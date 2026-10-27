@@ -33,10 +33,10 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 | T-008 | E | Transport, TransportBlock, loop segments, playhead atomic | TIME-003..009 | T-004, T-007 | done |
 | T-009 | E | OfflineDriver + AudioFileWriter | IO-010..013, IO-035 | T-004 | done |
 | T-010 | E | AudioFileLoader, resampling, AudioAsset, peak mipmaps | IO-030..034 (IO-033 deferred to T-056) | T-002 | done |
-| T-011 | E | CoreAudioDriver, workgroup join, latency reporting | IO-001..005 | T-004 | ready |
+| T-011 | E | CoreAudioDriver, workgroup join, latency reporting | IO-001..005 | T-004 | wip(t-011-coreaudio-driver) |
 | T-012 | E | GraphDescription, GraphBuilder (topo sort, buffer liveness, summing, master) | MIX-001..004, MIX-009 | T-004, T-005 | done |
-| T-013 | D | AudioClipPlayer + minimal ChannelStrip (gain/pan) | DSP-001, DSP-010 (partial), MIX-005 (gain/pan) | T-008, T-010, T-012 | ready |
-| T-014 | B | EngineFacade v0, EngineClient, EngineProtocol, FakeEngine | BRIDGE-001..008 (transport, graph, params, assets, offline, telemetry, events) | T-006, T-009, T-012 | ready |
+| T-013 | D | AudioClipPlayer + minimal ChannelStrip (gain/pan) | DSP-001, DSP-010 (partial), MIX-005 (gain/pan) | T-008, T-010, T-012 | wip(t-013-clip-player-strip) |
+| T-014 | B | EngineFacade v0, EngineClient, EngineProtocol, FakeEngine | BRIDGE-001..008 (transport, graph, params, assets, offline, telemetry, events) | T-006, T-009, T-012 | wip(t-014-engine-facade) |
 | T-015 | M | Project types, IDAllocator, Command protocol, UndoStack, gestures, ProjectStore, CommandRegistry | MODEL-001..004, 006, 007 | T-007 | done |
 | T-016 | M | GraphDescriptionBuilder + engine sync (structural vs param) | MODEL-020..022 | T-014, T-015 | todo |
 | T-017 | B | DAWControl protocol + Dispatcher + `dawctl` (headless) | CTL-001..005, CTL-010, 012 | T-016 | todo |
@@ -44,7 +44,7 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 | T-019 | E | Golden harness, test-only nodes, M1 goldens, `scripts/test.sh` | TEST-001..004, BUILD-007 | T-017 | todo |
 | T-085 | E | Engine test-support cleanup: one C++ test pattern (test-only module map), no test code in libDAWEngine, `core/`-rooted includes, isolated RT-trap counters | DW-006, 007, 014, 019 | T-003, T-007 | done |
 | T-086 | E | Rename the app to **Ember Studio**: Xcode project/target/scheme/folder `EmberStudio`, bundle ID `dev.emberstudio.EmberStudio`, log subsystem `dev.emberstudio`, all text mentions (specs, CLAUDE.md, SPEC.md text outside the decision log, scripts). Module names unchanged | — | T-004, T-010 (avoid conflicts) | done |
-| T-087 | E | Engine cleanup: RtTrap `LockHook::real` data race + TSan run (DW-028); leftover "macDAW" mentions (DW-045); `ErrorCode::cycle` with NodeIDs in `core/Result.h`, used by GraphBuilder (DW-050); `resetOnLocate` comment says locate only (DW-062) | DW-028, 045, 050, 062 | T-085, T-086 | ready |
+| T-087 | E | Engine cleanup: RtTrap `LockHook::real` data race + TSan run (DW-028); leftover "macDAW" mentions (DW-045); `ErrorCode::cycle` with NodeIDs in `core/Result.h`, used by GraphBuilder (DW-050); `resetOnLocate` comment says locate only (DW-062) | DW-028, 045, 050, 062 | T-085, T-086 | wip(t-087-engine-cleanup) |
 
 **M1 exit:** through `dawmcp`, an agent creates a project, imports a 44.1k WAV into a 48k session, adds an audio track and clip, renders offline, and `daw_audio_analyze` shows the expected level and frequency; `rtViolations == 0`; the sine, resample and gain-ramp goldens pass.
 
