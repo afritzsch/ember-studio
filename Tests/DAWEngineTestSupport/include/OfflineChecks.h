@@ -18,6 +18,16 @@ CheckResult offlineRendersRange();
 // IO-010: the range follows the tempo map (tempo changes, 44.1 kHz) and the file takes its rate.
 CheckResult offlineTempoMapRange();
 
+// IO-010, TIME-004, TIME-008: the export plays through the engine's transport from `from`,
+// straight through an enabled loop, after resetting the timeline nodes once; afterwards the
+// transport is stopped with its position, loop and output latency restored.
+CheckResult offlineFollowsTransport();
+
+// IO-010: the render fails (and removes the file) when the transport doesn't follow
+// ExportSpec.tempo: another rate or tempo than the graph's map, blocks above the graph's
+// maxBlock, or no graph.
+CheckResult offlineTransportMismatch();
+
 // IO-010: invalid ranges, block sizes, channel counts, tail settings and paths fail before any
 // block is rendered; an empty range writes an empty file.
 CheckResult offlineErrors();
@@ -25,6 +35,10 @@ CheckResult offlineErrors();
 // IO-011: two fresh engines rendering the same graph (sine + seeded noise + decay) produce the
 // same bytes, both in the file (16-bit with TPDF dither, and 32-bit float) and in the sink.
 CheckResult offlineDeterministic();
+
+// IO-011, TIME-008: two renders on one engine, with playback in between, are bit-identical
+// because the pre-render locate resets the timeline nodes; a node not flagged as one differs.
+CheckResult offlineRepeatableOnOneEngine();
 
 // IO-012: a decaying source ends the tail exactly quietSeconds after it drops below the
 // threshold (defaults and a custom threshold/length).

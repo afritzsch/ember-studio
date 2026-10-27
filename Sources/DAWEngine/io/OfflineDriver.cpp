@@ -33,12 +33,8 @@ Result<void> OfflineDriver::render(Engine& engine, Tick from, Tick to, const Exp
                           validSeconds(tail.maxSeconds)))
         return makeError(ErrorCode::invalidArgument, "offline render: invalid tail settings");
 
-    // T-008 seam (TIME-004): until the transport lands, the range is converted here and the
-    // engine renders that many frames from wherever its nodes are. With the transport, the
-    // render starts with engine.transport().locate(from) + play() (the locate also resets
-    // timeline nodes, TIME-008, so repeated renders start from the same state, IO-011) and ends
-    // with stop(). The frame count stays as computed here: the transport plays exactly
-    // tickToSample(from) ..< tickToSample(to) of the same map.
+    // The export's own copy of the tempo map gives the frame counts; the transport plays the
+    // graph's map. They must agree, which the loop checks block by block (see below).
     const TempoMap& tempo = spec.tempo;
     const double rate = tempo.sampleRate();
     const int64_t rangeFrames = tempo.tickToSample(to) - tempo.tickToSample(from);
@@ -72,18 +68,58 @@ Result<void> OfflineDriver::render(Engine& engine, Tick from, Tick to, const Exp
     for (uint32_t c = 0; c < numChannels; ++c) channels[c] = samples.data() + std::size_t{c} * blockSize;
     RenderTarget target{AudioBufferView{channels.data(), numChannels, blockSize}, AudioBufferView{}};
 
+    // IO-013: every Engine::render call is counted in this thread's own RtScope (DW-019).
+    auto renderCounted = [&](uint32_t numFrames) {
+        RtScope scope;
+        engine.render(target, numFrames);
+        stats_.rtViolations += scope.violations();
+    };
+
+    // TIME-004: commands apply in order at the start of the next block, and the playhead only
+    // shows what the last block applied. So a 0-frame block (ENG-004) first applies whatever is
+    // queued, making the playhead the transport's real state to restore afterwards.
+    //
+    // Then, all before the first exported frame: no output latency (offline output isn't
+    // delayed, and it makes the playhead the exact block start), the loop off so the range plays
+    // straight through, and play() before locate(): a locate applied while playing resets the
+    // timeline nodes (TIME-008), so every render starts them from the same state, however the
+    // previous render or playback left them (IO-011).
+    Transport& transport = engine.transport();
+    TransportPlayhead before;
+    const uint32_t latencyBefore = transport.outputLatency();
+    Result<void> failure;
+    if (maxFrames > 0) {
+        renderCounted(0);
+        before = transport.playhead();
+        transport.setOutputLatency(0);
+        if (!(transport.setLoop(false, before.loopStart, before.loopEnd) && transport.play() &&
+              transport.locate(from)))
+            failure = makeError(ErrorCode::internal, "offline render: transport command queue full");
+    }
+
     // IO-010: fixed-size blocks back to back, as fast as possible. The last block is rendered in
     // full and cut where the export ends, so every Engine::render call has the same length.
     const auto started = std::chrono::steady_clock::now();
+    const SamplePos startSample = tempo.tickToSample(from);
     int64_t written = 0, quietRun = 0;
-    Result<void> failure;
-    while (written < maxFrames) {
-        {
-            RtScope scope;  // IO-013: this thread's own count (DW-019)
-            engine.render(target, blockSize);
-            stats_.rtViolations += scope.violations();
-        }
+    while (failure && written < maxFrames) {
+        renderCounted(blockSize);
+
+        // The playhead is where this block started on the graph's own map. If it isn't where
+        // spec.tempo says, the export would have the wrong length: the spec's map differs from
+        // the graph's (or the graph changed mid-render), or the engine didn't render the block
+        // (no graph published, or blockSize above the graph's maxBlock), so the transport stood
+        // still. Fail rather than write a wrong file.
+        const SamplePos blockStart = startSample + static_cast<SamplePos>(stats_.blocks) * blockSize;
+        const TransportPlayhead head = transport.playhead();
         ++stats_.blocks;
+        if (!head.playing || head.sample != blockStart || head.tick != tempo.sampleToTick(blockStart)) {
+            failure = makeError(ErrorCode::invalidArgument,
+                                "offline render: the transport didn't follow the export range (no graph, "
+                                "block size above the graph's maxBlock, or ExportSpec.tempo isn't the "
+                                "graph's tempo map)");
+            break;
+        }
 
         uint32_t keep = static_cast<uint32_t>(std::min<int64_t>(blockSize, maxFrames - written));
         // IO-012: count quiet frames from the range end on; the tail ends on the frame that
@@ -115,6 +151,18 @@ Result<void> OfflineDriver::render(Engine& engine, Tick from, Tick to, const Exp
     if (maxTail > 0 && stats_.tailEnd != TailEnd::quiet && written == maxFrames)
         stats_.tailEnd = TailEnd::maxLength;
     stats_.tailFrames = std::max<int64_t>(0, written - rangeFrames);
+
+    // Leave the transport as the render found it: stopped where it was, loop and latency
+    // restored, applied by another 0-frame block so the playhead is settled when render()
+    // returns. A full queue would only leave the transport where the export ended, so it
+    // doesn't fail the render.
+    if (maxFrames > 0) {
+        (void)transport.stop();
+        (void)transport.locate(before.tick);
+        (void)transport.setLoop(before.loopEnabled, before.loopStart, before.loopEnd);
+        transport.setOutputLatency(latencyBefore);
+        renderCounted(0);
+    }
 
     if (writer) {
         stats_.clippedSamples = writer->clippedSamples();

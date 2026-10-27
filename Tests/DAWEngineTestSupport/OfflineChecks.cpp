@@ -31,7 +31,6 @@ namespace daw::testing {
 namespace {
 
 constexpr double kRate = 48000;
-constexpr PrepareInfo kInfo{kRate, kMaxBlock, 2, 2};
 // At the default map (120 bpm, 48 kHz) one beat is 24000 frames, so 1920 ticks are 1 s.
 constexpr Tick kOneSecond = 2 * kPPQ;
 
@@ -46,6 +45,10 @@ public:
 class CounterSource final : public Source {
 public:
     void process(ProcessContext& ctx, NodeIO& io) DAW_RT override {
+        if (ctx.numFrames == 0) {  // the driver's transport-settling blocks
+            ++emptyBlocks;
+            return;
+        }
         minFrames = std::min(minFrames, ctx.numFrames);
         maxFrames = std::max(maxFrames, ctx.numFrames);
         ++processes;
@@ -57,7 +60,7 @@ public:
 
     // Read by the test thread after rendering, which is the render thread here.
     uint32_t minFrames = kMaxBlock + 1, maxFrames = 0;
-    uint64_t processes = 0;
+    uint64_t processes = 0, emptyBlocks = 0;
 
 private:
     uint64_t next_ = 0;
@@ -190,31 +193,89 @@ public:
     }
 };
 
+// TIME-008, IO-011: a stand-in for a clip player. Reads the transport and keeps state across
+// blocks: a one-pole smoother over a sawtooth of the timeline position, so its output depends
+// on both where it plays and what it played before. reset() clears the state. Also records how
+// the transport looked while it played.
+class TimelineSource final : public Source {
+public:
+    void reset() DAW_RT override {
+        state_ = 0;
+        expectNext_ = -1;
+        ++resets;
+    }
+
+    void process(ProcessContext& ctx, NodeIO& io) DAW_RT override {
+        if (ctx.numFrames == 0) return;
+        const TransportBlock& t = ctx.transport;
+        if (!t.playing || t.numSegments == 0) {
+            ++stoppedBlocks;
+            for (uint32_t c = 0; c < io.audioOut.numChannels; ++c)
+                for (uint32_t f = 0; f < ctx.numFrames; ++f) io.audioOut.channels[c][f] = 0;
+            return;
+        }
+        if (expectNext_ < 0) firstSample = t.seg[0].startSample;
+        for (uint8_t s = 0; s < t.numSegments; ++s) {
+            const TransportSegment& seg = t.seg[s];
+            if (seg.afterWrap) ++wraps;
+            if (expectNext_ >= 0 && seg.startSample != expectNext_) contiguous = false;
+            expectNext_ = seg.startSample + seg.numFrames;
+            for (uint32_t f = 0; f < seg.numFrames; ++f) {
+                const SamplePos pos = seg.startSample + f;
+                state_ += 0.001 * (static_cast<double>(pos % 4800) / 4800.0 - state_);
+                const auto y = static_cast<float>(state_);
+                for (uint32_t c = 0; c < io.audioOut.numChannels; ++c)
+                    io.audioOut.channels[c][seg.frameOffset + f] = y;
+            }
+        }
+    }
+
+    // Read by the test thread after rendering, which is the render thread here.
+    uint64_t resets = 0, stoppedBlocks = 0, wraps = 0;
+    SamplePos firstSample = -1;  // first position played since the last reset
+    bool contiguous = true;      // every segment since the last reset continued the previous one
+
+private:
+    double state_ = 0;
+    SamplePos expectNext_ = -1;
+};
+
 // MARK: Harness
+
+// How a test graph is built. The graph renders at the map's rate (TIME-003).
+struct GraphOptions {
+    TempoMap tempo;                 // default: 120 bpm, 4/4, 48 kHz
+    uint32_t maxBlock = kMaxBlock;
+    bool timelineSources = false;   // TIME-008: flag the sources resetOnLocate, like clip players
+};
 
 // Publishes sources → (Mix →) master on `engine`, all stereo. Returns false if the graph is
 // rejected.
-bool publish(Engine& engine, std::vector<std::unique_ptr<Node>> sources) {
+bool publish(Engine& engine, std::vector<std::unique_ptr<Node>> sources, const GraphOptions& options = {}) {
     const auto n = static_cast<uint32_t>(sources.size());
+    const double rate = options.tempo.sampleRate();
+    const PrepareInfo info{rate, options.maxBlock, 2, 2};
     RenderGraphDesc desc;
-    desc.sampleRate = kRate;
-    desc.maxBlock = kMaxBlock;
+    desc.sampleRate = rate;
+    desc.maxBlock = options.maxBlock;
+    desc.tempo = options.tempo;
     const uint32_t numBuffers = n == 1 ? 1 : n + 2;
-    desc.buffers = std::move(AudioBufferPool::create(numBuffers, 2, kMaxBlock)).value();
+    desc.buffers = std::move(AudioBufferPool::create(numBuffers, 2, options.maxBlock)).value();
     NodeID id = 1;
     std::vector<uint32_t> inputs;
     for (uint32_t i = 0; i < n; ++i) {
-        auto node = engine.nodes().put(id++, std::move(sources[i]), kInfo);
+        auto node = engine.nodes().put(id++, std::move(sources[i]), info);
         if (!node) return false;
         RenderStepDesc step;
         step.node = std::move(node).value();
         step.output = i;
+        step.resetOnLocate = options.timelineSources;
         desc.steps.push_back(std::move(step));
         inputs.push_back(i);
     }
     desc.master = 0;
     if (n > 1) {
-        auto mix = engine.nodes().put(id++, std::make_unique<Mix>(), kInfo);
+        auto mix = engine.nodes().put(id++, std::make_unique<Mix>(), info);
         if (!mix) return false;
         RenderStepDesc step;
         step.node = std::move(mix).value();
@@ -230,10 +291,39 @@ bool publish(Engine& engine, std::vector<std::unique_ptr<Node>> sources) {
 }
 
 template <class T>
-bool publishOne(Engine& engine, std::unique_ptr<T> node) {
+bool publishOne(Engine& engine, std::unique_ptr<T> node, const GraphOptions& options = {}) {
     std::vector<std::unique_ptr<Node>> sources;
     sources.push_back(std::move(node));
-    return publish(engine, std::move(sources));
+    return publish(engine, std::move(sources), options);
+}
+
+// Applies queued transport commands with a 0-frame block, as the device's next block would.
+void applyTransportCommands(Engine& engine) {
+    float l[16] = {}, r[16] = {};
+    float* channels[2] = {l, r};
+    RenderTarget target{AudioBufferView{channels, 2, 16}, AudioBufferView{}};
+    engine.render(target, 0);
+}
+
+// Renders `blocks` blocks of 512 frames from the test thread, standing in for device playback.
+void renderBlocks(Engine& engine, int blocks) {
+    std::vector<float> l(512), r(512);
+    float* channels[2] = {l.data(), r.data()};
+    RenderTarget target{AudioBufferView{channels, 2, 512}, AudioBufferView{}};
+    for (int i = 0; i < blocks; ++i) engine.render(target, 512);
+}
+
+// What a freshly reset TimelineSource plays from `start` for `frames` frames, replayed with the
+// same arithmetic.
+std::vector<float> timelineReference(SamplePos start, int64_t frames) {
+    std::vector<float> out(static_cast<size_t>(frames));
+    double state = 0;
+    for (int64_t i = 0; i < frames; ++i) {
+        const SamplePos pos = start + i;
+        state += 0.001 * (static_cast<double>(pos % 4800) / 4800.0 - state);
+        out[static_cast<size_t>(i)] = static_cast<float>(state);
+    }
+    return out;
 }
 
 ExportSpec exportSpec(const std::filesystem::path& file, AudioFileType type, AudioSampleFormat sample) {
@@ -319,8 +409,10 @@ CheckResult offlineRendersRange() {
     DAW_CHECK(stats.renderSeconds > 0);
 
     // Every Engine::render call had the fixed size.
+    // Every audio block had the fixed size; the two 0-frame blocks only settle the transport.
     DAW_CHECK(probe->processes == stats.blocks);
     DAW_CHECK(probe->minFrames == 700 && probe->maxFrames == 700);
+    DAW_CHECK(probe->emptyBlocks == 2);
 
     // Progress after every block, ending at the total.
     DAW_CHECK(progress.size() == stats.blocks);
@@ -357,7 +449,7 @@ CheckResult offlineTempoMapRange() {
 
     TempDir dir;
     Engine engine;
-    DAW_CHECK(publishOne(engine, std::make_unique<SineSource>(1000, 0.25)));
+    DAW_CHECK(publishOne(engine, std::make_unique<SineSource>(1000, 0.25), {.tempo = *map}));
     ExportSpec spec = exportSpec(dir.path() / "tempo.aif", AudioFileType::aiff, AudioSampleFormat::int24);
     spec.tempo = *map;
     spec.tail.enabled = false;
@@ -433,6 +525,142 @@ CheckResult offlineErrors() {
     DAW_CHECK(driver.lastRender().blocks == 0 && driver.lastRender().framesWritten == 0);
     Result<FileInfo> info = readFileInfo(empty.file);
     DAW_CHECK(info.ok() && info->frames == 0);
+    return checks;
+}
+
+// MARK: IO-010 with the transport (TIME-004, TIME-008)
+
+CheckResult offlineFollowsTransport() {
+    CheckResult checks;
+    Engine engine;
+    auto node = std::make_unique<TimelineSource>();
+    TimelineSource* probe = node.get();
+    DAW_CHECK(publishOne(engine, std::move(node), {.timelineSources = true}));
+
+    // The session state the export must leave alone: stopped at beat 5, a loop over beat 4
+    // (inside the export range), 64 frames of output latency.
+    Transport& transport = engine.transport();
+    DAW_CHECK(transport.setLoop(true, 3 * kPPQ, 4 * kPPQ) && transport.locate(4 * kPPQ));
+    transport.setOutputLatency(64);
+    applyTransportCommands(engine);
+
+    // Beats 3…7: 48000 ..< 144000, across the loop end at 96000.
+    ExportSpec spec;
+    spec.tail.enabled = false;
+    Capture capture;
+    spec.sink = capture.sink();
+    OfflineDriver driver;
+    DAW_CHECK(driver.render(engine, 2 * kPPQ, 6 * kPPQ, spec, nullptr).ok());
+    DAW_CHECK(driver.lastRender().framesWritten == 96000);
+    DAW_CHECK(driver.lastRender().rtViolations == 0);
+
+    // It played from `from`, straight through (loop off), after one reset, every block playing.
+    DAW_CHECK(probe->resets == 1);
+    DAW_CHECK(probe->firstSample == 48000);
+    DAW_CHECK(probe->contiguous);
+    DAW_CHECK(probe->wraps == 0);
+    DAW_CHECK(probe->stoppedBlocks == 0);
+    // Exactly what a freshly reset node plays from 48000.
+    const std::vector<float> expected = timelineReference(48000, 96000);
+    DAW_CHECK(capture.channels.size() == 2 && capture.channels[0] == expected && capture.channels[1] == expected);
+
+    // Afterwards the transport is as it was, already applied when render() returns.
+    const TransportPlayhead after = transport.playhead();
+    DAW_CHECK(!after.playing);
+    DAW_CHECK(after.tick == 4 * kPPQ);
+    DAW_CHECK(after.loopEnabled && after.loopStart == 3 * kPPQ && after.loopEnd == 4 * kPPQ);
+    DAW_CHECK(transport.outputLatency() == 64);
+    return checks;
+}
+
+CheckResult offlineRepeatableOnOneEngine() {
+    CheckResult checks;
+    TempDir dir;
+    for (const bool timeline : {true, false}) {
+        Engine engine;
+        auto node = std::make_unique<TimelineSource>();
+        TimelineSource* probe = node.get();
+        DAW_CHECK(publishOne(engine, std::move(node), {.timelineSources = timeline}));
+
+        auto exportOnce = [&](const std::string& name, Channels& sink) {
+            ExportSpec spec = exportSpec(dir.path() / name, AudioFileType::wav, AudioSampleFormat::float32);
+            spec.tail.enabled = false;
+            Capture capture;
+            spec.sink = capture.sink();
+            OfflineDriver driver;
+            const bool ok = driver.render(engine, kPPQ, 5 * kPPQ, spec, nullptr).ok() &&
+                            driver.lastRender().rtViolations == 0;
+            sink = std::move(capture.channels);
+            return ok ? fileBytes(spec.file) : std::vector<char>{};
+        };
+
+        Channels first, second;
+        const std::vector<char> a = exportOnce(timeline ? "t1.wav" : "n1.wav", first);
+        // Playback between the renders leaves the node somewhere else entirely.
+        DAW_CHECK(engine.transport().locate(20 * kPPQ) && engine.transport().play());
+        renderBlocks(engine, 30);
+        DAW_CHECK(engine.transport().stop());
+        const std::vector<char> b = exportOnce(timeline ? "t2.wav" : "n2.wav", second);
+        DAW_CHECK(!a.empty() && !b.empty());
+        DAW_CHECK(!first.empty() && !second.empty());
+
+        if (timeline) {
+            // IO-011: the pre-render locate reset it, so both renders are bit-identical.
+            DAW_CHECK(probe->resets == 2);
+            DAW_CHECK(a == b);
+            DAW_CHECK(sameBits(first, second));
+        } else {
+            // Control: a node the locate doesn't reset carries its state into the second render,
+            // so the check above isn't vacuous.
+            DAW_CHECK(probe->resets == 0);
+            DAW_CHECK(a != b);
+            DAW_CHECK(!sameBits(first, second));
+        }
+    }
+    return checks;
+}
+
+CheckResult offlineTransportMismatch() {
+    CheckResult checks;
+    TempDir dir;
+    // Fails, removes the file and still restores the transport (stopped at 0).
+    auto fails = [&](Engine& engine, const ExportSpec& spec, uint64_t blocks) {
+        OfflineDriver driver;
+        const Result<void> r = driver.render(engine, 0, 2 * kOneSecond, spec, nullptr);
+        return !r.ok() && r.error().code == ErrorCode::invalidArgument &&
+               driver.lastRender().blocks == blocks && !std::filesystem::exists(spec.file) &&
+               !engine.transport().playhead().playing;
+    };
+    const ExportSpec base = exportSpec(dir.path() / "m.wav", AudioFileType::wav, AudioSampleFormat::int16);
+
+    // The spec's map is at another rate than the graph. From 0, block 0 starts at tick 0 in
+    // both; block 1 (512 frames) is tick 20 at 48 kHz but 22 at 44.1 kHz.
+    {
+        Engine engine;
+        DAW_CHECK(publishOne(engine, std::make_unique<SineSource>(440, 0.1)));
+        ExportSpec spec = base;
+        spec.tempo = std::move(TempoMap::make({{0, 120.0}}, {{0, 4, 4}}, 44100)).value();
+        DAW_CHECK(fails(engine, spec, 2));
+    }
+    // Same rate, another tempo: block 1 is tick 20 at 120 bpm but 17 at 100 bpm.
+    {
+        Engine engine;
+        DAW_CHECK(publishOne(engine, std::make_unique<SineSource>(440, 0.1)));
+        ExportSpec spec = base;
+        spec.tempo = std::move(TempoMap::make({{0, 100.0}}, {{0, 4, 4}}, kRate)).value();
+        DAW_CHECK(fails(engine, spec, 2));
+    }
+    // Blocks larger than the graph's maxBlock: the engine renders silence, the transport stays.
+    {
+        Engine engine;
+        DAW_CHECK(publishOne(engine, std::make_unique<SineSource>(440, 0.1), {.maxBlock = 256}));
+        DAW_CHECK(fails(engine, base, 1));
+    }
+    // Nothing published.
+    {
+        Engine engine;
+        DAW_CHECK(fails(engine, base, 1));
+    }
     return checks;
 }
 
@@ -585,7 +813,8 @@ CheckResult offlineRunsInRtScope() {
     spec.tail.enabled = false;
     OfflineDriver driver;
     DAW_CHECK(driver.render(engine, 0, kOneSecond, spec, nullptr).ok());
-    DAW_CHECK(probe->processes == driver.lastRender().blocks && probe->processes > 0);
+    // + the two 0-frame blocks that settle the transport
+    DAW_CHECK(probe->processes == driver.lastRender().blocks + 2 && probe->processes > 2);
 #if DAW_RT_TRAP
     DAW_CHECK(probe->allInRtContext);
 #else

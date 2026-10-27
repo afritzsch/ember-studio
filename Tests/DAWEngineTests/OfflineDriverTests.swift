@@ -13,6 +13,12 @@ struct OfflineDriverTests {
     @Test("IO-010: the range follows tempo changes; the file takes the map's rate")
     func tempoMapRange() { expectPasses(daw.testing.offlineTempoMapRange()) }
 
+    @Test("IO-010, TIME-004/008: plays the range through the transport (loop off, timeline reset once), then restores it")
+    func followsTransport() { expectPasses(daw.testing.offlineFollowsTransport()) }
+
+    @Test("IO-010: fails and removes the file when the transport doesn't follow ExportSpec.tempo")
+    func transportMismatch() { expectPasses(daw.testing.offlineTransportMismatch()) }
+
     @Test("IO-010: invalid arguments fail before rendering; an empty range writes an empty file")
     func errors() { expectPasses(daw.testing.offlineErrors()) }
 
@@ -31,6 +37,9 @@ struct OfflineDriverTests {
 struct OfflineDeterminismTests {
     @Test("IO-011: two runs give identical bytes (16-bit dithered file, float file, sink)")
     func deterministic() { expectPasses(daw.testing.offlineDeterministic()) }
+
+    @Test("IO-011, TIME-008: two renders on one engine, playback in between, are bit-identical")
+    func repeatableOnOneEngine() { expectPasses(daw.testing.offlineRepeatableOnOneEngine()) }
 }
 
 @Suite("IO-012: offline tail")
