@@ -35,7 +35,7 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 | T-010 | E | AudioFileLoader, resampling, AudioAsset, peak mipmaps | IO-030..034 (IO-033 deferred to T-056) | T-002 | done |
 | T-011 | E | CoreAudioDriver, workgroup join, latency reporting | IO-001..005 | T-004 | ready |
 | T-012 | E | GraphDescription, GraphBuilder (topo sort, buffer liveness, summing, master) | MIX-001..004, MIX-009 | T-004, T-005 | done |
-| T-013 | D | AudioClipPlayer + minimal ChannelStrip (gain/pan) | DSP-001, DSP-010 (partial), MIX-005 (gain/pan) | T-008, T-010, T-012 | todo |
+| T-013 | D | AudioClipPlayer + minimal ChannelStrip (gain/pan) | DSP-001, DSP-010 (partial), MIX-005 (gain/pan) | T-008, T-010, T-012 | ready |
 | T-014 | B | EngineFacade v0, EngineClient, EngineProtocol, FakeEngine | BRIDGE-001..008 (transport, graph, params, assets, offline, telemetry, events) | T-006, T-009, T-012 | ready |
 | T-015 | M | Project types, IDAllocator, Command protocol, UndoStack, gestures, ProjectStore, CommandRegistry | MODEL-001..004, 006, 007 | T-007 | done |
 | T-016 | M | GraphDescriptionBuilder + engine sync (structural vs param) | MODEL-020..022 | T-014, T-015 | todo |
@@ -54,7 +54,7 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 | T-021 | E | PDC: path latency, delay insertion, delay-line carry-over, source pre-roll | MIX-020..025 | T-012 | ready |
 | T-022 | M | Routing commands (tracks, buses, sends, outputs) + cycle rejection + validation | MODEL-005 (routing subset), MODEL-030..032 | T-016 | todo |
 | T-023 | E | Sidechain edges and ports | MIX-008 | T-021 | todo |
-| T-024 | D | Metronome node | TIME-010, DSP-011 | T-008 | todo |
+| T-024 | D | Metronome node | TIME-010, DSP-011 | T-008 | ready |
 | T-025 | E | M2 goldens: pan law, bus/send sum, PDC null | TEST (M2 set) | T-020, T-021, T-022 | todo |
 
 ### M3 — Timeline, persistence, app shell
@@ -71,7 +71,7 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 ### M4 — MIDI & Sampler
 | Task | Lane | Title | Requirements | Depends on | Status |
 |---|---|---|---|---|---|
-| T-040 | D | MidiClipPlayer, hanging-note handling | DSP-003 | T-008, T-012 | todo |
+| T-040 | D | MidiClipPlayer, hanging-note handling | DSP-003 | T-008, T-012 | ready |
 | T-041 | D | Sampler (zones, Hermite, voices, ADSR, CC64, bend) | DSP-020..023 | T-040, T-010 | todo |
 | T-042 | M | Note commands, instrument slot on MIDI tracks | MODEL-005 (note subset) | T-030 | todo |
 | T-043 | U | Piano roll + velocity lane + audition (`previewNote` facade addition) | UI-020, 021 | T-033, T-042 | todo |
@@ -105,7 +105,7 @@ DSP effects (T-070..073) depend only on the Node API and can be **pulled forward
 |---|---|---|---|---|---|
 | T-070 | D | EQ | DSP-030, 040, 041 | T-004, T-005 | ready |
 | T-071 | D | Compressor (+ sidechain) | DSP-031, 040, 041 | T-005, T-023 | todo |
-| T-072 | D | Delay (tempo sync) | DSP-032, 040, 041 | T-008 | todo |
+| T-072 | D | Delay (tempo sync) | DSP-032, 040, 041 | T-008 | ready |
 | T-073 | D | Reverb (FDN, deterministic) | DSP-033, 040, 041 | T-004, T-005 | ready |
 | T-074 | E+M | Automation lanes model + AutomationPlayer + plugin param path | AUTO-001..005, 008..010 | T-030, T-061/T-062 (for AUTO-009) | todo |
 | T-075 | U+M | Automation recording (touch/latch/write) + lane UI | AUTO-006, 007, UI-015 | T-074, T-033 | todo |
