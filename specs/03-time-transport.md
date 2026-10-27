@@ -54,4 +54,5 @@ public struct TempoMap: Codable, Sendable { ... same API ... }
 ## Status
 | ID | status | test |
 |---|---|---|
-| TIME-* | todo | |
+| TIME-001, TIME-002, TIME-011 | done (T-007) | `DAWEngineTests/TempoMapTests` + `DAWModelTests/TempoMapTests` against shared `Tests/Fixtures/tempo_vectors.json` (incl. bit-exact vectors); conversions run inside RtScope with 0 violations |
+| TIME-* (rest) | todo | |

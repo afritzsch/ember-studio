@@ -29,7 +29,7 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 | T-004 | E | Node API, Engine::render, snapshot publish, epoch reclaim, NodePool, FTZ | ENG-001..004, 010..015, 040..042 | T-002 | ready |
 | T-005 | E | ParamSlotTable + ParamSmoother | ENG-020..023 | T-002 | ready |
 | T-006 | E | Telemetry snapshot | ENG-050, 051 | T-004 | todo |
-| T-007 | M | TempoMap (C++ and Swift) + shared vector fixtures | TIME-001, 002, 011 | T-001 | wip(t-007-tempomap) |
+| T-007 | M | TempoMap (C++ and Swift) + shared vector fixtures | TIME-001, 002, 011 | T-001 | done |
 | T-008 | E | Transport, TransportBlock, loop segments, playhead atomic | TIME-003..009 | T-004, T-007 | todo |
 | T-009 | E | OfflineDriver + AudioFileWriter | IO-010..013, IO-035 | T-004 | todo |
 | T-010 | E | AudioFileLoader, resampling, AudioAsset, peak mipmaps | IO-030..034 (IO-033 deferred to T-056) | T-002 | ready |
@@ -37,7 +37,7 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 | T-012 | E | GraphDescription, GraphBuilder (topo sort, buffer liveness, summing, master) | MIX-001..004, MIX-009 | T-004, T-005 | todo |
 | T-013 | D | AudioClipPlayer + minimal ChannelStrip (gain/pan) | DSP-001, DSP-010 (partial), MIX-005 (gain/pan) | T-008, T-010, T-012 | todo |
 | T-014 | B | EngineFacade v0, EngineClient, EngineProtocol, FakeEngine | BRIDGE-001..008 (transport, graph, params, assets, offline, telemetry, events) | T-006, T-009, T-012 | todo |
-| T-015 | M | Project types, IDAllocator, Command protocol, UndoStack, gestures, ProjectStore, CommandRegistry | MODEL-001..004, 006, 007 | T-007 | todo |
+| T-015 | M | Project types, IDAllocator, Command protocol, UndoStack, gestures, ProjectStore, CommandRegistry | MODEL-001..004, 006, 007 | T-007 | ready |
 | T-016 | M | GraphDescriptionBuilder + engine sync (structural vs param) | MODEL-020..022 | T-014, T-015 | todo |
 | T-017 | B | DAWControl protocol + Dispatcher + `dawctl` (headless) | CTL-001..005, CTL-010, 012 | T-016 | todo |
 | T-018 | B | `dawmcp` headless + `.mcp.json` + command schema tool | CTL-020..022, 024, 025 | T-017 | todo |
@@ -195,8 +195,8 @@ Recorded by the lead from worker reports.
 | DW-003 | T-001 | `include/module.modulemap` exposes only placeholder `daw/EngineFacade.h`; bridge task must keep the module map pointing at it | B (T-014) | todo |
 | DW-004 | T-001 | `.patchbay.json` setup runs `git submodule update --init --recursive`, pulling VSTGUI/docs/tutorials the build excludes; `scripts/bootstrap.sh` alone fetches only what's needed | lead | todo |
 | DW-005 | T-001 | "No warnings" check only sees recompiled files; CI should do clean builds | E (T-084) | todo |
-| DW-006 | T-002 | C++ test-support target (Package.swift target + test-only module map) to replace the extern "C" self-test pattern in `core/CoreUtilsSelfTests.cpp`, which currently ships inside libDAWEngine.a | E (T-019 or earlier) | todo |
-| DW-007 | T-002 | Add `.headerSearchPath(".")` to DAWEngine so `#include "core/X.h"` works from any subfolder | E (lead) | todo |
+| DW-006 | T-002 | C++ test-support target (Package.swift target + test-only module map) to replace the extern "C" self-test pattern in `core/CoreUtilsSelfTests.cpp`, which currently ships inside libDAWEngine.a | E (T-019 or earlier) | todo — now 3 patterns: T-002 `@_silgen_name` self-tests, T-003 `dlsym`, T-007 test-only module map (`Tests/DAWEngineTests/EngineInternals`). Pick one before wave 3 |
+| DW-007 | T-002, T-007 | Add `.headerSearchPath(".")` to DAWEngine so `#include "core/X.h"` / `"time/TempoMap.h"` work from any subfolder | E (lead) | todo |
 | DW-008 | T-002 | CONV-RT-06 wording: `DAW_RT` must expand to `noexcept [[clang::nonblocking]]` (clang warns on non-noexcept nonblocking, -Werror fails) — spec text needs updating | spec (user/lead) | todo |
 | DW-009 | T-002 | Run SpscQueue/AudioBufferPool RT paths inside the RT trap scope and assert rtViolations == 0 | E (after T-003) | todo |
 | DW-010 | T-002 | Generate compile_commands.json so editor diagnostics use the package's C++20 flags | lead (low) | todo |
@@ -208,3 +208,7 @@ Recorded by the lead from worker reports.
 | DW-016 | T-060 | dawctl/dawmcp commands: scan, list plugins, list/reset blocked | B (after T-017) | todo |
 | DW-017 | T-060 | Convert Swift `PluginDescriptor` → `PluginDescriptorPOD` for `instantiatePlugin` | P/B (T-014/T-061) | todo |
 | DW-018 | T-060 | Optional: scan candidates in parallel (each hanging plugin costs up to 10 s serially) | P (later) | todo |
+| DW-019 | T-007 | RT-trap violation counters are process-wide; RtTrapTests violate on purpose while other suites run in parallel, so "0 violations" checks can be polluted (T-007 measures deltas + retries 3×). Needs per-scope counters or serialized RT tests | E (T-003 follow-up / T-006) | todo |
+| DW-020 | T-007 | `TempoMap.sampleRate` duplicates `Project.sessionSampleRate` — choose one source of truth; `SetSessionSampleRate` must rebuild the map | M (T-015) | todo |
+| DW-021 | T-007 | Map Swift `TempoMapError` into `DAWError` once it exists | M (T-015) | todo |
+| DW-022 | T-007 | Swift interop can't call `daw::Result::value()` (ref-qualified overloads); T-007 used an inline helper — facade will hit the same | B (T-014) | todo |
