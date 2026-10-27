@@ -16,7 +16,7 @@ All processors are `daw::Node` subclasses, stereo in/out, with parameters throug
 ### Channel & utility
 | ID | Requirement | Acceptance |
 |---|---|---|
-| DSP-010 | `ChannelStrip` (see MIX-005): gain, pan, mute, phase, meters. | Golden |
+| DSP-010 | `ChannelStrip` (see MIX-005): gain, pan, mute, phase, meters. `GainNode` (`NodeKind::gain`): one level slot, the send node of MIX-007. | Golden |
 | DSP-011 | `Metronome` (TIME-010). | Golden |
 
 ### Sampler (D-19)
