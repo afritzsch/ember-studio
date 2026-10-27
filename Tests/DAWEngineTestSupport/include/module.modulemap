@@ -11,6 +11,7 @@ module DAWEngineTestSupport {
   header "Checks.h"
   header "CoreUtilsChecks.h"
   header "EngineChecks.h"
+  header "GraphChecks.h"
   header "ParamChecks.h"
   header "RtTrapTestSupport.h"
   header "TelemetryChecks.h"

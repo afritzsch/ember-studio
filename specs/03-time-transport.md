@@ -22,7 +22,7 @@
 |---|---|---|
 | TIME-001 | `TempoMap::tickToSample(tick)` and `sampleToTick(sample)` are exact and drift-free. Precompute the cumulative sample offset (as `double`, rounded only on output) at each tempo event; conversion is O(log n). | Round-trip property test over 10k random positions at random tempos: error ≤ 1 sample |
 | TIME-002 | Bars/beats: `tickToBBT` and `bbtToTick` respect time-signature events. | Unit table tests (4/4 → 7/8 → 3/4) |
-| TIME-003 | TempoMap is immutable within a RenderGraph; a tempo edit publishes a new snapshot. | — |
+| TIME-003 | TempoMap is immutable within a RenderGraph; a tempo edit publishes a new snapshot. The RenderGraph owns its map: GraphBuilder builds it from `GraphDescription.tempo` (05) at the engine rate, and `Engine::render` points `TransportBlock.tempo` at `RenderGraph::tempoMap()`. | — |
 | TIME-004 | `Transport` state (RT-owned): `playing`, `recording`, `samplePos`, `loopEnabled`, `loopStart/End` (ticks). Commands from non-RT (`play`, `stop`, `locate(tick)`, `setLoop`) arrive via `SpscQueue<TransportCmd>` and are applied at block start. | Unit |
 | TIME-005 | Per block the transport produces a `TransportBlock`: `startSample`, `startTick`, `numFrames`, `tempoAtStart`, and up to **2 segments** when a loop wrap occurs inside the block (each with its own sample/tick range and a `wrapped` flag). | Golden: loop-wrap mid-block is click-free and correct |
 | TIME-006 | Nodes that read the timeline (clip players, MIDI sequencers, automation) must honor segments: they process segment 1, then reset per-segment position and process segment 2. | Clip player golden |
