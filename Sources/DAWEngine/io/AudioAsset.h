@@ -6,9 +6,15 @@
 //   AudioAssetRef     smart handle: copying retains, destroying releases.
 //   AudioAssetBuilder the only way to write samples; finish() freezes them into a SharedAudioAsset.
 //
-// IO-032: the last release never frees directly. It hands the asset to a RetireHook, which the
-// engine points at its RetireQueue (ENG-014) so the samples are freed on daw.reclaim, never on
-// daw.audio. retain() and release() are DAW_RT, so a snapshot may drop a reference anywhere.
+// IO-032, ENG-014: the audio thread never frees an asset. There are two ways to drop a reference:
+//   - On daw.audio: AudioAssetRef::retire(engine.retireQueue()). If it was the last reference,
+//     the asset goes into the engine's RetireQueue and daw.reclaim deletes it.
+//   - Anywhere else (destructor, reset): the last release hands the asset to its RetireHook, which
+//     frees it on that thread by default. References held by RenderGraphs and pooled nodes are
+//     dropped on daw.reclaim, because the Reclaimer destroys those (ENG-012/013).
+// RetireQueue has a single producer (the audio thread), so the off-audio-thread path can't use it.
+// Letting a handle die on the audio thread is the bug that path guards against; the Debug RT trap
+// reports it when it frees.
 
 #include "core/Realtime.h"
 #include "core/Result.h"
@@ -29,18 +35,20 @@ struct AudioAsset {
     const float* const* data;
 };
 
+class RetireQueue;
 class SharedAudioAsset;
 
-// IO-032: where a SharedAudioAsset goes when its last reference is released. `fn` runs on the
-// releasing thread, which may be daw.audio, so it is DAW_RT (the type system enforces it) and
-// must only enqueue. Whoever drains the queue calls SharedAudioAsset::destroy off the audio thread.
+// IO-032: where a SharedAudioAsset goes when its last reference is released other than through
+// AudioAssetRef::retire. `fn` runs on the releasing thread. It is DAW_RT (the type system
+// enforces it), so a hook that only enqueues is RT-safe; whoever drains such a queue calls
+// SharedAudioAsset::destroy.
 struct RetireHook {
     using Fn = void (*)(void* context, const SharedAudioAsset* asset) DAW_RT;
     Fn fn = nullptr;
     void* context = nullptr;
 
-    // Frees on the releasing thread. Only for assets that are never released on daw.audio:
-    // tests, tools, and assets no snapshot references. In Debug the RT trap flags misuse.
+    // Frees on the releasing thread: the default, and right for every release off the audio
+    // thread. In Debug the RT trap flags a release that frees on daw.audio.
     static RetireHook immediate();
 };
 
@@ -54,6 +62,9 @@ public:
     void retain() const DAW_RT;
     // The release that drops the count to zero calls the RetireHook (IO-032).
     void release() const DAW_RT;
+    // ENG-014, audio thread only: like release(), but the last reference goes to `queue` (freed on
+    // daw.reclaim) instead of the hook. Returns false, keeping the reference, if the queue is full.
+    [[nodiscard]] bool releaseInto(RetireQueue& queue) const DAW_RT;
     // Diagnostics and tests; racy by nature while other threads hold references.
     uint32_t useCount() const DAW_RT { return refs_.load(std::memory_order_relaxed); }
 
@@ -62,6 +73,7 @@ public:
 
 private:
     friend class AudioAssetBuilder;
+    friend class RetireQueue; // deletes it on daw.reclaim after releaseInto()
     SharedAudioAsset(AudioAsset view, float* samples, const float** channels, RetireHook hook);
     ~SharedAudioAsset();
 
@@ -99,6 +111,16 @@ public:
     void reset() DAW_RT {
         if (asset_) asset_->release();
         asset_ = nullptr;
+    }
+
+    // IO-032, ENG-014: how the audio thread drops a reference (engine.retireQueue()). If it was
+    // the last one, daw.reclaim frees the asset. Returns false when the queue is full: the handle
+    // still holds its reference, and the caller retries on a later block (RetireQueue contract).
+    [[nodiscard]] bool retire(RetireQueue& queue) DAW_RT {
+        if (!asset_) return true;
+        if (!asset_->releaseInto(queue)) return false;
+        asset_ = nullptr;
+        return true;
     }
 
     // Gives up ownership of one reference without releasing it (pairs with adopt()).

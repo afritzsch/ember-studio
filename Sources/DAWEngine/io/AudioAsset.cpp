@@ -1,5 +1,7 @@
 #include "io/AudioAsset.h"
 
+#include "core/RetireQueue.h"
+
 #include <algorithm>
 #include <cstring>
 #include <new>
@@ -14,8 +16,9 @@ constexpr size_t kFloatsPerLine = kCacheLineSize / sizeof(float);
 
 void retireImmediately(void*, const SharedAudioAsset* asset) DAW_RT {
     // RetireHook::immediate() frees on the releasing thread by definition, which the effect
-    // analysis rightly rejects in a DAW_RT function. Engine-owned assets use a RetireQueue hook
-    // instead; if this one ever runs inside an RtScope, the Debug RT trap reports it.
+    // analysis rightly rejects in a DAW_RT function. The audio thread drops references through
+    // AudioAssetRef::retire instead; if this ever runs inside an RtScope, the Debug RT trap
+    // reports it.
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wfunction-effects"
     SharedAudioAsset::destroy(asset);
@@ -61,6 +64,15 @@ void SharedAudioAsset::retain() const DAW_RT {
 void SharedAudioAsset::release() const DAW_RT {
     // acq_rel: every holder's reads of the samples happen before the retire hook sees the asset.
     if (refs_.fetch_sub(1, std::memory_order_acq_rel) == 1) hook_.fn(hook_.context, this);
+}
+
+bool SharedAudioAsset::releaseInto(RetireQueue& queue) const DAW_RT {
+    if (refs_.fetch_sub(1, std::memory_order_acq_rel) != 1) return true;
+    // Last reference: the caller was the only holder, so no other thread can see or change the
+    // count until it is handed over.
+    if (queue.retire(const_cast<SharedAudioAsset*>(this))) return true;
+    refs_.store(1, std::memory_order_relaxed); // full: the caller keeps its reference
+    return false;
 }
 
 void SharedAudioAsset::destroy(const SharedAudioAsset* asset) { delete asset; }

@@ -18,6 +18,13 @@ CheckResult assetConcurrentRelease();
 CheckResult assetBuilder();
 // CONV §5.3: retains and releases (including the last one, into a queue hook) inside an RtScope.
 uint64_t assetRetainReleaseViolations();
+// IO-032 with T-004's Engine (ENG-012..014; AssetReclaimChecks.cpp): a node's last reference,
+// dropped in process(), is freed by daw.reclaim; a reference that isn't the last only
+// decrements; a graph-held reference dies on daw.reclaim; a full RetireQueue keeps the reference.
+CheckResult assetRetiredOnReclaim();
+CheckResult assetRetireNotLast();
+CheckResult assetGraphReferenceDiesOnReclaim();
+CheckResult assetRetireQueueFull();
 
 // IO-031
 // 48k → 44.1k → 48k through files and the loader; the residual vs the original in dB, or +inf

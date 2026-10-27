@@ -19,6 +19,15 @@ struct AudioAssetTests {
     @Test("IO-032: AudioAssetBuilder grows, validates and freezes")
     func builder() { expectPasses(daw.testing.assetBuilder()) }
 
+    @Test("IO-032, ENG-014: a node's last reference, dropped in process(), is freed on daw.reclaim")
+    func retiredOnReclaim() { expectPasses(daw.testing.assetRetiredOnReclaim()) }
+    @Test("IO-032: retiring a reference that isn't the last only decrements")
+    func retireNotLast() { expectPasses(daw.testing.assetRetireNotLast()) }
+    @Test("IO-032, ENG-012: a reference held by a published graph dies on daw.reclaim")
+    func graphReference() { expectPasses(daw.testing.assetGraphReferenceDiesOnReclaim()) }
+    @Test("IO-032: a full RetireQueue leaves the reference with the caller")
+    func retireQueueFull() { expectPasses(daw.testing.assetRetireQueueFull()) }
+
     #if DEBUG  // the trap exists only in Debug (BUILD-005)
     @Test("IO-032, CONV §5.3: retain/release, including the last release, make 0 RT violations")
     func rtSafe() {

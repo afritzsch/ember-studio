@@ -36,8 +36,8 @@ struct AudioLoadRequest {
     double sessionRate = 0;      // the asset's rate; the file is resampled if it differs
     // IO-034: Project/Cache. Empty skips the peak cache (peaks are then not computed).
     std::filesystem::path peakCacheDir;
-    // IO-032: where the asset goes when its last reference is released. Engine-owned assets use
-    // a RetireQueue hook; the default frees on the releasing thread.
+    // IO-032: where the asset goes when its last reference is released off the audio thread. The
+    // default frees there; the audio thread drops references with AudioAssetRef::retire instead.
     RetireHook retire = RetireHook::immediate();
 };
 
