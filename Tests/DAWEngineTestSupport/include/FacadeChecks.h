@@ -21,7 +21,7 @@ CheckResult facadeDeferredParamFree();
 // and its result through pollJob, and posts jobFinished.
 CheckResult facadeExportPausesDevice();
 
-// DW-050: GraphBuilder's "cycle: <ids>" error becomes FacadeErrorCode::cycle with the NodeIDs,
+// DW-050: ErrorCode::cycle (Error::nodes) becomes FacadeErrorCode::cycle with the NodeIDs,
 // both through toFacadeError and through applyGraph → graphStatus/graphRejected; other codes map
 // one to one.
 CheckResult facadeErrorMapping();

@@ -7,9 +7,8 @@
 
 namespace daw {
 
-// DW-050: a routing cycle becomes code `cycle` with its NodeIDs. GraphBuilder reports it as
-// invalidArgument "cycle: <ids>" (MIX-002) until T-087 adds ErrorCode::cycle; the message is
-// what's recognised, so either form maps the same way.
+// Code for code. DW-050: ErrorCode::cycle (MIX-002) carries the cycle's NodeIDs in
+// Error::nodes; they cross as FacadeError::cycle.
 FacadeError toFacadeError(const Error& error);
 
 FacadeError facadeError(FacadeErrorCode code, std::string message);

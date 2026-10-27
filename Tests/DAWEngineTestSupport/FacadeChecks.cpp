@@ -375,11 +375,14 @@ CheckResult facadeExportPausesDevice() {
 CheckResult facadeErrorMapping() {
     CheckResult checks;
     {
-        const FacadeError e = toFacadeError(makeError(ErrorCode::invalidArgument, "cycle: 3 7 9"));
+        const FacadeError e = toFacadeError(makeCycleError({3, 7, 9}));
         DAW_CHECK(e.code == FacadeErrorCode::cycle);
         DAW_CHECK((e.cycle == std::vector<NodeID>{3, 7, 9}));
-        DAW_CHECK(e.message == "cycle: 3 7 9");
+        DAW_CHECK(e.message == "cycle: 3, 7, 9");
     }
+    // Only the code makes a cycle, not a message that looks like one.
+    DAW_CHECK(toFacadeError(makeError(ErrorCode::invalidArgument, "cycle: 1 2")).code ==
+              FacadeErrorCode::invalidArgument);
     DAW_CHECK(toFacadeError(makeError(ErrorCode::invalidArgument, "bad")).code == FacadeErrorCode::invalidArgument);
     DAW_CHECK(toFacadeError(makeError(ErrorCode::outOfMemory)).code == FacadeErrorCode::outOfMemory);
     DAW_CHECK(toFacadeError(makeError(ErrorCode::notFound)).code == FacadeErrorCode::notFound);
@@ -439,7 +442,7 @@ CheckResult facadeRealtimeDriverSeam() {
         DAW_CHECK(!facade.transport().playing);
         DAW_CHECK(h.driver->render(1) == 0);
         DAW_CHECK(facade.transport().playing);
-        DAW_CHECK(facade.transport().sample == 22050 + kBlock);
+        DAW_CHECK(facade.transport().sample >= 22050);  // TIME-009: from the located position on
         facade.stop();
         DAW_CHECK(h.driver->render(1) == 0);
         DAW_CHECK(!facade.transport().playing);
@@ -447,6 +450,7 @@ CheckResult facadeRealtimeDriverSeam() {
         DriverConfig config;
         config.outputDeviceUID = "fake-uid";
         config.bufferSize = 128;
+        config.sampleRate = 0;  // the device's rate
         DAW_CHECK(facade.setDevice(config).ok());
         DAW_CHECK(h.driver->config().bufferSize == 128);
         DAW_CHECK((h.driver->log() == std::vector<std::string>{"start", "stop", "start"}));

@@ -53,7 +53,7 @@ struct DriverConfig {
 };
 
 // Mirrors daw::ErrorCode (core/Result.h), plus `none` for success. DW-050: `cycle` is a
-// rejected routing cycle (MIX-002), with the NodeIDs on it in FacadeError::cycle.
+// rejected routing cycle (MIX-002); Error::nodes crosses as FacadeError::cycle.
 enum class FacadeErrorCode : uint32_t {
     none,
     invalidArgument,
