@@ -119,7 +119,7 @@ bool PeakMipmap::operator==(const PeakMipmap& other) const {
 
 Result<void> PeakMipmap::write(const std::filesystem::path& file) const {
     std::string out;
-    put(out, kMagic);
+    out.append(kMagic, sizeof(kMagic));
     put(out, kFormatVersion);
     put(out, channels_);
     put(out, assetID_);

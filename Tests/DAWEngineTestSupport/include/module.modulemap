@@ -5,6 +5,7 @@
 module DAWEngineTestSupport {
   header "../../../Sources/DAWEngine/core/RtTrap.h"
   header "../../../Sources/DAWEngine/time/TempoMap.h"
+  header "AudioFileChecks.h"
   header "Checks.h"
   header "CoreUtilsChecks.h"
   header "RtTrapTestSupport.h"
