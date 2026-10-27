@@ -23,7 +23,7 @@ public final class ProjectStore {
     @ObservationIgnored private var subscribers: [Int: AsyncStream<ProjectChange>.Continuation] = [:]
     @ObservationIgnored private var nextSubscriber = 0
 
-    private static let log = Logger(subsystem: "dev.macdaw", category: "model")
+    private static let log = Logger(subsystem: "dev.emberstudio", category: "model")
 
     public init(project: Project = Project(), undoLimit: Int = UndoStack.defaultLimit) {
         self.project = project

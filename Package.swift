@@ -1,5 +1,5 @@
 // swift-tools-version: 6.0
-// Root manifest for macDAW (01-build-layout). The Xcode app in App/ links the products declared here.
+// Root manifest for Ember Studio (01-build-layout). The Xcode app in App/ links the products declared here.
 
 import PackageDescription
 
@@ -132,7 +132,12 @@ let package = Package(
         .target(
             name: "DAWEngine",
             dependencies: ["VST3SDK"],
-            cxxSettings: engineCxxSettings + [.headerSearchPath(".")]
+            cxxSettings: engineCxxSettings + [.headerSearchPath(".")],
+            linkerSettings: [
+                // IO-031: ExtAudioFile decoding and AudioConverter resampling (io/).
+                .linkedFramework("AudioToolbox"),
+                .linkedFramework("CoreFoundation"),
+            ]
         ),
 
         // MARK: Swift

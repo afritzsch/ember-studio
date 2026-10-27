@@ -47,7 +47,7 @@ struct VST3ScanTests {
         // Controller classes are not plugins; only kVstAudioEffectClass entries are listed.
         #expect(result.map(\.name) == ["Fake Sidechain Comp", "Fake Synth"])
         #expect(result.allSatisfy { $0.status == .ok && $0.reason == nil && $0.format == .vst3 })
-        #expect(result.allSatisfy { $0.vendor == "macDAW Tests" && $0.version == "1.2.3" })
+        #expect(result.allSatisfy { $0.vendor == "Ember Studio Tests" && $0.version == "1.2.3" })
 
         let comp = result[0]
         #expect(comp.identifier == "\(bundle.path)#5A1D3C01000000000000000000000001")

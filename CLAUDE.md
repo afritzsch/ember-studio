@@ -1,4 +1,4 @@
-# macDAW — Agent Instructions
+# Ember Studio — Agent Instructions
 
 This repo is **spec-driven**. The spec is the source of truth; code implements it.
 

@@ -1,8 +1,8 @@
-# macDAW — Specification Index
+# Ember Studio — Specification Index
 
-macDAW is a linear-timeline DAW for macOS (audio + MIDI tracks), built as a **learning project**: correctness and clean real-time architecture matter more than feature count.
+Ember Studio is a linear-timeline DAW for macOS (audio + MIDI tracks), built as a **learning project**: correctness and clean real-time architecture matter more than feature count.
 
-This file is the entry point. Detailed requirements live in `specs/`. Work is broken into agent-sized tasks in [`specs/90-tasks.md`](specs/90-tasks.md).
+This file is the entry point. Detailed requirements live in `specs/`. Work is broken into agent-sized tasks in [`specs/90-tasks.md`](specs/90-tasks.md). 
 
 ## How to use these specs
 

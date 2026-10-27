@@ -139,7 +139,7 @@ public:
     virtual ~FakeFactory() = default;
 
     tresult PLUGIN_API getFactoryInfo(PFactoryInfo* info) override {
-        *info = PFactoryInfo("macDAW Tests", "", "", PFactoryInfo::kUnicode);
+        *info = PFactoryInfo("Ember Studio Tests", "", "", PFactoryInfo::kUnicode);
         return kResultOk;
     }
     int32 PLUGIN_API countClasses() override { return 4; }

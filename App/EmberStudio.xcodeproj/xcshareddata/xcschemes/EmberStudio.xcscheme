@@ -15,9 +15,9 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "DA0000000000000000000010"
-               BuildableName = "macDAW.app"
-               BlueprintName = "macDAW"
-               ReferencedContainer = "container:macDAW.xcodeproj">
+               BuildableName = "Ember Studio.app"
+               BlueprintName = "EmberStudio"
+               ReferencedContainer = "container:EmberStudio.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
       </BuildActionEntries>
@@ -43,9 +43,9 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "DA0000000000000000000010"
-            BuildableName = "macDAW.app"
-            BlueprintName = "macDAW"
-            ReferencedContainer = "container:macDAW.xcodeproj">
+            BuildableName = "Ember Studio.app"
+            BlueprintName = "EmberStudio"
+            ReferencedContainer = "container:EmberStudio.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </LaunchAction>
@@ -60,9 +60,9 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "DA0000000000000000000010"
-            BuildableName = "macDAW.app"
-            BlueprintName = "macDAW"
-            ReferencedContainer = "container:macDAW.xcodeproj">
+            BuildableName = "Ember Studio.app"
+            BlueprintName = "EmberStudio"
+            ReferencedContainer = "container:EmberStudio.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </ProfileAction>
