@@ -6,8 +6,10 @@
 // bit-identical results (TIME-011): keep the arithmetic in the same order in both files.
 
 #include <cstdint>
-#include <optional>
 #include <vector>
+
+#include "../core/Realtime.h"
+#include "../core/Result.h"
 
 namespace daw {
 
@@ -66,33 +68,28 @@ public:
 
     static TempoMapError validate(const TempoEventList& tempos, const TimeSigEventList& sigs,
                                   double sampleRate);
-    // Non-RT. Returns nullopt when validate() fails.
-    // TODO(T-002): return daw::Result<TempoMap> carrying the TempoMapError.
-    static std::optional<TempoMap> make(TempoEventList tempos, TimeSigEventList sigs,
-                                        double sampleRate);
+    // Non-RT. Fails with ErrorCode::invalidArgument when validate() does; the message names
+    // the TempoMapError.
+    static Result<TempoMap> make(const TempoEventList& tempos, const TimeSigEventList& sigs,
+                                 double sampleRate);
 
     // TIME-001: the nearest sample to the exact position of `tick`. O(log n) in tempo events.
-    // TODO(T-002): DAW_RT
-    SamplePos tickToSample(Tick tick) const noexcept;
+    SamplePos tickToSample(Tick tick) const DAW_RT;
     // TIME-001: the last tick whose tickToSample() is <= `sample`, i.e. the tick that is sounding
     // at that sample. tickToSample(sampleToTick(s)) <= s < tickToSample(sampleToTick(s) + 1).
-    // TODO(T-002): DAW_RT
-    Tick sampleToTick(SamplePos sample) const noexcept;
-    // TODO(T-002): DAW_RT
-    double bpmAt(Tick tick) const noexcept;
+    Tick sampleToTick(SamplePos sample) const DAW_RT;
+    double bpmAt(Tick tick) const DAW_RT;
     // TIME-002
-    // TODO(T-002): DAW_RT
-    BBT tickToBBT(Tick tick) const noexcept;
+    BBT tickToBBT(Tick tick) const DAW_RT;
     // TIME-002: inverse of tickToBBT for every BBT it returns. Other inputs (beat > numerator,
     // tick >= beat length) extrapolate linearly within the bar's signature.
-    // TODO(T-002): DAW_RT
-    Tick bbtToTick(BBT bbt) const noexcept;
+    Tick bbtToTick(BBT bbt) const DAW_RT;
 
-    double sampleRate() const noexcept { return sampleRate_; }
-    size_t tempoEventCount() const noexcept { return tempo_.size(); }
-    TempoEvent tempoEvent(size_t i) const noexcept { return {tempo_[i].tick, tempo_[i].bpm}; }
-    size_t timeSigEventCount() const noexcept { return sig_.size(); }
-    TimeSigEvent timeSigEvent(size_t i) const noexcept {
+    double sampleRate() const DAW_RT { return sampleRate_; }
+    size_t tempoEventCount() const DAW_RT { return tempo_.size(); }
+    TempoEvent tempoEvent(size_t i) const DAW_RT { return {tempo_[i].tick, tempo_[i].bpm}; }
+    size_t timeSigEventCount() const DAW_RT { return sig_.size(); }
+    TimeSigEvent timeSigEvent(size_t i) const DAW_RT {
         return {sig_[i].tick, sig_[i].num, sig_[i].den};
     }
 
@@ -116,8 +113,8 @@ private:
 
     TempoMap(const TempoEventList& tempos, const TimeSigEventList& sigs, double sampleRate);
 
-    size_t tempoSegmentAt(Tick tick) const noexcept;
-    size_t sigSegmentAt(Tick tick) const noexcept;
+    size_t tempoSegmentAt(Tick tick) const DAW_RT;
+    size_t sigSegmentAt(Tick tick) const DAW_RT;
 
     std::vector<TempoSegment> tempo_;
     std::vector<SigSegment> sig_;

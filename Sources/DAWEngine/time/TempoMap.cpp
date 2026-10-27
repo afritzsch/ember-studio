@@ -15,28 +15,28 @@ namespace {
 // undefined behaviour (and Swift's mirror can't trap).
 constexpr double kMaxPosition = 4611686018427387904.0;  // 2^62
 
-int64_t clampToInt64(double x) noexcept {
+int64_t clampToInt64(double x) DAW_RT {
     return static_cast<int64_t>(std::clamp(x, -kMaxPosition, kMaxPosition));
 }
 
 // Round half away from zero: std::llround, and Swift's default rounded().
-int64_t roundToInt64(double x) noexcept {
+int64_t roundToInt64(double x) DAW_RT {
     return std::llround(std::clamp(x, -kMaxPosition, kMaxPosition));
 }
 
-int64_t floorDiv(int64_t a, int64_t b) noexcept {
+int64_t floorDiv(int64_t a, int64_t b) DAW_RT {
     return a >= 0 ? a / b : -((-a - 1) / b) - 1;
 }
 
-int64_t ceilDiv(int64_t a, int64_t b) noexcept {
+int64_t ceilDiv(int64_t a, int64_t b) DAW_RT {
     return (a + b - 1) / b;  // a >= 0 only
 }
 
-double samplesPerTick(double sampleRate, double bpm) noexcept {
+double samplesPerTick(double sampleRate, double bpm) DAW_RT {
     return (sampleRate * 60.0) / (bpm * static_cast<double>(kPPQ));
 }
 
-bool isValidDenominator(int32_t den) noexcept {
+bool isValidDenominator(int32_t den) DAW_RT {
     return den >= 1 && den <= kMaxTimeSigDenominator && (den & (den - 1)) == 0;
 }
 
@@ -69,9 +69,26 @@ TempoMapError TempoMap::validate(const TempoEventList& tempos, const TimeSigEven
     return TempoMapError::ok;
 }
 
-std::optional<TempoMap> TempoMap::make(TempoEventList tempos, TimeSigEventList sigs,
-                                       double sampleRate) {
-    if (validate(tempos, sigs, sampleRate) != TempoMapError::ok) return std::nullopt;
+static const char* errorName(TempoMapError e) {
+    switch (e) {
+        case TempoMapError::ok: return "ok";
+        case TempoMapError::noTempoEvents: return "noTempoEvents";
+        case TempoMapError::noTimeSignatures: return "noTimeSignatures";
+        case TempoMapError::firstEventNotAtTickZero: return "firstEventNotAtTickZero";
+        case TempoMapError::eventsNotAscending: return "eventsNotAscending";
+        case TempoMapError::tempoOutOfRange: return "tempoOutOfRange";
+        case TempoMapError::invalidTimeSignature: return "invalidTimeSignature";
+        case TempoMapError::sampleRateOutOfRange: return "sampleRateOutOfRange";
+    }
+    return "unknown";
+}
+
+Result<TempoMap> TempoMap::make(const TempoEventList& tempos, const TimeSigEventList& sigs,
+                                double sampleRate) {
+    const TempoMapError error = validate(tempos, sigs, sampleRate);
+    if (error != TempoMapError::ok) {
+        return makeError(ErrorCode::invalidArgument, std::string("tempo map: ") + errorName(error));
+    }
     return TempoMap(tempos, sigs, sampleRate);
 }
 
@@ -102,26 +119,26 @@ TempoMap::TempoMap(const TempoEventList& tempos, const TimeSigEventList& sigs, d
     }
 }
 
-size_t TempoMap::tempoSegmentAt(Tick tick) const noexcept {
+size_t TempoMap::tempoSegmentAt(Tick tick) const DAW_RT {
     auto it = std::upper_bound(tempo_.begin(), tempo_.end(), tick,
                                [](Tick t, const TempoSegment& s) { return t < s.tick; });
     return it == tempo_.begin() ? 0 : static_cast<size_t>(it - tempo_.begin()) - 1;
 }
 
-size_t TempoMap::sigSegmentAt(Tick tick) const noexcept {
+size_t TempoMap::sigSegmentAt(Tick tick) const DAW_RT {
     auto it = std::upper_bound(sig_.begin(), sig_.end(), tick,
                                [](Tick t, const SigSegment& s) { return t < s.tick; });
     return it == sig_.begin() ? 0 : static_cast<size_t>(it - sig_.begin()) - 1;
 }
 
-SamplePos TempoMap::tickToSample(Tick tick) const noexcept {
+SamplePos TempoMap::tickToSample(Tick tick) const DAW_RT {
     const TempoSegment& s = tempo_[tempoSegmentAt(tick)];
     // Subtract as doubles: exact for any realistic tick, and can't overflow for extreme ones.
     return roundToInt64(s.startSample +
                         (static_cast<double>(tick) - static_cast<double>(s.tick)) * s.samplesPerTick);
 }
 
-Tick TempoMap::sampleToTick(SamplePos sample) const noexcept {
+Tick TempoMap::sampleToTick(SamplePos sample) const DAW_RT {
     // tickToSample(t) <= sample  ⇔  exact position of t < sample + 0.5 (up to ties), so the
     // answer is the last tick before sample + 0.5. Find its segment, solve, then correct the
     // estimate against tickToSample itself so the two functions agree exactly.
@@ -138,11 +155,11 @@ Tick TempoMap::sampleToTick(SamplePos sample) const noexcept {
     return t;
 }
 
-double TempoMap::bpmAt(Tick tick) const noexcept {
+double TempoMap::bpmAt(Tick tick) const DAW_RT {
     return tempo_[tempoSegmentAt(tick)].bpm;
 }
 
-BBT TempoMap::tickToBBT(Tick tick) const noexcept {
+BBT TempoMap::tickToBBT(Tick tick) const DAW_RT {
     const SigSegment& s = sig_[sigSegmentAt(tick)];
     const int64_t rel = tick - s.tick;
     const int64_t barIndex = floorDiv(rel, s.barTicks);
@@ -151,7 +168,7 @@ BBT TempoMap::tickToBBT(Tick tick) const noexcept {
             static_cast<int32_t>(inBar % s.beatTicks)};
 }
 
-Tick TempoMap::bbtToTick(BBT bbt) const noexcept {
+Tick TempoMap::bbtToTick(BBT bbt) const DAW_RT {
     auto it = std::upper_bound(sig_.begin(), sig_.end(), bbt.bar,
                                [](int64_t bar, const SigSegment& s) { return bar < s.firstBar; });
     const SigSegment& s = sig_[it == sig_.begin() ? 0 : static_cast<size_t>(it - sig_.begin()) - 1];

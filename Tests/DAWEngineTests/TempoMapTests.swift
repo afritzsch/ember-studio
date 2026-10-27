@@ -112,6 +112,19 @@ struct EngineTempoMapTests {
         }
     }
 
+    #if DEBUG
+    // CONV §5.3: the trap exists only in Debug (BUILD-005).
+    @Test("TIME-001/002: conversions make no RT violations under the RT trap")
+    func conversionsAreRealtimeSafe() {
+        var buffer = [CChar](repeating: 0, count: 1024)
+        let failures = buffer.withUnsafeMutableBufferPointer {
+            tempoMapConversionsRtSafe($0.baseAddress, $0.count)
+        }
+        let message = buffer.withUnsafeBufferPointer { String(cString: $0.baseAddress!) }
+        #expect(failures == 0, "\(failures) failed check(s); first: \(message)")
+    }
+    #endif
+
     @Test("Default map is 120 bpm 4/4 at 48 kHz")
     func defaultMap() {
         let map = daw.TempoMap()
@@ -123,6 +136,12 @@ struct EngineTempoMapTests {
 }
 
 // MARK: - Helpers
+
+#if DEBUG
+// Sources/DAWEngine/time/TempoMapSelfTests.cpp (needs RtScope, so it runs as C++).
+@_silgen_name("daw_selftest_tempomap_conversions_rt_safe")
+private func tempoMapConversionsRtSafe(_ message: UnsafeMutablePointer<CChar>?, _ capacity: Int) -> Int32
+#endif
 
 private func eventLists(
     _ tempos: [(Int64, Double)], _ sigs: [(Int64, Int32, Int32)]
@@ -138,7 +157,7 @@ private func makeMap(
     _ tempos: [(Int64, Double)], _ sigs: [(Int64, Int32, Int32)], _ sampleRate: Double
 ) -> daw.TempoMap? {
     let (t, s) = eventLists(tempos, sigs)
-    return daw.TempoMap.make(t, s, sampleRate).value
+    return daw.testing.makeTempoMap(t, s, sampleRate).value
 }
 
 /// A random tempo map with an exact `Decimal` reference for tick → sample.

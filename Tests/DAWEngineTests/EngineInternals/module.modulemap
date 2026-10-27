@@ -2,6 +2,7 @@
 // (01-build-layout Interfaces). Only DAWEngineTests loads it, via -fmodule-map-file in Package.swift.
 module DAWEngineInternals {
   header "../../../Sources/DAWEngine/time/TempoMap.h"
+  header "TempoMapTestSupport.h"
   requires cplusplus
   export *
 }
