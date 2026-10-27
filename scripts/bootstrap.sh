@@ -15,11 +15,16 @@ fail() { echo "bootstrap: $*" >&2; exit 1; }
 command -v xcodebuild >/dev/null || fail "xcodebuild not found; install Xcode 16 or later"
 command -v swift >/dev/null || fail "swift not found; install Xcode 16 or later"
 
-xcode_version=$(xcodebuild -version 2>/dev/null | awk '/^Xcode / { print $2; exit }')
+# Tool output is captured before parsing. A parser that stops reading early (`awk '… exit'`,
+# `head -n 1`) can SIGPIPE the producer, and under pipefail bootstrap then exits 141 (DW-025).
+xcode_out=$(xcodebuild -version 2>/dev/null) || fail "xcodebuild -version failed (is xcode-select pointing at Xcode.app?)"
+xcode_version=$(awk '/^Xcode / { print $2; exit }' <<<"$xcode_out")
 [[ -n "$xcode_version" ]] || fail "could not read the Xcode version (is xcode-select pointing at Xcode.app?)"
 (( ${xcode_version%%.*} >= 16 )) || fail "Xcode >= 16 required, found $xcode_version"
 
-swift_version=$(swift --version 2>/dev/null | sed -nE 's/.*Swift version ([0-9]+(\.[0-9]+)*).*/\1/p' | head -n 1)
+swift_out=$(swift --version 2>/dev/null) || fail "swift --version failed"
+swift_version=$(sed -nE 's/.*Swift version ([0-9]+(\.[0-9]+)*).*/\1/p' <<<"$swift_out")
+swift_version=${swift_version%%$'\n'*}
 [[ -n "$swift_version" ]] || fail "could not read the Swift version"
 (( ${swift_version%%.*} >= 6 )) || fail "Swift >= 6 required, found $swift_version"
 

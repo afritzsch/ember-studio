@@ -43,7 +43,7 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 | T-018 | B | `dawmcp` headless + `.mcp.json` + command schema tool | CTL-020..022, 024, 025 | T-017 | todo |
 | T-019 | E | Golden harness, test-only nodes, M1 goldens, `scripts/test.sh` | TEST-001..004, BUILD-007 | T-017 | todo |
 | T-085 | E | Engine test-support cleanup: one C++ test pattern (test-only module map), no test code in libDAWEngine, `core/`-rooted includes, isolated RT-trap counters | DW-006, 007, 014, 019 | T-003, T-007 | done |
-| T-086 | E | Rename the app to **Ember Studio**: Xcode project/target/scheme/folder `EmberStudio`, bundle ID `dev.emberstudio.EmberStudio`, log subsystem `dev.emberstudio`, all text mentions (specs, CLAUDE.md, SPEC.md text outside the decision log, scripts). Module names unchanged | — | T-004, T-010 (avoid conflicts) | wip(t-086-rename-ember-studio) |
+| T-086 | E | Rename the app to **Ember Studio**: Xcode project/target/scheme/folder `EmberStudio`, bundle ID `dev.emberstudio.EmberStudio`, log subsystem `dev.emberstudio`, all text mentions (specs, CLAUDE.md, SPEC.md text outside the decision log, scripts). Module names unchanged | — | T-004, T-010 (avoid conflicts) | done |
 
 **M1 exit:** through `dawmcp`, an agent creates a project, imports a 44.1k WAV into a 48k session, adds an audio track and clip, renders offline, and `daw_audio_analyze` shows the expected level and frequency; `rtViolations == 0`; the sine, resample and gain-ramp goldens pass.
 
@@ -170,7 +170,7 @@ Conflicts: lanes own separate folders, so merges should be clean. If two branche
 
 ### Worker briefing (prompt for `new_session`)
 ```
-You are a worker on macDAW task T-XXX (<title>), in your own git worktree on branch t-xxx-<slug>.
+You are a worker on Ember Studio task T-XXX (<title>), in your own git worktree on branch t-xxx-<slug>.
 Read: CLAUDE.md, SPEC.md, specs/00-conventions.md, specs/<owning spec>.md, and the "Interfaces" sections of: <dep specs>.
 Requirements to satisfy: <IDs>. You may edit only: <modules>.
 Do not edit specs/90-tasks.md or any spec Status table — the lead does that on merge.
@@ -216,7 +216,7 @@ Recorded by the lead from worker reports.
 | DW-022 | T-007 | Swift interop can't call `daw::Result::value()` (ref-qualified overloads); T-007 used an inline helper — facade will hit the same | B (T-014) | todo |
 | DW-023 | T-085 | `test.sh` BUILD-002 check treats every target reaching DAWEngine as Swift; `DAWEngineTestSupport` carries a no-op `swiftSettings: cxxInterop` to pass. The check should skip C-family targets | E (T-084 / T-019) | todo |
 | DW-024 | T-085 | Telemetry `rtViolations` is process-wide, so in-process engine tests asserting on it (e.g. TEST-004 AllocatingNode) see RtTrapTests' deliberate violations. Nest such tests in `RtTrapTests`, or have the Engine count from its render `RtScope::violations()` — possibly an ENG-032 clarification | E (T-004 / T-006) + spec | todo |
-| DW-025 | lead | `scripts/bootstrap.sh` can exit 141 under `pipefail`: `xcodebuild -version \| awk '… exit'` (and `\| head -n 1`) close the pipe early, so the producer gets SIGPIPE. It made T-015's worktree setup fail once, and the `bootstrap` stage of `test.sh` fail once in T-004's review | E (T-084) / lead | todo |
+| DW-025 | lead | `scripts/bootstrap.sh` can exit 141 under `pipefail`: `xcodebuild -version \| awk '… exit'` (and `\| head -n 1`) close the pipe early, so the producer gets SIGPIPE. It made T-015's worktree setup fail once, and the `bootstrap` stage of `test.sh` fail once in T-004's review | E (T-084) / lead | done (T-086) |
 | DW-026 | T-005 | Golden `gain_ramp_smoothing` for ENG-022 | E (T-019) | todo |
 | DW-027 | T-005 | ENG-023 "fader sweep → 0 publishes" test needs Engine + GraphBuilder | E/B (T-012 / T-014) | todo |
 | DW-028 | T-005 | RtTrap data race: `LockHook::real` (RtTrap.cpp ~146-154) is a plain static written by `install()` while hooked locks read it on other threads; TSan flags it and one TSan run hung (malloc_logger/GOT rebinding vs TSan interceptors, unconfirmed). Make it atomic or set once (`std::call_once`). Blocks TEST-007's TSan job | E (T-003 follow-up) | todo |
@@ -236,3 +236,5 @@ Recorded by the lead from worker reports.
 | DW-042 | T-010 | Rule for asset-playing nodes: on the audio thread drop a reference only via `AudioAssetRef::retire(engine.retireQueue())`; if it returns false keep it and retry next block. Never destroy a handle on the audio thread | D (T-013, T-041) | todo |
 | DW-043 | T-010 | ImportAsset command should call `AudioImporter::importFile` and persist `projectRelativePath` | M (T-030) | todo |
 | DW-044 | T-010 | IO-033 (T-056): per-request progress events still needed; the peak cache already handles stale rates | E (T-056) | todo |
+| DW-045 | T-086 | Product-name leftovers in files that wave-4 workers own: `core/Denormals.h:16` (`#error "macDAW targets arm64 only"`), `io/AudioFileLoader.cpp:24` (`os_log_create("dev.macdaw", "io")` → `dev.emberstudio`), `Tests/DAWEngineTestSupport/TestAudio.cpp:22` (temp prefix `macdaw-t010-`). Fix after T-006/T-008/T-009/T-012 merge | E (lead, small) | todo |
+| DW-046 | T-086 | The built app is now `Ember Studio.app` (path contains a space); CTL-023's attach-mode launcher must quote it. The Swift package name stays `macDAW` (01 doesn't constrain it); the repo folder `/Users/artem/dev/macDAW` is unchanged. Plugin cache moved to `~/Library/Application Support/Ember Studio/` (no migration; a rescan) | B (T-018/T-032), lead | todo |

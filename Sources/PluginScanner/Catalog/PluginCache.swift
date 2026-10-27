@@ -1,8 +1,8 @@
 import Foundation
 
-/// PLUG-004: the scan cache, `~/Library/Application Support/macDAW/plugins.json`. One entry per
-/// candidate, keyed by path + mtime + version, holding what the scanner reported for it. Blocked
-/// plugins are cached like any other result, which is what keeps them from being rescanned.
+/// PLUG-004: the scan cache, `~/Library/Application Support/Ember Studio/plugins.json`. One entry
+/// per candidate, keyed by path + mtime + version, holding what the scanner reported for it.
+/// Blocked plugins are cached like any other result, which is what keeps them from being rescanned.
 public struct PluginCache: Codable, Equatable, Sendable {
     public static let currentFormatVersion = 1
 
@@ -37,7 +37,7 @@ public struct PluginCache: Codable, Equatable, Sendable {
     }
 
     public static var defaultURL: URL {
-        URL.applicationSupportDirectory.appending(path: "macDAW/plugins.json")
+        URL.applicationSupportDirectory.appending(path: "Ember Studio/plugins.json")
     }
 
     /// A missing, unreadable or incompatible file yields an empty cache, which only costs a full

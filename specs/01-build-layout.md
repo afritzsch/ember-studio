@@ -1,6 +1,6 @@
 # 01 — Build & Repository Layout
 
-**Depends on:** 00 · **Owns:** `Package.swift`, `Packages/*/Package.swift`, `App/macDAW.xcodeproj`, `Vendor/`, `scripts/`, CI config.
+**Depends on:** 00 · **Owns:** `Package.swift`, `Packages/*/Package.swift`, `App/EmberStudio.xcodeproj`, `Vendor/`, `scripts/`, CI config.
 
 ## Layout
 ```
@@ -21,8 +21,8 @@ macDAW/
     DAWControlTests/
     GoldenTests/                # fixture projects + reference WAVs
   App/
-    macDAW.xcodeproj            # thin app target: links the SwiftPM products
-    macDAW/                     # SwiftUI + AppKit sources
+    EmberStudio.xcodeproj       # thin app target: links the SwiftPM products
+    EmberStudio/                # SwiftUI + AppKit sources
   Vendor/
     vst3sdk/                    # git submodule, pinned tag
   scripts/                      # bootstrap, golden update, lint
@@ -35,7 +35,7 @@ macDAW/
 | BUILD-001 | Root `Package.swift` declares targets `DAWEngine` (C++20, `cxxLanguageStandard: .cxx20`), `DAWModel`, `DAWControl`, `dawctl`, `dawmcp`, `PluginScanner` and their test targets; platform `.macOS(.v15)`. | `swift build` succeeds on a clean clone after `scripts/bootstrap.sh` |
 | BUILD-002 | Swift targets that import `DAWEngine` enable `.interoperabilityMode(.Cxx)`. | Compiles |
 | BUILD-003 | VST3 SDK is a pinned git submodule under `Vendor/vst3sdk`, built as C++ target `VST3SDK` (hosting sources only: `pluginterfaces`, `base`, `public.sdk/source/vst/hosting`). | `DAWEngine` links it |
-| BUILD-004 | `App/macDAW.xcodeproj` contains only the app target. It depends on the local package, has `NSMicrophoneUsageDescription`, hardened runtime, the `com.apple.security.device.audio-input` entitlement and **disabled library validation** (needed to load third-party plugins). | App launches and asks for mic permission on first record |
+| BUILD-004 | `App/EmberStudio.xcodeproj` contains only the app target. It depends on the local package, has `NSMicrophoneUsageDescription`, hardened runtime, the `com.apple.security.device.audio-input` entitlement and **disabled library validation** (needed to load third-party plugins). | App launches and asks for mic permission on first record |
 | BUILD-005 | Build configurations: `Debug` defines `DAW_RT_TRAP=1`; `Release` is `-O3` with the trap compiled out. | `#if DAW_RT_TRAP` paths present only in Debug |
 | BUILD-006 | `scripts/bootstrap.sh` initializes submodules and verifies the Xcode ≥ 16 / Swift ≥ 6 toolchain. | Idempotent |
 | BUILD-007 | `scripts/test.sh` runs `swift test` + golden tests + `xcodebuild build` for the app. This is the single CI entry point. | Exit code reflects failures |

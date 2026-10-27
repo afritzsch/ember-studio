@@ -1,6 +1,6 @@
 # 13 — Control Protocol, `dawctl`, `dawmcp`
 
-**Depends on:** 07 (Commands, ProjectStore), 08 (EngineClient) · **Owns:** `Sources/DAWControl/`, `Sources/dawctl/`, `Sources/dawmcp/`, `App/macDAW/Control/` (socket server).
+**Depends on:** 07 (Commands, ProjectStore), 08 (EngineClient) · **Owns:** `Sources/DAWControl/`, `Sources/dawctl/`, `Sources/dawmcp/`, `App/EmberStudio/Control/` (socket server).
 
 Agents use this to **drive and verify the DAW themselves** (D-20, D-21, D-22). There is one protocol and three transports:
 
@@ -69,7 +69,7 @@ Agents use this to **drive and verify the DAW themselves** (D-20, D-21, D-22). T
 | ID | Requirement |
 |---|---|
 | CTL-030 | `ControlSocketServer` listens only when launched with `--control-socket <path>` or in Debug builds; the socket file has 0600 permissions and the server is local-only. |
-| CTL-032 | Socket path is per instance (parallel worktrees, `00-conventions §9`): the `--control-socket <path>` argument, or by default `$TMPDIR/macdaw-<pid>.sock`. `dawmcp` attach passes `$TMPDIR/macdaw-<hash of worktree root>.sock`. Stale sockets are unlinked on start. |
+| CTL-032 | Socket path is per instance (parallel worktrees, `00-conventions §9`): the `--control-socket <path>` argument, or by default `$TMPDIR/emberstudio-<pid>.sock`. `dawmcp` attach passes `$TMPDIR/emberstudio-<hash of worktree root>.sock`. Stale sockets are unlinked on start. |
 | CTL-031 | Requests are dispatched on the main actor; long jobs (render) report progress notifications. |
 
 ## Status
