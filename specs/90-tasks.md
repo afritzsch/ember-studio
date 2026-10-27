@@ -51,7 +51,7 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 | Task | Lane | Title | Requirements | Depends on | Status |
 |---|---|---|---|---|---|
 | T-020 | E | Full channel strip: mute/solo (solo-in-place), phase, meters; sends pre/post | MIX-005..007, DSP-010 | T-013 | todo |
-| T-021 | E | PDC: path latency, delay insertion, delay-line carry-over, source pre-roll | MIX-020..025 | T-012 | todo |
+| T-021 | E | PDC: path latency, delay insertion, delay-line carry-over, source pre-roll | MIX-020..025 | T-012 | ready |
 | T-022 | M | Routing commands (tracks, buses, sends, outputs) + cycle rejection + validation | MODEL-005 (routing subset), MODEL-030..032 | T-016 | todo |
 | T-023 | E | Sidechain edges and ports | MIX-008 | T-021 | todo |
 | T-024 | D | Metronome node | TIME-010, DSP-011 | T-008 | todo |
