@@ -32,7 +32,7 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 | T-007 | M | TempoMap (C++ and Swift) + shared vector fixtures | TIME-001, 002, 011 | T-001 | done |
 | T-008 | E | Transport, TransportBlock, loop segments, playhead atomic | TIME-003..009 | T-004, T-007 | wip(t-008-transport) |
 | T-009 | E | OfflineDriver + AudioFileWriter | IO-010..013, IO-035 | T-004 | wip(t-009-offline-driver) |
-| T-010 | E | AudioFileLoader, resampling, AudioAsset, peak mipmaps | IO-030..034 (IO-033 deferred to T-056) | T-002 | wip(t-010-audio-loader) |
+| T-010 | E | AudioFileLoader, resampling, AudioAsset, peak mipmaps | IO-030..034 (IO-033 deferred to T-056) | T-002 | done |
 | T-011 | E | CoreAudioDriver, workgroup join, latency reporting | IO-001..005 | T-004 | ready |
 | T-012 | E | GraphDescription, GraphBuilder (topo sort, buffer liveness, summing, master) | MIX-001..004, MIX-009 | T-004, T-005 | wip(t-012-graphbuilder) |
 | T-013 | D | AudioClipPlayer + minimal ChannelStrip (gain/pan) | DSP-001, DSP-010 (partial), MIX-005 (gain/pan) | T-008, T-010, T-012 | todo |
@@ -43,7 +43,7 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 | T-018 | B | `dawmcp` headless + `.mcp.json` + command schema tool | CTL-020..022, 024, 025 | T-017 | todo |
 | T-019 | E | Golden harness, test-only nodes, M1 goldens, `scripts/test.sh` | TEST-001..004, BUILD-007 | T-017 | todo |
 | T-085 | E | Engine test-support cleanup: one C++ test pattern (test-only module map), no test code in libDAWEngine, `core/`-rooted includes, isolated RT-trap counters | DW-006, 007, 014, 019 | T-003, T-007 | done |
-| T-086 | E | Rename the app to **Ember Studio**: Xcode project/target/scheme/folder `EmberStudio`, bundle ID `dev.emberstudio.EmberStudio`, log subsystem `dev.emberstudio`, all text mentions (specs, CLAUDE.md, SPEC.md text outside the decision log, scripts). Module names unchanged | — | T-004, T-010 (avoid conflicts) | todo |
+| T-086 | E | Rename the app to **Ember Studio**: Xcode project/target/scheme/folder `EmberStudio`, bundle ID `dev.emberstudio.EmberStudio`, log subsystem `dev.emberstudio`, all text mentions (specs, CLAUDE.md, SPEC.md text outside the decision log, scripts). Module names unchanged | — | T-004, T-010 (avoid conflicts) | ready |
 
 **M1 exit:** through `dawmcp`, an agent creates a project, imports a 44.1k WAV into a 48k session, adds an audio track and clip, renders offline, and `daw_audio_analyze` shows the expected level and frequency; `rtViolations == 0`; the sine, resample and gain-ramp goldens pass.
 
@@ -231,3 +231,8 @@ Recorded by the lead from worker reports.
 | DW-037 | T-004 | Telemetry: fill the seam in `Engine::render`; count oversize blocks (rendered as silence) and RetireQueue-full; DW-024 can use the render `RtScope` count | E (T-006) | todo |
 | DW-038 | T-004 | `time/TransportBlock.h` was created by T-004 verbatim from 03 Interfaces; T-008 owns it and fills the "advance transport" seam | E (T-008) | todo |
 | DW-039 | T-004 | LSan isn't supported on macOS; TEST-007 leak checks need `leaks --atExit` or similar | E (T-084 / T-019) | todo |
+| DW-040 | T-010 | Reclaim API gaps: no non-RT retire path (RetireQueue is audio-thread-only; Reclaimer takes only graphs/nodes from other threads), and no Release-safe "am I the render thread?" query (`RtTrap::inRealtimeContext()` is false in Release, not nonblocking). So asset retirement is an explicit call, not automatic | E (T-004 follow-up) | todo |
+| DW-041 | T-010 | Something must own the `AudioFileLoader` (daw.loader) and forward its completions as EngineEvents | E/B (T-014) | todo |
+| DW-042 | T-010 | Rule for asset-playing nodes: on the audio thread drop a reference only via `AudioAssetRef::retire(engine.retireQueue())`; if it returns false keep it and retry next block. Never destroy a handle on the audio thread | D (T-013, T-041) | todo |
+| DW-043 | T-010 | ImportAsset command should call `AudioImporter::importFile` and persist `projectRelativePath` | M (T-030) | todo |
+| DW-044 | T-010 | IO-033 (T-056): per-request progress events still needed; the peak cache already handles stale rates | E (T-056) | todo |

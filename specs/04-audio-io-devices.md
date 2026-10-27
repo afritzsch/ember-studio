@@ -56,4 +56,9 @@ struct AudioAsset { uint64_t assetID; double sampleRate; uint32_t channels; int6
 ## Status
 | ID | status | test |
 |---|---|---|
-| IO-* | todo | |
+| IO-030 | done (T-010) | `AudioFileLoaderTests` "Audio import" (copy by default, no overwrite on collision, reference mode, rejects bad files). `AudioImporter::importFile`; the ImportAsset command is model work |
+| IO-031 | done (T-010) | `AudioFileLoaderTests` "AudioFileLoader" (48k→44.1k→48k residual < −80 dB; decode per format; mono/6ch/empty; errors; ordered on daw.loader). AudioConverter Mastering SRC; MP3 decode untested (macOS can't encode it, no fixture) |
+| IO-032 | done (T-010) | `AudioFileLoaderTests` "AudioAsset" (ref-counted, last release retires; on the audio thread via `AudioAssetRef::retire(engine.retireQueue())`, otherwise via RetireHook; 0 RT violations) |
+| IO-033 | todo (T-056) | Peak cache already detects a stale rate and rewrites itself |
+| IO-034 | done (T-010) | `AudioFileLoaderTests` "Peak mipmaps" (brute-force match, documented `.peaks` layout, corrupt files rejected, cache reuse/refresh) |
+| IO-* (rest) | todo | |

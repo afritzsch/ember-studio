@@ -7,6 +7,7 @@ module DAWEngineTestSupport {
   header "../../../Sources/DAWEngine/core/ParamSmoother.h"
   header "../../../Sources/DAWEngine/core/RtTrap.h"
   header "../../../Sources/DAWEngine/time/TempoMap.h"
+  header "AudioFileChecks.h"
   header "Checks.h"
   header "CoreUtilsChecks.h"
   header "EngineChecks.h"

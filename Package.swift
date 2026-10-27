@@ -132,7 +132,12 @@ let package = Package(
         .target(
             name: "DAWEngine",
             dependencies: ["VST3SDK"],
-            cxxSettings: engineCxxSettings + [.headerSearchPath(".")]
+            cxxSettings: engineCxxSettings + [.headerSearchPath(".")],
+            linkerSettings: [
+                // IO-031: ExtAudioFile decoding and AudioConverter resampling (io/).
+                .linkedFramework("AudioToolbox"),
+                .linkedFramework("CoreFoundation"),
+            ]
         ),
 
         // MARK: Swift
