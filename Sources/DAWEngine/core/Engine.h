@@ -16,7 +16,8 @@
 #include "core/RenderGraph.h"
 #include "core/RenderTarget.h"
 #include "core/RetireQueue.h"
-#include "time/TransportBlock.h"
+#include "time/TempoMap.h"
+#include "time/Transport.h"
 
 namespace daw {
 
@@ -46,6 +47,10 @@ public:
     ParamSlotTable& params() { return params_; }
     NodePool& nodes() { return nodes_; }  // non-RT
 
+    // TIME-004/009: commands and the playhead from any non-RT thread; render() advances it.
+    Transport& transport() { return transport_; }
+    const Transport& transport() const { return transport_; }
+
     // ENG-014: for RT code that is done with a heap object (audio thread only).
     RetireQueue& retireQueue() { return reclaimer_.rtQueue(); }
 
@@ -63,8 +68,12 @@ private:
     Reclaimer reclaimer_{renderEpoch_};
     NodePool nodes_{reclaimer_};
     ParamSlotTable params_;
-    // T-008: the transport produces this every block. Until then it stays stopped at 0.
-    TransportBlock transport_{};
+    // TIME-004..009: advanced at the start of every block that renders a graph.
+    Transport transport_;
+    // T-012 seam (TIME-003): render() should hand the transport graph->tempoMap() (approved 05
+    // Interfaces addition: the RenderGraph owns the map GraphBuilder built at the engine's rate).
+    // Until T-012 merges, every graph plays at this map's 120 bpm, 4/4, 48 kHz.
+    TempoMap fallbackTempo_;
     // ENG-010/011. seq_cst on both sides, see Reclaimer.h.
     std::atomic<RenderGraph*> current_{nullptr};
 };

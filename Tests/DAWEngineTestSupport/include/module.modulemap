@@ -13,6 +13,7 @@ module DAWEngineTestSupport {
   header "ParamChecks.h"
   header "RtTrapTestSupport.h"
   header "TempoMapTestSupport.h"
+  header "TransportChecks.h"
   requires cplusplus
   export *
 }
