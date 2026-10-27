@@ -1,0 +1,7 @@
+// BUILD-003: SwiftPM needs a public header root for the VST3SDK target. Nothing here is meant
+// for Swift; C++ in DAWEngine includes SDK headers directly from Vendor/vst3sdk.
+module VST3SDK {
+  header "VST3SDK.h"
+  requires cplusplus
+  export *
+}

@@ -1,0 +1,280 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		DA0000000000000000000014 /* DAWModel in Frameworks */ = {isa = PBXBuildFile; productRef = DA0000000000000000000021 /* DAWModel */; };
+		DA0000000000000000000015 /* DAWControl in Frameworks */ = {isa = PBXBuildFile; productRef = DA0000000000000000000022 /* DAWControl */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		DA0000000000000000000004 /* macDAW.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = macDAW.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		DA0000000000000000000006 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		DA0000000000000000000007 /* macDAW.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = macDAW.entitlements; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		DA0000000000000000000005 /* macDAW */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = macDAW;
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		DA0000000000000000000012 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				DA0000000000000000000014 /* DAWModel in Frameworks */,
+				DA0000000000000000000015 /* DAWControl in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		DA0000000000000000000002 = {
+			isa = PBXGroup;
+			children = (
+				DA0000000000000000000005 /* macDAW */,
+				DA0000000000000000000006 /* Info.plist */,
+				DA0000000000000000000007 /* macDAW.entitlements */,
+				DA0000000000000000000003 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		DA0000000000000000000003 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				DA0000000000000000000004 /* macDAW.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		DA0000000000000000000010 /* macDAW */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = DA0000000000000000000033 /* Build configuration list for PBXNativeTarget "macDAW" */;
+			buildPhases = (
+				DA0000000000000000000011 /* Sources */,
+				DA0000000000000000000012 /* Frameworks */,
+				DA0000000000000000000013 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				DA0000000000000000000005 /* macDAW */,
+			);
+			name = macDAW;
+			packageProductDependencies = (
+				DA0000000000000000000021 /* DAWModel */,
+				DA0000000000000000000022 /* DAWControl */,
+			);
+			productName = macDAW;
+			productReference = DA0000000000000000000004 /* macDAW.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		DA0000000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1600;
+				LastUpgradeCheck = 1600;
+				TargetAttributes = {
+					DA0000000000000000000010 = {
+						CreatedOnToolsVersion = 16.0;
+					};
+				};
+			};
+			buildConfigurationList = DA0000000000000000000030 /* Build configuration list for PBXProject "macDAW" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = DA0000000000000000000002;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				DA0000000000000000000020 /* XCLocalSwiftPackageReference ".." */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = DA0000000000000000000003 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				DA0000000000000000000010 /* macDAW */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		DA0000000000000000000013 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		DA0000000000000000000011 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		DA0000000000000000000031 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ARCHS = arm64;
+				CLANG_CXX_LANGUAGE_STANDARD = "c++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		DA0000000000000000000032 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ARCHS = arm64;
+				CLANG_CXX_LANGUAGE_STANDARD = "c++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+			};
+			name = Release;
+		};
+		DA0000000000000000000034 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = macDAW.entitlements;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_HARDENED_RUNTIME = YES;
+				INFOPLIST_FILE = Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 0.1;
+				OTHER_CODE_SIGN_FLAGS = "--options=runtime";
+				PRODUCT_BUNDLE_IDENTIFIER = dev.macdaw.macDAW;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_OBJC_INTEROP_MODE = objcxx;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		DA0000000000000000000035 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = macDAW.entitlements;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_HARDENED_RUNTIME = YES;
+				INFOPLIST_FILE = Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 0.1;
+				OTHER_CODE_SIGN_FLAGS = "--options=runtime";
+				PRODUCT_BUNDLE_IDENTIFIER = dev.macdaw.macDAW;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_OBJC_INTEROP_MODE = objcxx;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		DA0000000000000000000030 /* Build configuration list for PBXProject "macDAW" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				DA0000000000000000000031 /* Debug */,
+				DA0000000000000000000032 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		DA0000000000000000000033 /* Build configuration list for PBXNativeTarget "macDAW" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				DA0000000000000000000034 /* Debug */,
+				DA0000000000000000000035 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		DA0000000000000000000020 /* XCLocalSwiftPackageReference ".." */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ..;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		DA0000000000000000000021 /* DAWModel */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = DAWModel;
+		};
+		DA0000000000000000000022 /* DAWControl */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = DAWControl;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = DA0000000000000000000001 /* Project object */;
+}
