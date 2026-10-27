@@ -39,6 +39,7 @@ void Engine::publish(std::unique_ptr<RenderGraph> graph) {
 }
 
 void Engine::render(RenderTarget& target, uint32_t numFrames) DAW_RT {
+    const uint64_t startTicks = Telemetry::clockTicks();  // ENG-051: nonblocking
     RtScope rtScope;              // ENG-030, DW-011
     ScopedFlushDenormals ftz;     // ENG-042
 
@@ -69,7 +70,17 @@ void Engine::render(RenderTarget& target, uint32_t numFrames) DAW_RT {
         }
     }
 
-    // T-006 (ENG-041 "publish telemetry", ENG-050/051) goes here.
+    // ENG-041 "publish telemetry", ENG-050/051. DW-037: an oversize block rendered silence
+    // above; a full RetireQueue means RT retire() calls are failing this block.
+    if (graph != nullptr && n > graph->maxBlock()) telemetry_.countOversizeBlock();
+    if (reclaimer_.rtQueue().sizeApprox() >= RetireQueue::kCapacity)
+        telemetry_.countRetireQueueFull();
+    // DW-024: this block's own RtScope count, not the process-wide RtTrap::violationCount().
+    // The end tick is taken last, so the render time includes the telemetry work.
+    const uint64_t violations = rtScope.violations();
+    const uint64_t renderNanos = telemetry_.ticksToNanos(Telemetry::clockTicks() - startTicks);
+    telemetry_.recordBlock(renderNanos, n, graph != nullptr ? graph->sampleRate() : 0.0,
+                           violations, epoch + 2);
 
     // ENG-012: the block is done with `graph`.
     renderEpoch_.store(epoch + 2, std::memory_order_seq_cst);

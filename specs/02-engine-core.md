@@ -43,7 +43,7 @@ The engine is a set of **node instances** connected by an immutable **RenderGrap
 |---|---|---|
 | ENG-030 | With `DAW_RT_TRAP=1`, a thread-local flag `inRealtimeContext` is set during `render()`. | — |
 | ENG-031 | Interpose `malloc/free/calloc/realloc/posix_memalign` and `pthread_mutex_lock`, and count calls made while the flag is set. | Test: a deliberately allocating node increments the counter |
-| ENG-032 | Violations are counted in telemetry (`rtViolations`) with the first offending backtrace captured off-thread. They never abort by default; `DAW_RT_TRAP_ABORT=1` env aborts. | — |
+| ENG-032 | Violations are counted in telemetry (`rtViolations`) with the first offending backtrace captured off-thread. `rtViolations` is the engine's own count, the sum of its render `RtScope`'s violations per block (DW-024): equal to the process-wide trap count in production, but immune to violations other scopes make. They never abort by default; `DAW_RT_TRAP_ABORT=1` env aborts. | — |
 | ENG-033 | Allowlist: CoreAudio-internal allocations during device start are excluded by enabling the flag only inside the engine's own render scope. | — |
 
 ### Engine entry points
@@ -99,11 +99,12 @@ public:
 |---|---|---|
 | ENG-060 | done (T-002) | `CoreUtilsTests` (SpscQueue cases) |
 | ENG-061 | done (T-002, T-004) | `CoreUtilsTests` (AudioBufferPool cases); `EngineRenderTests.graphValidation` (RenderGraph owns its pool) |
-| ENG-030..033 | done (T-003) | `RtTrapTests` (Debug only). Allocations caught via libmalloc `malloc_logger`, locks via GOT rebinding — not dyld `__interpose` (see DW-012). Engine installs the trap and `render` runs in an `RtScope` (T-004); telemetry wiring is T-006 |
+| ENG-030..033 | done (T-003) | `RtTrapTests` (Debug only). Allocations caught via libmalloc `malloc_logger`, locks via GOT rebinding — not dyld `__interpose` (see DW-012). Engine installs the trap and `render` runs in an `RtScope` (T-004); telemetry `rtViolations` = the render scope's count, `firstViolation()` exposed (T-006, DW-024) |
 | ENG-020, 021 | done (T-005) | `ParamSlotTableTests`, `ParamSlotTests`, `ParamRealtimeTests` (RtScope count 0). `allocate(count)` returns a contiguous range; `generation` counts writes |
 | ENG-022 | partial (T-005) | `ParamSmootherTests` (0→1 step = linear ramp for every block size 0..4096); golden pending (T-019) |
 | ENG-023 | partial (T-005) | `ParamSnapshotIsolationTests` (sweep leaves node config unchanged); "fader sweep → 0 publishes" pending Engine + GraphBuilder (T-012/T-014) |
 | ENG-001..004 | done (T-004) | `NodeAPITests` (lifecycle, replaced, nodeIO, midiWriter, randomBlockSizes 0..4096). RenderGraph doesn't route MIDI yet (T-012/T-040) |
 | ENG-010..015 | done (T-004) | `SnapshotTests` (10k publishes during render, freed on reclaim; stalled audio thread; idle reclaim; RetireQueue; silence). ASan clean; LSan unsupported on macOS, so the stress test counts frees. `renderEpoch` is odd during a block, even when idle (seq_cst) |
 | ENG-040..042 | done (T-004) | `EngineRenderTests` (renderOrder, flushToZero with decaying IIR, graphValidation). Transport (T-008) and telemetry (T-006) steps are marked seams in `Engine::render` |
+| ENG-050, 051 | done (T-006) | `TelemetryTests` (mach_absolute_time clock; DSP load EMA τ = 0.3 s; render publishes epoch/load/rtViolations; producer paths for xruns, latency, meters; seqlock latency table + packed meters never torn; POD-copyable). Per-field relaxed atomics: one snapshot may mix adjacent blocks. "Graph epoch" = renderEpoch after the last block |
 | ENG-* (rest) | todo | |

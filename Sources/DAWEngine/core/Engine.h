@@ -16,6 +16,7 @@
 #include "core/RenderGraph.h"
 #include "core/RenderTarget.h"
 #include "core/RetireQueue.h"
+#include "core/Telemetry.h"
 #include "time/TransportBlock.h"
 
 namespace daw {
@@ -54,7 +55,10 @@ public:
     // Completed blocks so far (each block bumps the raw epoch twice, see Reclaimer.h).
     uint64_t blocksRendered() const { return renderEpoch_.load(std::memory_order_acquire) / 2; }
 
-    // T-006 (ENG-050): const Telemetry& telemetry() const;
+    // ENG-050: read from any thread without locks. The non-const overload is for the other
+    // producers (driver xruns and latency, meters, node latencies; see Telemetry.h).
+    const Telemetry& telemetry() const { return telemetry_; }
+    Telemetry& telemetry() { return telemetry_; }
 
 private:
     // Declaration order is destruction order in reverse: the reclaimer outlives the pool and
@@ -67,6 +71,8 @@ private:
     TransportBlock transport_{};
     // ENG-010/011. seq_cst on both sides, see Reclaimer.h.
     std::atomic<RenderGraph*> current_{nullptr};
+    // ENG-050: written by render() once per block (the "publish telemetry" step).
+    Telemetry telemetry_;
 };
 
 } // namespace daw
