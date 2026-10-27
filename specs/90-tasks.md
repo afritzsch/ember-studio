@@ -89,7 +89,7 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 ### M6 — Plugins
 | Task | Lane | Title | Requirements | Depends on | Status |
 |---|---|---|---|---|---|
-| T-060 | P | PluginScanner + cache + blocklist | PLUG-001..004 | T-001 | wip(t-060-plugin-scanner) |
+| T-060 | P | PluginScanner + cache + blocklist | PLUG-001..004 | T-001 | done |
 | T-061 | P | AU hosting node (FX + instrument), params, state, latency | PLUG-010, 012..016 (AU) | T-021, T-014 | todo |
 | T-062 | P | VST3 hosting node + build SDK `again` test plugin | PLUG-011..016 (VST3) | T-021, T-014 | todo |
 | T-063 | P+U | Plugin editor windows (AU view controller, VST3 IPlugView) | PLUG-017 | T-061, T-062, T-032 | todo |
@@ -204,3 +204,7 @@ Recorded by the lead from worker reports.
 | DW-012 | T-003 | ENG-031 says "interpose"; dyld `__interpose` doesn't apply to the test executable or dlopen'd bundles, so the trap uses `malloc_logger` + GOT rebinding. Gaps: locks inside system libraries and `dispatch_*` aren't counted; allocations invisible under ASan (matters for TEST-007). Spec wording needs a clarification note | spec (user/lead) | todo |
 | DW-013 | T-003 | Optional: `test.sh` engine-objects stage could also assert `_daw_rt_trap_install` is absent from Release | E (T-019) | todo |
 | DW-014 | T-003 | Unify C++ test binding styles (T-002 `@_silgen_name` via SelfTest.h vs T-003 `dlsym`); fold into DW-006 test-support target | E (with DW-006) | todo |
+| DW-015 | T-060 | App can't use the scanner yet: embed `PluginScanner` in macDAW.app as an auxiliary executable, and expose `PluginCatalog` to the app — via a new library product (changes 01-build-layout Interfaces product list → needs approval) or through DAWModel | U + lead (with T-065) | todo |
+| DW-016 | T-060 | dawctl/dawmcp commands: scan, list plugins, list/reset blocked | B (after T-017) | todo |
+| DW-017 | T-060 | Convert Swift `PluginDescriptor` → `PluginDescriptorPOD` for `instantiatePlugin` | P/B (T-014/T-061) | todo |
+| DW-018 | T-060 | Optional: scan candidates in parallel (each hanging plugin costs up to 10 s serially) | P (later) | todo |

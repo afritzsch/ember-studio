@@ -42,4 +42,5 @@ Scanner stdout JSON = array of `PluginDescriptorPOD` fields + `{status: ok|block
 ## Status
 | ID | status | test |
 |---|---|---|
-| PLUG-* | todo | |
+| PLUG-001..004 | done (T-060) | `PluginScannerTests` (launcher crash/timeout → blocked with fake VST3 bundles, VST3 probe, AU scan of Apple built-ins, cache rescan). AUv3 extension path not covered by an automated test |
+| PLUG-* (rest) | todo | |
