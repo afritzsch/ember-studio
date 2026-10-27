@@ -33,7 +33,7 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 | T-008 | E | Transport, TransportBlock, loop segments, playhead atomic | TIME-003..009 | T-004, T-007 | done |
 | T-009 | E | OfflineDriver + AudioFileWriter | IO-010..013, IO-035 | T-004 | done |
 | T-010 | E | AudioFileLoader, resampling, AudioAsset, peak mipmaps | IO-030..034 (IO-033 deferred to T-056) | T-002 | done |
-| T-011 | E | CoreAudioDriver, workgroup join, latency reporting | IO-001..005 | T-004 | wip(t-011-coreaudio-driver) |
+| T-011 | E | CoreAudioDriver, workgroup join, latency reporting | IO-001..005 | T-004 | done |
 | T-012 | E | GraphDescription, GraphBuilder (topo sort, buffer liveness, summing, master) | MIX-001..004, MIX-009 | T-004, T-005 | done |
 | T-013 | D | AudioClipPlayer + minimal ChannelStrip (gain/pan) | DSP-001, DSP-010 (partial), MIX-005 (gain/pan) | T-008, T-010, T-012 | wip(t-013-clip-player-strip) |
 | T-014 | B | EngineFacade v0, EngineClient, EngineProtocol, FakeEngine | BRIDGE-001..008 (transport, graph, params, assets, offline, telemetry, events) | T-006, T-009, T-012 | wip(t-014-engine-facade) |
@@ -81,7 +81,7 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 ### M5 — Recording & devices
 | Task | Lane | Title | Requirements | Depends on | Status |
 |---|---|---|---|---|---|
-| T-050 | E | FakeDeviceDriver (loopback, scripted events) | TEST-005 | T-011 | todo |
+| T-050 | E | FakeDeviceDriver (loopback, scripted events) | TEST-005 | T-011 | ready |
 | T-051 | E | DeviceMonitor, hot-swap sequence, xrun detection, EngineEvents | IO-020..023 | T-050 | todo |
 | T-052 | E | Audio recording: FIFOs, disk writer, latency comp, finalize, punch | REC-001..005 | T-050, T-009 | todo |
 | T-053 | E | CoreMIDI input + MIDI recording | REC-010..012 | T-040 | todo |
@@ -241,7 +241,7 @@ Recorded by the lead from worker reports.
 | DW-046 | T-086 | The built app is now `Ember Studio.app` (path contains a space); CTL-023's attach-mode launcher must quote it. The Swift package name stays `macDAW` (01 doesn't constrain it); the repo folder `/Users/artem/dev/macDAW` is unchanged. Plugin cache moved to `~/Library/Application Support/Ember Studio/` (no migration; a rescan) | B (T-018/T-032), lead | todo |
 | DW-047 | T-006 | RenderGraph should carry a per-node latency table + total PDC latency for `Telemetry::publishNodeLatencies` (audio thread copies on graph change), and the `GraphDescription.version` so telemetry can report which applyGraph version is rendering (natural thing for dawmcp to wait on) | E (T-012 / T-021), B (T-014) | todo |
 | DW-048 | T-006 | GraphBuilder hands out MeterIDs (≤ `Telemetry::kMaxMeters` = 4096) to channel strips, which call `writeMeter(id, peak, rms)` from `process()`; the 300 ms window is the strip's job | E/D (T-012 follow-up, T-013/T-020) | todo |
-| DW-049 | T-006 | Driver calls `Telemetry::countXrun()` (IO-023) and `setDeviceOutputLatency()` (IO-005); overruns are detectable from `lastBlockLoadPercent > 100`. Facade copies `TelemetrySnapshot` field by field into `TelemetryPOD`; `firstViolation()` is non-RT and allocates | E (T-011/T-051), B (T-014) | todo |
+| DW-049 | T-006 | Driver calls `Telemetry::countXrun()` (IO-023) and `setDeviceOutputLatency()` (IO-005); overruns are detectable from `lastBlockLoadPercent > 100`. Facade copies `TelemetrySnapshot` field by field into `TelemetryPOD`; `firstViolation()` is non-RT and allocates | E (T-011/T-051), B (T-014) | driver part done (T-011: countXrun on processor overload, setDeviceOutputLatency); facade part todo (T-014) |
 | DW-050 | T-012 | No `ErrorCode::cycle` in `core/Result.h` though MIX-002 names `Error::cycle`; builder returns `invalidArgument` "cycle: <NodeIDs>". Add the code (ideally with a structured ID list) and map it to `DAWError.routingCycle` | E (core) + B (T-014) | core done (T-087: `ErrorCode::cycle`, `Error::nodes`); mapping todo (T-014) |
 | DW-051 | T-012 | Clip/note delivery: node factories get a node's clips and notes only when an instance is created (new node or kind/configVersion/param range change). Either clip edits bump `configVersion`, or clip players get per-graph clip data | D (T-013) / M (T-016) | todo |
 | DW-052 | T-012 | PDC (MIX-021) belongs in `RenderGraph::feed()`; migrate T-004's EngineChecks off the old summing path, then remove it. `MasterNode::clippedSamples()` should reach telemetry | E (T-021), E (T-006 follow-up) | todo |
@@ -251,7 +251,7 @@ Recorded by the lead from worker reports.
 | DW-056 | T-009 | `ExportSpec.blockSize` can't be checked against the published graph's `maxBlock` (Engine doesn't expose it); an oversize block renders silence silently. Add a non-RT `Engine::currentMaxBlock()` or check in the facade. `ExportSpec`/`ProgressFn` were undefined in the specs; T-009 defined them in `io/ExportSpec.h` (carries the TempoMap; now that `RenderGraph::tempoMap()` exists, reconsider) | E / B (T-014) | partial (T-009: per-block check catches oversize blocks; ExportSpec keeps its TempoMap because the driver needs frame counts before rendering) |
 | DW-057 | T-009 | Facade: map `ExportSpecPOD` → `daw::ExportSpec`, run offline render on a job thread with the device driver stopped, turn `OfflineProgress` into job status. Cancellation would need `ErrorCode::cancelled` | B (T-014) | todo |
 | DW-058 | T-008 | Goldens `loop_wrap_midblock` (TIME-005) and locate/no-stuck-voices (TIME-008) | E (T-019) | todo |
-| DW-059 | T-008 | Driver calls `Engine::transport().setOutputLatency(samples)`; facade `TransportPOD` maps from `TransportPlayhead` | E (T-011), B (T-014) | todo |
+| DW-059 | T-008 | Driver calls `Engine::transport().setOutputLatency(samples)`; facade `TransportPOD` maps from `TransportPlayhead` | E (T-011), B (T-014) | driver part done (T-011); facade `TransportPOD` todo (T-014) |
 | DW-060 | T-008 | Loops shorter than a block (< 4096 samples) play once then leave a gap (contract allows 2 segments). Model should enforce a minimum loop length | M (T-030 SetLoop) | todo |
 | DW-061 | T-008 | Product question: on a tempo edit the playhead keeps its sample position, so its musical position shifts. Keeping the tick instead needs a decision | user | todo |
 | DW-062 | T-008 | 03 clarifications: a segment's [startTick, endTick) is exactly the ticks whose events sound in it; a stopped/0-frame block has 0 segments and seg[0] carries the position; past the loop end plays on; loop wraps don't reset nodes. Also `RenderStepDesc::resetOnLocate` comment in `core/RenderGraph.h` says "locate or loop jump" — should say locate only | spec (lead) + E (small) | done (T-087) |
@@ -259,3 +259,7 @@ Recorded by the lead from worker reports.
 | DW-064 | T-009 | Facade passes the map it built the current graph from as `ExportSpec.tempo`, and disarms recording before an export (the driver doesn't touch the recording flag) | B (T-014) | todo |
 | DW-065 | T-087 | Under TSan (like ASan, DW-054) malloc is replaced, so the RT-trap allocation tests (RtTrap ENG-031/032, DW-019, Telemetry DW-011/024, OfflineDriver IO-013) fail; Swift Testing exit tests always SIGABRT under TSan whatever their body (so ENG-032's abort test passes only by accident); IO-010 "60 s in < 10 s" is too slow. The TEST-007 TSan job must skip these. TSan otherwise clean (0 reports, 12.7 s) | E (T-019 / T-084) | todo |
 | DW-066 | T-087 | `Package.swift` still has `name: "macDAW"` (package name, not a module). Rename when no worker owns Package.swift | lead (small) | todo |
+| DW-067 | T-011 | Facade: publish graphs prepared for at least `driver.current().bufferFrames` (shorter → silence, counted in oversizeBlocks); stop the driver before an offline render (DW-057); enabling input (record/monitor armed) means restarting the driver with `inputEnabled` — no live input switch | B (T-014) | todo |
+| DW-068 | T-011 | IO-023 rest: overruns from render time vs block duration, `EngineEvent.overload`; one processor-overload notification often arrives right at start, so ignore a short window after start | E (T-051) | todo |
+| DW-069 | T-011 | 04 Interfaces names `DriverConfig` and `DeviceLatency` without defining them; T-011 defined them in `io/DriverConfig.h` / `io/DeviceLatency.h` (like `ExportSpec`). Add them to the Interfaces block | spec (lead) | todo |
+| DW-070 | T-011 | FakeDeviceDriver can reuse `DeviceRenderer` (device-independent IO cycle) and `publishDeviceLatency()`. Device start/stop/config/latency not reachable via dawctl/dawmcp until the facade + control exist | E (T-050), B (T-017/T-018) | todo |
