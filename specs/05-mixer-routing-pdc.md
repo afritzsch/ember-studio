@@ -57,6 +57,18 @@ struct GraphDescription { uint64_t version; std::vector<NodeDesc> nodes; std::ve
 }
 ```
 
+> **PROPOSED (T-012): define `TempoMapDesc`.** The contract above uses `TempoMapDesc`, but no spec or header defines it, so `GraphDescription.h` can't be written "exactly per 05 Interfaces". Proposed addition (same header, before `GraphDescription`):
+> ```cpp
+> struct TempoPointDesc { Tick tick; double bpm; };              // mirrors daw::TempoEvent (03)
+> struct TimeSigDesc    { Tick tick; int32_t num; int32_t den; }; // mirrors daw::TimeSigEvent (03)
+> struct TempoMapDesc   { std::vector<TempoPointDesc> tempos; std::vector<TimeSigDesc> timeSigs; };
+> ```
+> - **Own POD structs, not 03's `TempoEvent`/`TimeSigEvent`.** `include/daw/` is what Swift sees through the facade (01 Interfaces). It can't `#include "time/TempoMap.h"`, because that path isn't on the public include path and would pull `Result`/`Realtime` into the Swift module. For the same reason, `GraphDescription.h` redeclares `NodeID`, `ParamID` and `Tick` as identical aliases (`uint64_t`, `uint32_t`, `int64_t`), which is legal C++.
+> - **No sample rate in the desc.** `GraphBuilder` builds the map with `TempoMap::make(tempos, sigs, <the rate it prepares nodes at>)`, which keeps the engine's rate the single source of truth on the C++ side (cf. DW-020). An invalid map makes `build()` fail with `invalidArgument`. The model has already validated it (`Project.setTempoMap`), so this is a defensive check.
+> - **The RenderGraph owns the built `TempoMap`** (TIME-003: immutable within a RenderGraph) and exposes `const TempoMap& tempoMap() const`. `Engine::render` points `TransportBlock.tempo` at it.
+>
+> Affected: **T-012** (header + builder), **T-008** (Engine's transport seam takes `TransportBlock.tempo` from the current graph), **T-014** (facade converts / passes it through, 08), **T-016** (model fills it from `Project.tempoMap.tempoEvents/timeSignatures`). Specs: 05 (this section), 03 (TIME-003, where the map lives), 08.
+
 ## Status
 | ID | status | test |
 |---|---|---|
