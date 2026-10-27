@@ -10,6 +10,8 @@ module DAWEngineTestSupport {
   header "AudioFileChecks.h"
   header "AudioFileWriterChecks.h"
   header "Checks.h"
+  header "ChannelStripChecks.h"
+  header "ClipPlayerChecks.h"
   header "CoreUtilsChecks.h"
   header "EngineChecks.h"
   header "GraphChecks.h"

@@ -9,7 +9,7 @@ All processors are `daw::Node` subclasses, stereo in/out, with parameters throug
 ### Clip players
 | ID | Requirement | Acceptance |
 |---|---|---|
-| DSP-001 | `AudioClipPlayer`: for each TransportSegment, finds overlapping clips (sorted array, binary search), copies frames from `AudioAsset` with clip gain and linear fades (fade in/out in ticks → samples). Mono assets are duplicated to L/R. | Golden: two adjacent clips, fades |
+| DSP-001 | `AudioClipPlayer`: for each TransportSegment, finds overlapping clips (sorted array, binary search), copies frames from `AudioAsset` with clip gain and linear fades (fade in/out in ticks → samples). Mono assets are duplicated to L/R. A clip sounds on samples `[tickToSample(start), tickToSample(start+length))` of the block's tempo map (moves with tempo, never stretches, D-06); source frames outside the asset are silent. **Clip delivery (DW-051):** a player's clips (and their assets, resolved through the `AssetLookup` given to `registerBuiltinNodes`) are fixed when the node instance is created, so the model bumps the player's `configVersion` whenever that track's clips change or an asset they use finishes loading; unloaded assets play silence. Loop wraps crossfade the old and new pass over 64 samples (TIME-005/006). | Golden: two adjacent clips, fades |
 | DSP-002 | Overlapping clips on one track: the later clip wins, with an automatic 64-sample equal-power crossfade at boundaries (comp boundaries reuse this, see 09). | Golden |
 | DSP-003 | `MidiClipPlayer`: emits note-on/off events with frame offsets for notes overlapping the segment. On loop wrap/locate it sends note-offs for hanging notes (all-notes-off). | Unit: no stuck notes after random locates |
 
