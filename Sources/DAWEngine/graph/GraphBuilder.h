@@ -17,6 +17,7 @@
 #include <cstdint>
 #include <memory>
 #include <unordered_map>
+#include <vector>
 
 #include "core/Node.h"
 #include "core/NodePool.h"
@@ -45,6 +46,9 @@ public:
     Result<std::unique_ptr<RenderGraph>> build(const GraphDescription& desc, NodePool& pool,
                                                ParamSlotTable& params);
 
+    // DW-048: the MeterID handed to `node`'s factory (see NodeCreateInfo), or kNoMeter.
+    MeterID meterOf(NodeID node) const;
+
     double sampleRate() const { return sampleRate_; }
     uint32_t maxBlock() const { return maxBlock_; }
 
@@ -65,6 +69,12 @@ private:
     double sampleRate_;
     uint32_t maxBlock_;
     std::unordered_map<NodeID, Instance> instances_;
+
+    // DW-048: MeterIDs of metering nodes, kept per NodeID; released IDs are reused.
+    MeterID assignMeter(NodeID node);
+    std::unordered_map<NodeID, MeterID> meters_;
+    std::vector<MeterID> freeMeters_;
+    MeterID nextMeter_ = 0;
 };
 
 } // namespace daw

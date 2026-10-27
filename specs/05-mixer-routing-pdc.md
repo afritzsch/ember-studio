@@ -70,4 +70,5 @@ struct GraphDescription { uint64_t version; std::vector<NodeDesc> nodes; std::ve
 | MIX-003 | done (T-012) | `GraphTests` (100-track project ≤ max fan-in + depth; random mixer projects). Bound holds for mixer-shaped graphs, not arbitrary dense DAGs |
 | MIX-004 | partial (T-012) | `GraphTests` (summing, sidechain port, random DAG sums exact); golden `bus_send_sum` pending (T-019) |
 | MIX-009 | done (T-012) | `GraphTests` (master last; limiter off by default, clips + counts overs when on) |
+| MIX-005 | partial (T-013) | `ChannelStripTests` (−3 dB constant-power pan law, also on centred stereo; gain linear clamped to +12 dB; ENG-022 per-block ramps; post-fader peak + 300 ms RMS into Telemetry; GraphBuilder assigns stable, reusable MeterIDs, DW-048). Mute/solo/phase in T-020; pan golden in T-025 |
 | MIX-* (rest) | todo | |

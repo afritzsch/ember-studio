@@ -35,7 +35,7 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 | T-010 | E | AudioFileLoader, resampling, AudioAsset, peak mipmaps | IO-030..034 (IO-033 deferred to T-056) | T-002 | done |
 | T-011 | E | CoreAudioDriver, workgroup join, latency reporting | IO-001..005 | T-004 | done |
 | T-012 | E | GraphDescription, GraphBuilder (topo sort, buffer liveness, summing, master) | MIX-001..004, MIX-009 | T-004, T-005 | done |
-| T-013 | D | AudioClipPlayer + minimal ChannelStrip (gain/pan) | DSP-001, DSP-010 (partial), MIX-005 (gain/pan) | T-008, T-010, T-012 | wip(t-013-clip-player-strip) |
+| T-013 | D | AudioClipPlayer + minimal ChannelStrip (gain/pan) | DSP-001, DSP-010 (partial), MIX-005 (gain/pan) | T-008, T-010, T-012 | done |
 | T-014 | B | EngineFacade v0, EngineClient, EngineProtocol, FakeEngine | BRIDGE-001..008 (transport, graph, params, assets, offline, telemetry, events) | T-006, T-009, T-012 | wip(t-014-engine-facade) |
 | T-015 | M | Project types, IDAllocator, Command protocol, UndoStack, gestures, ProjectStore, CommandRegistry | MODEL-001..004, 006, 007 | T-007 | done |
 | T-016 | M | GraphDescriptionBuilder + engine sync (structural vs param) | MODEL-020..022 | T-014, T-015 | todo |
@@ -51,7 +51,7 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 ### M2 — Mixer & routing
 | Task | Lane | Title | Requirements | Depends on | Status |
 |---|---|---|---|---|---|
-| T-020 | E | Full channel strip: mute/solo (solo-in-place), phase, meters; sends pre/post | MIX-005..007, DSP-010 | T-013 | todo |
+| T-020 | E | Full channel strip: mute/solo (solo-in-place), phase, meters; sends pre/post | MIX-005..007, DSP-010 | T-013 | ready |
 | T-021 | E | PDC: path latency, delay insertion, delay-line carry-over, source pre-roll | MIX-020..025 | T-012 | ready |
 | T-022 | M | Routing commands (tracks, buses, sends, outputs) + cycle rejection + validation | MODEL-005 (routing subset), MODEL-030..032 | T-016 | todo |
 | T-023 | E | Sidechain edges and ports | MIX-008 | T-021 | todo |
@@ -66,7 +66,7 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 | T-032 | U+B | App shell, window, view-model pattern, toasts, ControlSocketServer, attach mode, UI dump/snapshot | UI-001, 003, 004, 050..052, CTL-011, 023, 030, 031 | T-018 | todo |
 | T-033 | U | Arrange canvas: tiles, waveforms (Metal), grid/snap, clip gestures, playhead layer | UI-010..014 | T-032, T-030 | todo |
 | T-034 | U | Toolbar, transport, keyboard shortcuts | UI-002 | T-032 | todo |
-| T-035 | D | Overlapping-clip crossfades | DSP-002 | T-013 | todo |
+| T-035 | D | Overlapping-clip crossfades | DSP-002 | T-013 | ready |
 | T-036 | E | M3 goldens: clips/fades/tempo change, loop wrap mid-block | TEST (M3 set) | T-030, T-035 | todo |
 
 ### M4 — MIDI & Sampler
@@ -234,16 +234,16 @@ Recorded by the lead from worker reports.
 | DW-039 | T-004 | LSan isn't supported on macOS; TEST-007 leak checks need `leaks --atExit` or similar | E (T-084 / T-019) | todo |
 | DW-040 | T-010 | Reclaim API gaps: no non-RT retire path (RetireQueue is audio-thread-only; Reclaimer takes only graphs/nodes from other threads), and no Release-safe "am I the render thread?" query (`RtTrap::inRealtimeContext()` is false in Release, not nonblocking). So asset retirement is an explicit call, not automatic | E (T-004 follow-up) | todo |
 | DW-041 | T-010 | Something must own the `AudioFileLoader` (daw.loader) and forward its completions as EngineEvents | E/B (T-014) | todo |
-| DW-042 | T-010 | Rule for asset-playing nodes: on the audio thread drop a reference only via `AudioAssetRef::retire(engine.retireQueue())`; if it returns false keep it and retry next block. Never destroy a handle on the audio thread | D (T-013, T-041) | todo |
+| DW-042 | T-010 | Rule for asset-playing nodes: on the audio thread drop a reference only via `AudioAssetRef::retire(engine.retireQueue())`; if it returns false keep it and retry next block. Never destroy a handle on the audio thread | D (T-013, T-041) | done for AudioClipPlayer (T-013: refs held for the node's life, released on reclaim); applies again to T-041 |
 | DW-043 | T-010 | ImportAsset command should call `AudioImporter::importFile` and persist `projectRelativePath` | M (T-030) | todo |
 | DW-044 | T-010 | IO-033 (T-056): per-request progress events still needed; the peak cache already handles stale rates | E (T-056) | todo |
 | DW-045 | T-086 | Product-name leftovers in files that wave-4 workers own: `core/Denormals.h:16` (`#error "macDAW targets arm64 only"`), `io/AudioFileLoader.cpp:24` (`os_log_create("dev.macdaw", "io")` → `dev.emberstudio`), `Tests/DAWEngineTestSupport/TestAudio.cpp:22` (temp prefix `macdaw-t010-`). Fix after T-006/T-008/T-009/T-012 merge | E (lead, small) | done (T-087) |
 | DW-046 | T-086 | The built app is now `Ember Studio.app` (path contains a space); CTL-023's attach-mode launcher must quote it. The Swift package name stays `macDAW` (01 doesn't constrain it); the repo folder `/Users/artem/dev/macDAW` is unchanged. Plugin cache moved to `~/Library/Application Support/Ember Studio/` (no migration; a rescan) | B (T-018/T-032), lead | todo |
 | DW-047 | T-006 | RenderGraph should carry a per-node latency table + total PDC latency for `Telemetry::publishNodeLatencies` (audio thread copies on graph change), and the `GraphDescription.version` so telemetry can report which applyGraph version is rendering (natural thing for dawmcp to wait on) | E (T-012 / T-021), B (T-014) | todo |
-| DW-048 | T-006 | GraphBuilder hands out MeterIDs (≤ `Telemetry::kMaxMeters` = 4096) to channel strips, which call `writeMeter(id, peak, rms)` from `process()`; the 300 ms window is the strip's job | E/D (T-012 follow-up, T-013/T-020) | todo |
+| DW-048 | T-006 | GraphBuilder hands out MeterIDs (≤ `Telemetry::kMaxMeters` = 4096) to channel strips, which call `writeMeter(id, peak, rms)` from `process()`; the 300 ms window is the strip's job | E/D (T-012 follow-up, T-013/T-020) | done (T-013: `NodeKindInfo::meters`, `NodeCreateInfo::meter`, `GraphBuilder::meterOf`); facade NodeID→MeterID map in DW-071 |
 | DW-049 | T-006 | Driver calls `Telemetry::countXrun()` (IO-023) and `setDeviceOutputLatency()` (IO-005); overruns are detectable from `lastBlockLoadPercent > 100`. Facade copies `TelemetrySnapshot` field by field into `TelemetryPOD`; `firstViolation()` is non-RT and allocates | E (T-011/T-051), B (T-014) | driver part done (T-011: countXrun on processor overload, setDeviceOutputLatency); facade part todo (T-014) |
 | DW-050 | T-012 | No `ErrorCode::cycle` in `core/Result.h` though MIX-002 names `Error::cycle`; builder returns `invalidArgument` "cycle: <NodeIDs>". Add the code (ideally with a structured ID list) and map it to `DAWError.routingCycle` | E (core) + B (T-014) | core done (T-087: `ErrorCode::cycle`, `Error::nodes`); mapping todo (T-014) |
-| DW-051 | T-012 | Clip/note delivery: node factories get a node's clips and notes only when an instance is created (new node or kind/configVersion/param range change). Either clip edits bump `configVersion`, or clip players get per-graph clip data | D (T-013) / M (T-016) | todo |
+| DW-051 | T-012 | Clip/note delivery: node factories get a node's clips and notes only when an instance is created (new node or kind/configVersion/param range change). Either clip edits bump `configVersion`, or clip players get per-graph clip data | D (T-013) / M (T-016) | decided (T-013): clips/assets fixed per instance; model bumps configVersion on clip edits and asset load (DW-072) |
 | DW-052 | T-012 | PDC (MIX-021) belongs in `RenderGraph::feed()`; migrate T-004's EngineChecks off the old summing path, then remove it. `MasterNode::clippedSamples()` should reach telemetry | E (T-021), E (T-006 follow-up) | todo |
 | DW-053 | T-012 | Facade: `applyGraph` submits to `GraphCompiler`; `EngineFacade.h` includes `daw/GraphDescription.h` | B (T-014) | todo |
 | DW-054 | T-012, lead | Under ASan the RT trap sees no allocations (DW-012), so the RtTrap suite and the Telemetry rtViolations tests (DW-011/024) fail with `--sanitize=address`. The TEST-007 sanitizer job must exclude or skip them | E (T-019 / T-084) | todo |
@@ -263,3 +263,8 @@ Recorded by the lead from worker reports.
 | DW-068 | T-011 | IO-023 rest: overruns from render time vs block duration, `EngineEvent.overload`; one processor-overload notification often arrives right at start, so ignore a short window after start | E (T-051) | todo |
 | DW-069 | T-011 | 04 Interfaces names `DriverConfig` and `DeviceLatency` without defining them; T-011 defined them in `io/DriverConfig.h` / `io/DeviceLatency.h` (like `ExportSpec`). Add them to the Interfaces block | spec (lead) | todo |
 | DW-070 | T-011 | FakeDeviceDriver can reuse `DeviceRenderer` (device-independent IO cycle) and `publishDeviceLatency()`. Device start/stop/config/latency not reachable via dawctl/dawmcp until the facade + control exist | E (T-050), B (T-017/T-018) | todo |
+| DW-071 | T-013 | Facade/telemetry need the NodeID → MeterID map (today only `GraphBuilder::meterOf`, compile thread): publish it with each graph or through GraphCompiler | B (T-014 / T-020) | todo |
+| DW-072 | T-013 | DW-051 decision: the model must bump a clip player's `configVersion` whenever its track's clips change and when an asset they use finishes loading (facade emits `assetLoaded`) | M (T-016) | todo |
+| DW-073 | T-013 | Goldens: two adjacent clips with fades (DSP-001), loop wrap mid-block through the clip player (TIME-005/006), locate reset (TIME-008), pan hard-left/centre/right (MIX-005, T-025) | E (T-019 / T-025 / T-036) | todo |
+| DW-074 | T-013 | DSP-041: `dsp/ParamInfo.h` and `ChannelStrip::kParamInfo` exist but no registry publishes param tables. Gain slot holds linear amplitude, labelled with a dB curve for display | D/E | todo |
+| DW-075 | T-013 | Clip edits during playback swap in a new player instance with no crossfade (can click; fix = per-graph clip data, touches graph/); stop cuts audio with no declick; DSP-040 (NaN guard, silence-tail) not done for clip player / strip | D (later) | todo |

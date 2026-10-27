@@ -160,7 +160,8 @@ Result<std::unique_ptr<RenderGraph>> GraphBuilder::build(const GraphDescription&
         }
         // New, changed, or replaced in the pool behind our back: a fresh instance, prepared
         // before any graph can render it.
-        auto created = kinds[i]->create(NodeCreateInfo{d, clips[i], notes[i]});
+        const MeterID meter = kinds[i]->meters ? assignMeter(d.id) : kNoMeter;
+        auto created = kinds[i]->create(NodeCreateInfo{d, clips[i], notes[i], meter});
         if (!created) return created.error();
         if (!created.value()) return makeError(ErrorCode::internal, nodeName(d.id) + ": factory returned null");
         const PrepareInfo info{sampleRate_, maxBlock_, 2, kinds[i]->audioOutput ? 2u : 0u};
@@ -207,7 +208,35 @@ Result<std::unique_ptr<RenderGraph>> GraphBuilder::build(const GraphDescription&
         if (pool.get(it->first) == it->second.node.lock()) pool.remove(it->first);
         it = instances_.erase(it);
     }
+    // DW-048: release the MeterIDs of nodes that left, or whose kind no longer meters.
+    for (auto it = meters_.begin(); it != meters_.end();) {
+        auto node = index.find(it->first);
+        if (node != index.end() && kinds[node->second]->meters) {
+            ++it;
+            continue;
+        }
+        freeMeters_.push_back(it->second);
+        it = meters_.erase(it);
+    }
     return result;
+}
+
+MeterID GraphBuilder::assignMeter(NodeID node) {
+    if (auto it = meters_.find(node); it != meters_.end()) return it->second;
+    MeterID id = kNoMeter;
+    if (!freeMeters_.empty()) {
+        id = freeMeters_.back();
+        freeMeters_.pop_back();
+    } else if (nextMeter_ < Telemetry::kMaxMeters) {
+        id = nextMeter_++;
+    }
+    if (id != kNoMeter) meters_[node] = id;
+    return id;
+}
+
+MeterID GraphBuilder::meterOf(NodeID node) const {
+    auto it = meters_.find(node);
+    return it == meters_.end() ? kNoMeter : it->second;
 }
 
 } // namespace daw
