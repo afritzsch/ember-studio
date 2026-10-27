@@ -61,8 +61,8 @@ struct AudioAsset { uint64_t assetID; double sampleRate; uint32_t channels; int6
 | IO-032 | done (T-010) | `AudioFileLoaderTests` "AudioAsset" (ref-counted, last release retires; on the audio thread via `AudioAssetRef::retire(engine.retireQueue())`, otherwise via RetireHook; 0 RT violations) |
 | IO-033 | todo (T-056) | Peak cache already detects a stale rate and rewrites itself |
 | IO-034 | done (T-010) | `AudioFileLoaderTests` "Peak mipmaps" (brute-force match, documented `.peaks` layout, corrupt files rejected, cache reuse/refresh) |
-| IO-010 | done (T-009) | `OfflineDriverTests` (tick range → frames at fixed block size, follows tempo changes, progress; 60 s simple project < 10 s). Transport locate/play is a marked seam until T-008 (DW-055) |
-| IO-011 | done (T-009) | `OfflineDriverTests` (two runs → identical bytes: 16-bit dithered file, float file, sink); `TpdfDitherTests` (same seed → same bytes for any block split) |
+| IO-010 | done (T-009) | `OfflineDriverTests` (tick range → frames at fixed block size, follows tempo changes, progress; 60 s simple project < 10 s). Exports play through the transport (play + locate(from), restore after); per-block playhead check fails on a wrong map/rate, graph swap or oversize block. 60 s render takes 0.49 s in Debug |
+| IO-011 | done (T-009) | `OfflineDriverTests` (two runs → identical bytes: 16-bit dithered file, float file, sink; two exports on one engine with stateful timeline nodes); `TpdfDitherTests` (same seed → same bytes for any block split) |
 | IO-012 | done (T-009) | `OfflineDriverTests` (decaying tail ends after quiet time; loud frame restarts the count; endless tone stops at max) |
 | IO-013 | done (T-009) | `OfflineDriverTests` (nodes run inside the trap scope offline; allocating node counted by the render thread's own count) |
 | IO-035 | done (T-009) | `AudioFileWriterTests` (9 formats round trip within quantization error; recordings are float CAF; clamp/NaN; errors); `TpdfDitherTests` (triangular, variance 1/6, seeded). `ExportSpec` defined in `io/ExportSpec.h` |

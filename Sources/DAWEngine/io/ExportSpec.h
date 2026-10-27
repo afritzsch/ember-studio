@@ -37,8 +37,12 @@ struct ExportSpec {
     uint32_t numChannels = 2;
     // IO-010: every Engine::render call is this long; at most the graph's maxBlock (kMaxBlock).
     uint32_t blockSize = 512;
-    // The project's tempo map, at the session rate the graph renders at. It converts the tick
-    // range to frames, and its sample rate is the file's.
+    // The tempo map of the graph being rendered (RenderGraph::tempoMap(), the project's map at
+    // the session rate). It converts the range and the tail to frames up front, and its rate is
+    // the file's. A copy is passed because the driver runs off the audio thread, where the
+    // current graph may be retired at any moment; the facade has the map it built the graph
+    // from. The driver checks every block that the transport, playing the graph's own map, is
+    // where this map says, and fails on a mismatch.
     TempoMap tempo;
     TailSpec tail;
     OfflineBlockSink sink;
