@@ -56,6 +56,11 @@ struct AudioAsset { uint64_t assetID; double sampleRate; uint32_t channels; int6
 ## Status
 | ID | status | test |
 |---|---|---|
+| IO-001 | done (T-011) | `DeviceRendererTests` (cycles render in blocks ≤ buffer size, contiguous, extra channels silent, 0 RT violations); `CoreAudioDriverTests` "plays a sine" (AUHAL default output, stop/restart; skipped without a device or with `DAW_SKIP_DEVICE_TESTS=1`; −80 dBFS unless `DAW_AUDIBLE_DEVICE_TEST=1`) |
+| IO-002 | done (T-011) | `WorkgroupJoinTests` (fake os_workgroup: join on first cycle and on a new IO thread, leave on stop, EALREADY/errors, 0 RT violations); device run logs the join result (AUHAL IO threads are already members: EALREADY) |
+| IO-003 | done (T-011) | `DriverConfigTests` "resolves" (nominal default rate, fallback, explicit; buffer 32…2048 clamped to the device; channels); device run checks the resolved rate/buffer. `DriverConfig` defined in `io/DriverConfig.h` |
+| IO-004 | done (T-011) | `DriverConfigTests` "inputChoice" (separate input only on a shared clock); `InputFifoTests` (wrap, underrun, backlog drop, overflow; two threads, 0 RT violations); opt-in device runs (`DAW_DEVICE_INPUT_TESTS=1`): duplex and separate-device input via second AUHAL + FIFO |
+| IO-005 | done (T-011) | `DeviceLatencyTests` (device + safety offset + buffer + stream, saturating; published to `Telemetry::setDeviceOutputLatency` and `Transport::setOutputLatency`); device run matches the CoreAudio properties. `DeviceLatency` defined in `io/DeviceLatency.h` |
 | IO-030 | done (T-010) | `AudioFileLoaderTests` "Audio import" (copy by default, no overwrite on collision, reference mode, rejects bad files). `AudioImporter::importFile`; the ImportAsset command is model work |
 | IO-031 | done (T-010) | `AudioFileLoaderTests` "AudioFileLoader" (48k→44.1k→48k residual < −80 dB; decode per format; mono/6ch/empty; errors; ordered on daw.loader). AudioConverter Mastering SRC; MP3 decode untested (macOS can't encode it, no fixture) |
 | IO-032 | done (T-010) | `AudioFileLoaderTests` "AudioAsset" (ref-counted, last release retires; on the audio thread via `AudioAssetRef::retire(engine.retireQueue())`, otherwise via RetireHook; 0 RT violations) |

@@ -137,6 +137,8 @@ let package = Package(
                 // IO-031: ExtAudioFile decoding and AudioConverter resampling (io/).
                 .linkedFramework("AudioToolbox"),
                 .linkedFramework("CoreFoundation"),
+                // IO-001..005: HAL device properties and the AUHAL output unit (io/CoreAudioDriver).
+                .linkedFramework("CoreAudio"),
             ]
         ),
 
