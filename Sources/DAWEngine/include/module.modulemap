@@ -1,0 +1,6 @@
+// 01-build-layout Interfaces: Swift sees only EngineFacade.h (and the POD types it includes).
+module DAWEngine {
+  header "daw/EngineFacade.h"
+  requires cplusplus
+  export *
+}
