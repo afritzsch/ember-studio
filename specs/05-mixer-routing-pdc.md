@@ -26,7 +26,7 @@ Sidechain: any track/bus (pre- or post-fader) → a plugin's sidechain input
 | MIX-006 | Solo logic: if any track is soloed, non-soloed tracks are muted, except tracks feeding a soloed bus and buses that soloed tracks feed (solo-in-place). Computed in the builder, not at RT. Mute/solo are slots read per block to avoid rebuilds. | Unit truth table |
 | MIX-007 | Sends: per-send level slot, pre/post-fader tap, target bus. | Golden |
 | MIX-008 | Sidechain: an edge type `sidechain` into a node's sidechain input, with pre/post-fader tap. | Golden with built-in compressor (06) |
-| MIX-009 | Master: final node, writes to the RenderTarget, with an optional hard-clip safety limiter (off by default; on in tests to detect overs). | — |
+| MIX-009 | Master: final node, writes to the RenderTarget, with an optional hard-clip safety limiter (off by default; on in tests to detect overs). The limiter is switched by the master node's first param slot (on when ≥ 0.5; a master with `numParams` 0 never clips); clipped samples (and NaNs, which become 0) are counted as overs. | — |
 
 ### PDC
 | ID | Requirement | Acceptance |
