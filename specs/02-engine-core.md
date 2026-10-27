@@ -43,7 +43,7 @@ The engine is a set of **node instances** connected by an immutable **RenderGrap
 |---|---|---|
 | ENG-030 | With `DAW_RT_TRAP=1`, a thread-local flag `inRealtimeContext` is set during `render()`. | — |
 | ENG-031 | Interpose `malloc/free/calloc/realloc/posix_memalign` and `pthread_mutex_lock`, and count calls made while the flag is set. | Test: a deliberately allocating node increments the counter |
-| ENG-032 | Violations are counted in telemetry (`rtViolations`) with the first offending backtrace captured off-thread. They never abort by default; `DAW_RT_TRAP_ABORT=1` env aborts. | — |
+| ENG-032 | Violations are counted in telemetry (`rtViolations`) with the first offending backtrace captured off-thread. `rtViolations` is the engine's own count, the sum of its render `RtScope`'s violations per block (DW-024): equal to the process-wide trap count in production, but immune to violations other scopes make. They never abort by default; `DAW_RT_TRAP_ABORT=1` env aborts. | — |
 | ENG-033 | Allowlist: CoreAudio-internal allocations during device start are excluded by enabling the flag only inside the engine's own render scope. | — |
 
 ### Engine entry points
