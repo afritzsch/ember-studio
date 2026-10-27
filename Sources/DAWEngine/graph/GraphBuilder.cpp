@@ -112,9 +112,7 @@ Result<std::unique_ptr<RenderGraph>> GraphBuilder::build(const GraphDescription&
         std::vector<NodeID> ids;
         for (uint32_t n : sorted.cycle) ids.push_back(desc.nodes[n].id);
         std::sort(ids.begin(), ids.end());
-        std::string message = "cycle:";
-        for (size_t i = 0; i < ids.size(); ++i) message += (i ? ", " : " ") + std::to_string(ids[i]);
-        return invalid(std::move(message));
+        return makeCycleError(std::move(ids));
     }
 
     // TIME-003. The model has validated the map already; this is the defensive check.

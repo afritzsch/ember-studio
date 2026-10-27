@@ -482,7 +482,7 @@ CheckResult graphCompilesOnCompileThread() {
         DAW_CHECK(compiler.wait(bad, 5000ms));
         status = compiler.status();
         DAW_CHECK(status.publishedVersion == 1);
-        DAW_CHECK(status.lastError && status.lastError->code == ErrorCode::invalidArgument);
+        DAW_CHECK(status.lastError && status.lastError->code == ErrorCode::cycle);  // DW-050
         DAW_CHECK(renderCounted(engine, out) == 0);
         DAW_CHECK(out.all(0.5f));
 
@@ -556,9 +556,14 @@ CheckResult graphCycleRejected() {
     Engine engine;
     auto log = std::make_shared<TestLog>();
     GraphBuilder builder(testRegistry(log), kRate, kBlock);
+    // MIX-002 (DW-050): ErrorCode::cycle, the IDs as data, and the same IDs in the message.
     auto message = [&](const Desc& d) -> std::string {
         auto r = builder.build(d.d, engine.nodes(), engine.params());
-        if (r.ok() || r.error().code != ErrorCode::invalidArgument) return "<no error>";
+        if (r.ok() || r.error().code != ErrorCode::cycle) return "<no cycle error>";
+        std::string fromNodes = "cycle:";
+        for (size_t i = 0; i < r.error().nodes.size(); ++i)
+            fromNodes += (i ? ", " : " ") + std::to_string(r.error().nodes[i]);
+        if (fromNodes != r.error().message) return "<nodes " + fromNodes + " != message>";
         return r.error().message;
     };
 

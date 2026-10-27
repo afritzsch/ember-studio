@@ -66,7 +66,7 @@ struct GraphDescription { uint64_t version; std::vector<NodeDesc> nodes; std::ve
 | ID | status | test |
 |---|---|---|
 | MIX-001 | done (T-012) | `GraphTests` (builds + renders, prepare before publish; `GraphCompiler` on daw.compile coalesces and keeps the current graph on failure; malformed descriptions rejected before the pool is touched) |
-| MIX-002 | done (T-012) | `GraphTests` (crafted cycle → NodeIDs; random DAGs). No `ErrorCode::cycle` yet: returns `invalidArgument` "cycle: <ids>" (DW-050) |
+| MIX-002 | done (T-012) | `GraphTests` (crafted cycle → NodeIDs; random DAGs). Returns `ErrorCode::cycle` with `Error::nodes` (T-087, DW-050) |
 | MIX-003 | done (T-012) | `GraphTests` (100-track project ≤ max fan-in + depth; random mixer projects). Bound holds for mixer-shaped graphs, not arbitrary dense DAGs |
 | MIX-004 | partial (T-012) | `GraphTests` (summing, sidechain port, random DAG sums exact); golden `bus_send_sum` pending (T-019) |
 | MIX-009 | done (T-012) | `GraphTests` (master last; limiter off by default, clips + counts overs when on) |

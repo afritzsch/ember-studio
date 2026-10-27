@@ -8,8 +8,11 @@
 #include <type_traits>
 #include <utility>
 #include <variant>
+#include <vector>
 
 namespace daw {
+
+using NodeID = uint64_t;  // same alias as core/Node.h, which this header shouldn't pull in
 
 enum class ErrorCode : uint32_t {
     invalidArgument,
@@ -18,15 +21,24 @@ enum class ErrorCode : uint32_t {
     unsupported,
     io,
     internal,
+    cycle,  // MIX-002: the routing has a feedback loop; Error::nodes lists the NodeIDs on it
 };
 
 struct Error {
     ErrorCode code;
     std::string message;
+    std::vector<NodeID> nodes = {};  // ErrorCode::cycle: the NodeIDs on the cycle, ascending
 };
 
 inline Error makeError(ErrorCode code, std::string message = {}) {
     return Error{code, std::move(message)};
+}
+
+// MIX-002 (DW-050). The message repeats the IDs ("cycle: 2, 3, 4") for logs.
+inline Error makeCycleError(std::vector<NodeID> nodes) {
+    std::string message = "cycle:";
+    for (size_t i = 0; i < nodes.size(); ++i) message += (i ? ", " : " ") + std::to_string(nodes[i]);
+    return Error{ErrorCode::cycle, std::move(message), std::move(nodes)};
 }
 
 template <class T>

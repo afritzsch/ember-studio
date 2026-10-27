@@ -21,7 +21,7 @@ constexpr UInt32 kChunkFrames = 8192;
 constexpr double kMaxSampleRate = 768'000;
 
 os_log_t ioLog() {
-    static os_log_t log = os_log_create("dev.macdaw", "io");
+    static os_log_t log = os_log_create("dev.emberstudio", "io");
     return log;
 }
 

@@ -13,7 +13,7 @@
 #include "core/Realtime.h"
 
 #if !defined(__aarch64__)
-#error "macDAW targets arm64 only (BUILD-008)"
+#error "Ember Studio targets arm64 only (BUILD-008)"
 #endif
 
 namespace daw {
