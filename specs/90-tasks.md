@@ -31,12 +31,12 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 | T-006 | E | Telemetry snapshot | ENG-050, 051 | T-004 | done |
 | T-007 | M | TempoMap (C++ and Swift) + shared vector fixtures | TIME-001, 002, 011 | T-001 | done |
 | T-008 | E | Transport, TransportBlock, loop segments, playhead atomic | TIME-003..009 | T-004, T-007 | wip(t-008-transport) |
-| T-009 | E | OfflineDriver + AudioFileWriter | IO-010..013, IO-035 | T-004 | wip(t-009-offline-driver) |
+| T-009 | E | OfflineDriver + AudioFileWriter | IO-010..013, IO-035 | T-004 | done |
 | T-010 | E | AudioFileLoader, resampling, AudioAsset, peak mipmaps | IO-030..034 (IO-033 deferred to T-056) | T-002 | done |
 | T-011 | E | CoreAudioDriver, workgroup join, latency reporting | IO-001..005 | T-004 | ready |
 | T-012 | E | GraphDescription, GraphBuilder (topo sort, buffer liveness, summing, master) | MIX-001..004, MIX-009 | T-004, T-005 | done |
 | T-013 | D | AudioClipPlayer + minimal ChannelStrip (gain/pan) | DSP-001, DSP-010 (partial), MIX-005 (gain/pan) | T-008, T-010, T-012 | todo |
-| T-014 | B | EngineFacade v0, EngineClient, EngineProtocol, FakeEngine | BRIDGE-001..008 (transport, graph, params, assets, offline, telemetry, events) | T-006, T-009, T-012 | todo |
+| T-014 | B | EngineFacade v0, EngineClient, EngineProtocol, FakeEngine | BRIDGE-001..008 (transport, graph, params, assets, offline, telemetry, events) | T-006, T-009, T-012 | ready |
 | T-015 | M | Project types, IDAllocator, Command protocol, UndoStack, gestures, ProjectStore, CommandRegistry | MODEL-001..004, 006, 007 | T-007 | done |
 | T-016 | M | GraphDescriptionBuilder + engine sync (structural vs param) | MODEL-020..022 | T-014, T-015 | todo |
 | T-017 | B | DAWControl protocol + Dispatcher + `dawctl` (headless) | CTL-001..005, CTL-010, 012 | T-016 | todo |
@@ -246,3 +246,6 @@ Recorded by the lead from worker reports.
 | DW-052 | T-012 | PDC (MIX-021) belongs in `RenderGraph::feed()`; migrate T-004's EngineChecks off the old summing path, then remove it. `MasterNode::clippedSamples()` should reach telemetry | E (T-021), E (T-006 follow-up) | todo |
 | DW-053 | T-012 | Facade: `applyGraph` submits to `GraphCompiler`; `EngineFacade.h` includes `daw/GraphDescription.h` | B (T-014) | todo |
 | DW-054 | T-012, lead | Under ASan the RT trap sees no allocations (DW-012), so the RtTrap suite and the Telemetry rtViolations tests (DW-011/024) fail with `--sanitize=address`. The TEST-007 sanitizer job must exclude or skip them | E (T-019 / T-084) | todo |
+| DW-055 | T-009 | Fill the marked seam in `OfflineDriver::render`: `transport.locate(from)` + `play()` before the loop, `stop()` after. Rendering twice on one engine is bit-identical only for stateless nodes, so the pre-render locate must reset timeline nodes even when stopped (TIME-008 covers locate while playing), or IO-011 needs an engine-level reset | E (T-009 follow-up after T-008) | todo |
+| DW-056 | T-009 | `ExportSpec.blockSize` can't be checked against the published graph's `maxBlock` (Engine doesn't expose it); an oversize block renders silence silently. Add a non-RT `Engine::currentMaxBlock()` or check in the facade. `ExportSpec`/`ProgressFn` were undefined in the specs; T-009 defined them in `io/ExportSpec.h` (carries the TempoMap; now that `RenderGraph::tempoMap()` exists, reconsider) | E / B (T-014) | todo |
+| DW-057 | T-009 | Facade: map `ExportSpecPOD` → `daw::ExportSpec`, run offline render on a job thread with the device driver stopped, turn `OfflineProgress` into job status. Cancellation would need `ErrorCode::cancelled` | B (T-014) | todo |
