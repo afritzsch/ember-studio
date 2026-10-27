@@ -26,15 +26,15 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 | T-001 | E | Repo bootstrap, Package.swift, Xcode app stub, VST3 submodule, scripts | BUILD-001..008 | — | done |
 | T-002 | E | Core utilities: `Result`, `DAW_RT`, `SpscQueue`, `AudioBufferPool` | ENG-060, ENG-061, CONV-RT-06 | T-001 | done |
 | T-003 | E | RT safety trap (Debug) | ENG-030..033 | T-001 | done |
-| T-004 | E | Node API, Engine::render, snapshot publish, epoch reclaim, NodePool, FTZ | ENG-001..004, 010..015, 040..042 | T-002 | wip(t-004-node-engine) |
+| T-004 | E | Node API, Engine::render, snapshot publish, epoch reclaim, NodePool, FTZ | ENG-001..004, 010..015, 040..042 | T-002 | done |
 | T-005 | E | ParamSlotTable + ParamSmoother | ENG-020..023 | T-002 | done |
-| T-006 | E | Telemetry snapshot | ENG-050, 051 | T-004 | todo |
+| T-006 | E | Telemetry snapshot | ENG-050, 051 | T-004 | ready |
 | T-007 | M | TempoMap (C++ and Swift) + shared vector fixtures | TIME-001, 002, 011 | T-001 | done |
-| T-008 | E | Transport, TransportBlock, loop segments, playhead atomic | TIME-003..009 | T-004, T-007 | todo |
-| T-009 | E | OfflineDriver + AudioFileWriter | IO-010..013, IO-035 | T-004 | todo |
+| T-008 | E | Transport, TransportBlock, loop segments, playhead atomic | TIME-003..009 | T-004, T-007 | ready |
+| T-009 | E | OfflineDriver + AudioFileWriter | IO-010..013, IO-035 | T-004 | ready |
 | T-010 | E | AudioFileLoader, resampling, AudioAsset, peak mipmaps | IO-030..034 (IO-033 deferred to T-056) | T-002 | wip(t-010-audio-loader) |
-| T-011 | E | CoreAudioDriver, workgroup join, latency reporting | IO-001..005 | T-004 | todo |
-| T-012 | E | GraphDescription, GraphBuilder (topo sort, buffer liveness, summing, master) | MIX-001..004, MIX-009 | T-004, T-005 | todo |
+| T-011 | E | CoreAudioDriver, workgroup join, latency reporting | IO-001..005 | T-004 | ready |
+| T-012 | E | GraphDescription, GraphBuilder (topo sort, buffer liveness, summing, master) | MIX-001..004, MIX-009 | T-004, T-005 | ready |
 | T-013 | D | AudioClipPlayer + minimal ChannelStrip (gain/pan) | DSP-001, DSP-010 (partial), MIX-005 (gain/pan) | T-008, T-010, T-012 | todo |
 | T-014 | B | EngineFacade v0, EngineClient, EngineProtocol, FakeEngine | BRIDGE-001..008 (transport, graph, params, assets, offline, telemetry, events) | T-006, T-009, T-012 | todo |
 | T-015 | M | Project types, IDAllocator, Command protocol, UndoStack, gestures, ProjectStore, CommandRegistry | MODEL-001..004, 006, 007 | T-007 | done |
@@ -103,10 +103,10 @@ DSP effects (T-070..073) depend only on the Node API and can be **pulled forward
 
 | Task | Lane | Title | Requirements | Depends on | Status |
 |---|---|---|---|---|---|
-| T-070 | D | EQ | DSP-030, 040, 041 | T-004, T-005 | todo |
+| T-070 | D | EQ | DSP-030, 040, 041 | T-004, T-005 | ready |
 | T-071 | D | Compressor (+ sidechain) | DSP-031, 040, 041 | T-005, T-023 | todo |
 | T-072 | D | Delay (tempo sync) | DSP-032, 040, 041 | T-008 | todo |
-| T-073 | D | Reverb (FDN, deterministic) | DSP-033, 040, 041 | T-004, T-005 | todo |
+| T-073 | D | Reverb (FDN, deterministic) | DSP-033, 040, 041 | T-004, T-005 | ready |
 | T-074 | E+M | Automation lanes model + AutomationPlayer + plugin param path | AUTO-001..005, 008..010 | T-030, T-061/T-062 (for AUTO-009) | todo |
 | T-075 | U+M | Automation recording (touch/latch/write) + lane UI | AUTO-006, 007, UI-015 | T-074, T-033 | todo |
 | T-076 | U | Mixer view + meters + routing pickers | UI-030, 031, 033 | T-022, T-032 | todo |
@@ -202,7 +202,7 @@ Recorded by the lead from worker reports.
 | DW-008 | T-002 | CONV-RT-06 wording: `DAW_RT` must expand to `noexcept [[clang::nonblocking]]` (clang warns on non-noexcept nonblocking, -Werror fails) — spec text needs updating | spec (user/lead) | todo |
 | DW-009 | T-002 | Run SpscQueue/AudioBufferPool RT paths inside the RT trap scope and assert rtViolations == 0. Cheap since T-085: run `rtRoundTrip` (`Tests/DAWEngineTestSupport/CoreUtilsChecks.cpp`) inside an `RtScope` and return `scope.violations()` | E (after T-003) | todo |
 | DW-010 | T-002 | Generate compile_commands.json so editor diagnostics use the package's C++20 flags; also cover `DAWEngineTestSupport` (needs `-I Sources/DAWEngine`) | lead (low) | todo |
-| DW-011 | T-003 | Wire the trap: `RtTrap::install()` at Engine construction + `daw::RtScope` in `Engine::render` (T-004); `Telemetry::rtViolations` from `RtTrap::violationCount()` and expose `RtTrap::firstViolation()` via telemetry/dawmcp (T-006) | E (T-004, T-006) | todo |
+| DW-011 | T-003 | Wire the trap: `RtTrap::install()` at Engine construction + `daw::RtScope` in `Engine::render` (T-004); `Telemetry::rtViolations` from `RtTrap::violationCount()` and expose `RtTrap::firstViolation()` via telemetry/dawmcp (T-006) | E (T-004, T-006) | partial (T-004: install + RtScope in render; T-006: telemetry) |
 | DW-012 | T-003 | ENG-031 says "interpose"; dyld `__interpose` doesn't apply to the test executable or dlopen'd bundles, so the trap uses `malloc_logger` + GOT rebinding. Gaps: locks inside system libraries and `dispatch_*` aren't counted; allocations invisible under ASan (matters for TEST-007). Spec wording needs a clarification note | spec (user/lead) | todo |
 | DW-013 | T-003 | Optional: `test.sh` engine-objects stage could also assert the trap is absent from Release. `_daw_rt_trap_install` no longer exists (T-085), so retarget to `RtTrap::install`'s mangled name or close | E (T-019) | todo |
 | DW-014 | T-003 | Unify C++ test binding styles (T-002 `@_silgen_name` via SelfTest.h vs T-003 `dlsym`); fold into DW-006 test-support target | E (with DW-006) | done (T-085) |
@@ -210,13 +210,13 @@ Recorded by the lead from worker reports.
 | DW-016 | T-060 | dawctl/dawmcp commands: scan, list plugins, list/reset blocked | B (after T-017) | todo |
 | DW-017 | T-060 | Convert Swift `PluginDescriptor` → `PluginDescriptorPOD` for `instantiatePlugin` | P/B (T-014/T-061) | todo |
 | DW-018 | T-060 | Optional: scan candidates in parallel (each hanging plugin costs up to 10 s serially) | P (later) | todo |
-| DW-019 | T-007 | RT-trap violation counters are process-wide; RtTrapTests violate on purpose while other suites run in parallel, so "0 violations" checks can be polluted (T-007 measures deltas + retries 3×). Needs per-scope counters or serialized RT tests | E (T-003 follow-up / T-006) | done (T-085) |
+| DW-019 | T-007 | RT-trap violation counters are process-wide; RtTrapTests violate on purpose while other suites run in parallel, so "0 violations" checks can be polluted (T-007 measured deltas + retried 3×). Needs per-scope counters or serialized RT tests | E (T-003 follow-up / T-006) | done (T-085) |
 | DW-020 | T-007 | `TempoMap.sampleRate` duplicates `Project.sessionSampleRate` — choose one source of truth; `SetSessionSampleRate` must rebuild the map | M (T-015) | done (T-015) |
 | DW-021 | T-007 | Map Swift `TempoMapError` into `DAWError` once it exists | M (T-015) | done (T-015) |
 | DW-022 | T-007 | Swift interop can't call `daw::Result::value()` (ref-qualified overloads); T-007 used an inline helper — facade will hit the same | B (T-014) | todo |
 | DW-023 | T-085 | `test.sh` BUILD-002 check treats every target reaching DAWEngine as Swift; `DAWEngineTestSupport` carries a no-op `swiftSettings: cxxInterop` to pass. The check should skip C-family targets | E (T-084 / T-019) | todo |
 | DW-024 | T-085 | Telemetry `rtViolations` is process-wide, so in-process engine tests asserting on it (e.g. TEST-004 AllocatingNode) see RtTrapTests' deliberate violations. Nest such tests in `RtTrapTests`, or have the Engine count from its render `RtScope::violations()` — possibly an ENG-032 clarification | E (T-004 / T-006) + spec | todo |
-| DW-025 | lead | `scripts/bootstrap.sh` can exit 141 under `pipefail`: `xcodebuild -version \| awk '… exit'` (and `\| head -n 1`) close the pipe early, so the producer gets SIGPIPE. It made T-015's worktree setup fail once | E (T-084) / lead | todo |
+| DW-025 | lead | `scripts/bootstrap.sh` can exit 141 under `pipefail`: `xcodebuild -version \| awk '… exit'` (and `\| head -n 1`) close the pipe early, so the producer gets SIGPIPE. It made T-015's worktree setup fail once, and the `bootstrap` stage of `test.sh` fail once in T-004's review | E (T-084) / lead | todo |
 | DW-026 | T-005 | Golden `gain_ramp_smoothing` for ENG-022 | E (T-019) | todo |
 | DW-027 | T-005 | ENG-023 "fader sweep → 0 publishes" test needs Engine + GraphBuilder | E/B (T-012 / T-014) | todo |
 | DW-028 | T-005 | RtTrap data race: `LockHook::real` (RtTrap.cpp ~146-154) is a plain static written by `install()` while hooked locks read it on other threads; TSan flags it and one TSan run hung (malloc_logger/GOT rebinding vs TSan interceptors, unconfirmed). Make it atomic or set once (`std::call_once`). Blocks TEST-007's TSan job | E (T-003 follow-up) | todo |
@@ -225,3 +225,9 @@ Recorded by the lead from worker reports.
 | DW-031 | T-015 | MODEL-032: run `Project.validate()` after every command in Debug (hook in `UndoStack.perform`); decoding should also move the ID allocator past the largest ID in the file | M (T-022 / T-031) | todo |
 | DW-032 | T-015 | Change detection diffs the whole project after every command and gesture step; may need tuning for large projects / fast drags | M (T-016) | todo |
 | DW-033 | T-015 | `Project.init` uses a random UUID; headless `project.new` should pass a fixed id so runs are deterministic | B (T-017, CTL-004) | todo |
+| DW-034 | T-004 | ENG-011/012 wording: as built, `renderEpoch` is odd while a block runs and even when idle (so graphs replaced while idle free at once), with seq_cst on both sides rather than "acquire". Record in the spec | spec (lead) | todo |
+| DW-035 | T-004 | 00-conventions §3 gives no QoS for `daw.reclaim`; T-004 used `QOS_CLASS_UTILITY`. Record in the spec | spec (lead) | todo |
+| DW-036 | T-004 | GraphBuilder: a `NodeDesc.configVersion` bump must `NodePool::put` a new prepared instance (a node a live graph may render can't be re-prepared in place). RenderGraph doesn't route MIDI yet (`midiIn` empty, `midiOut` capacity 0) | E (T-012), D (T-040) | todo |
+| DW-037 | T-004 | Telemetry: fill the seam in `Engine::render`; count oversize blocks (rendered as silence) and RetireQueue-full; DW-024 can use the render `RtScope` count | E (T-006) | todo |
+| DW-038 | T-004 | `time/TransportBlock.h` was created by T-004 verbatim from 03 Interfaces; T-008 owns it and fills the "advance transport" seam | E (T-008) | todo |
+| DW-039 | T-004 | LSan isn't supported on macOS; TEST-007 leak checks need `leaks --atExit` or similar | E (T-084 / T-019) | todo |

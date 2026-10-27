@@ -9,6 +9,7 @@ module DAWEngineTestSupport {
   header "../../../Sources/DAWEngine/time/TempoMap.h"
   header "Checks.h"
   header "CoreUtilsChecks.h"
+  header "EngineChecks.h"
   header "ParamChecks.h"
   header "RtTrapTestSupport.h"
   header "TempoMapTestSupport.h"
