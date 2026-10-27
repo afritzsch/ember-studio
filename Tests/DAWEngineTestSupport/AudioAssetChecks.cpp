@@ -24,7 +24,10 @@ struct RetireQueueStub {
     static void push(void* context, const SharedAudioAsset* asset) DAW_RT {
         auto* self = static_cast<RetireQueueStub*>(context);
         self->retired.fetch_add(1, std::memory_order_relaxed);
-        DAW_RT_ASSERT(self->queue.push(asset));
+        // Not inside DAW_RT_ASSERT, which compiles out in Release (and the push with it).
+        const bool pushed = self->queue.push(asset);
+        DAW_RT_ASSERT(pushed);
+        (void)pushed;
     }
     RetireHook hook() { return RetireHook{&push, this}; }
 
