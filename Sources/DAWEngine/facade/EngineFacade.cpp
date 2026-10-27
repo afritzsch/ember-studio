@@ -22,6 +22,7 @@
 #include <mutex>
 #include <optional>
 #include <set>
+#include <span>
 #include <thread>
 #include <utility>
 
@@ -37,16 +38,10 @@
 #include "io/DriverConfig.h"
 #include "io/ExportSpec.h"
 #include "io/OfflineDriver.h"
+#include "nodes/BuiltinNodes.h"
+#include "nodes/ChannelStrip.h"
 #include "time/TempoMap.h"
 
-// T-013's node module registers the clip player and channel strip. Until it is merged the facade
-// builds graphs of the engine's own kinds only.
-#if __has_include("nodes/BuiltinNodes.h")
-#include "nodes/BuiltinNodes.h"
-#define DAW_FACADE_HAS_BUILTIN_NODES 1
-#else
-#define DAW_FACADE_HAS_BUILTIN_NODES 0
-#endif
 
 namespace daw {
 
@@ -106,23 +101,58 @@ OfflineResultPOD toResult(const OfflineRenderStats& stats, double sampleRate) {
     return r;
 }
 
-// The registry every facade builds graphs with: the engine's kinds, the built-in nodes (T-013)
-// reading this facade's assets, then whatever the creator adds.
-Result<NodeRegistry> makeRegistry(AssetTable& assets, Telemetry& telemetry, const FacadeOptions& options) {
+// DW-071: which MeterID each metering node writes. GraphBuilder hands the ID to the node's
+// factory (NodeCreateInfo::meter, stable per NodeID across builds); the facade records it there,
+// on daw.compile, and drops nodes that leave the published graph, whose IDs get reused.
+class MeterMap {
+public:
+    void record(NodeID node, MeterID meter) {
+        std::lock_guard lock(mutex_);
+        meters_[node] = meter;
+    }
+    std::optional<MeterID> find(NodeID node) const {
+        std::lock_guard lock(mutex_);
+        auto it = meters_.find(node);
+        return it == meters_.end() ? std::nullopt : std::optional<MeterID>(it->second);
+    }
+    // Keeps only `nodes` (sorted).
+    void retain(const std::vector<NodeID>& nodes) {
+        std::lock_guard lock(mutex_);
+        std::erase_if(meters_, [&](const auto& entry) {
+            return !std::binary_search(nodes.begin(), nodes.end(), entry.first);
+        });
+    }
+
+private:
+    mutable std::mutex mutex_;
+    std::map<NodeID, MeterID> meters_;
+};
+
+// The registry every facade builds graphs with: the engine's kinds, the built-in nodes reading
+// this facade's assets and metering into its telemetry, then whatever the creator adds. Metering
+// kinds are wrapped so their MeterIDs land in `meters`.
+Result<NodeRegistry> makeRegistry(AssetTable& assets, Telemetry& telemetry, MeterMap& meters,
+                                  const FacadeOptions& options) {
     NodeRegistry registry = NodeRegistry::withBuiltins();
-#if DAW_FACADE_HAS_BUILTIN_NODES
     // DW-041: clip players resolve assetIDs here when daw.compile creates them. DW-048: channel
     // strips write their meters into the engine's telemetry.
-    auto registered = registerBuiltinNodes(
+    auto builtins = registerBuiltinNodes(
         registry, [&assets](uint64_t assetID) { return assets.find(assetID); }, &telemetry);
-    if (!registered) return registered.error();
-#else
-    (void)assets;
-    (void)telemetry;
-#endif
+    if (!builtins) return builtins.error();
     if (options.registerNodes) {
         auto registered = options.registerNodes(registry);
         if (!registered) return registered.error();
+    }
+    for (uint16_t k = 0; k <= static_cast<uint16_t>(NodeKind::bus); ++k) {
+        const NodeKind kind = static_cast<NodeKind>(k);
+        const NodeKindInfo* info = registry.find(kind);
+        if (!info || !info->meters) continue;
+        NodeKindInfo wrapped = *info;
+        wrapped.create = [create = info->create, &meters](const NodeCreateInfo& create_info) {
+            if (create_info.meter != kNoMeter) meters.record(create_info.desc.id, create_info.meter);
+            return create(create_info);
+        };
+        if (auto set = registry.set(kind, std::move(wrapped)); !set) return set.error();
     }
     return registry;
 }
@@ -167,7 +197,14 @@ struct EngineFacade::Impl {
     // the versions applyGraph stamps (1, 2, …).
     uint64_t submitted = 0;
     uint64_t lastSeenCompleted = 0;  // graphRejected events up to here
-    std::map<uint64_t, TempoMapDesc> tempoByVersion;  // DW-064: published and later versions
+    // The published version and every later one: their tempo maps (DW-064) and node IDs, sorted
+    // (DW-071, to prune the meter map).
+    struct VersionInfo {
+        TempoMapDesc tempo;
+        std::vector<NodeID> nodes;
+    };
+    std::map<uint64_t, VersionInfo> versions;
+    uint64_t prunedForVersion = 0;
 
     // DW-029: freed ranges whose slots an older graph may still read.
     struct PendingFree {
@@ -197,6 +234,7 @@ struct EngineFacade::Impl {
 
     Engine engine;
     AssetTable assets;
+    MeterMap meters;
     std::unique_ptr<GraphCompiler> compiler;
     AudioFileLoader loader;
     std::unique_ptr<DriverAdapter> driver;
@@ -224,7 +262,7 @@ EngineFacade::Impl::Impl(EngineMode m, const DriverConfigPOD& cfg, FacadeOptions
     }
     if (!(sampleRate >= kMinSampleRate && sampleRate <= kMaxSampleRate)) sampleRate = 48000.0;
 
-    auto registry = makeRegistry(assets, engine.telemetry(), options);
+    auto registry = makeRegistry(assets, engine.telemetry(), meters, options);
     if (!registry) {
         // A registration hook failed: build graphs of the engine's kinds only, and say why.
         EngineEventPOD event;
@@ -304,8 +342,20 @@ void EngineFacade::Impl::pump() {
         }
     }
 
-    // DW-064: keep the tempo map of the published version and of everything newer.
-    tempoByVersion.erase(tempoByVersion.begin(), tempoByVersion.lower_bound(status.publishedVersion));
+    // DW-064: keep the published version and everything newer.
+    versions.erase(versions.begin(), versions.lower_bound(status.publishedVersion));
+    // DW-071: meters of nodes the published graph no longer has. (A newer graph still compiling
+    // may re-record a node it brings back; its factory runs again only if it's new.)
+    if (status.publishedVersion > prunedForVersion) {
+        prunedForVersion = status.publishedVersion;
+        if (auto it = versions.find(status.publishedVersion); it != versions.end()) {
+            std::vector<NodeID> keep = it->second.nodes;
+            for (auto later = std::next(it); later != versions.end(); ++later)
+                keep.insert(keep.end(), later->second.nodes.begin(), later->second.nodes.end());
+            std::sort(keep.begin(), keep.end());
+            meters.retain(keep);
+        }
+    }
 
     // IO-023: the driver counts xruns into telemetry; surface them as events.
     const uint64_t xruns = engine.telemetry().snapshot().xruns;
@@ -429,12 +479,12 @@ void EngineFacade::Impl::runExport(JobID jobID, Tick from, Tick to, const Export
         std::lock_guard lock(mutex);
         pump();
         const GraphCompiler::Status status = compiler->status();
-        auto tempo = tempoByVersion.find(status.publishedVersion);
+        auto tempo = versions.find(status.publishedVersion);
         if (!built) {
             error = facadeError(FacadeErrorCode::internal, "offline render: graph build timed out");
-        } else if (status.publishedVersion == 0 || tempo == tempoByVersion.end()) {
+        } else if (status.publishedVersion == 0 || tempo == versions.end()) {
             error = facadeError(FacadeErrorCode::invalidArgument, "offline render: no graph applied");
-        } else if (auto map = makeTempoMap(tempo->second, sampleRate); !map) {
+        } else if (auto map = makeTempoMap(tempo->second.tempo, sampleRate); !map) {
             error = toFacadeError(map.error());
         } else {
             // DW-064: the map the rendering graph was built from (GraphBuilder builds the same
@@ -526,7 +576,10 @@ uint64_t EngineFacade::applyGraph(const GraphDescription& desc) {
     std::lock_guard lock(impl_->mutex);
     GraphDescription copy = desc;
     copy.version = ++impl_->submitted;
-    impl_->tempoByVersion[copy.version] = copy.tempo;
+    Impl::VersionInfo& info = impl_->versions[copy.version];
+    info.tempo = copy.tempo;
+    for (const NodeDesc& node : copy.nodes) info.nodes.push_back(node.id);
+    std::sort(info.nodes.begin(), info.nodes.end());
     const uint64_t ticket = impl_->compiler->submit(std::move(copy));
     (void)ticket;  // == version: applyGraph is the only submitter, under this lock
     impl_->pump();
@@ -793,8 +846,13 @@ std::vector<NodeLatencyPOD> EngineFacade::nodeLatencies() const {
     return out;
 }
 
-// Meters are written per MeterID, which GraphBuilder doesn't assign yet (MIX-005, T-020).
-MeterPOD EngineFacade::meter(NodeID) const { return MeterPOD{}; }
+// MIX-005, DW-071: the node's meter, if it has one (channel strips).
+MeterPOD EngineFacade::meter(NodeID node) const {
+    const std::optional<MeterID> id = impl_->meters.find(node);
+    if (!id) return MeterPOD{};
+    const MeterReading reading = impl_->engine.telemetry().meter(*id);
+    return MeterPOD{reading.peak, reading.rms, true};
+}
 
 size_t EngineFacade::pollEvents(EngineEventPOD* out, size_t max) {
     std::lock_guard lock(impl_->mutex);
@@ -807,8 +865,22 @@ size_t EngineFacade::pollEvents(EngineEventPOD* out, size_t max) {
     return n;
 }
 
-// Param descriptions per kind arrive with the nodes that define them (06, T-013 onwards).
-std::string EngineFacade::paramInfoJSON(NodeKind) const { return "[]"; }
+// CTL engine.paramInfo. Only the kinds whose nodes publish ParamInfo so far; "[]" for the rest.
+std::string EngineFacade::paramInfoJSON(NodeKind kind) const {
+    std::span<const ParamInfo> params;
+    if (kind == NodeKind::channelStrip) params = ChannelStrip::kParamInfo;
+    std::string json = "[";
+    for (const ParamInfo& p : params) {
+        if (json.size() > 1) json += ",";
+        const char* curve = p.curve == ParamInfo::Curve::db ? "db" : p.curve == ParamInfo::Curve::log ? "log" : "linear";
+        // The strings are compile-time identifiers and units: nothing to escape.
+        json += std::string("{\"index\":") + std::to_string(p.index) + ",\"id\":\"" + p.id + "\",\"name\":\"" +
+                p.name + "\",\"min\":" + std::to_string(p.min) + ",\"max\":" + std::to_string(p.max) +
+                ",\"default\":" + std::to_string(p.def) + ",\"curve\":\"" + curve + "\",\"unit\":\"" + p.unit +
+                "\",\"automatable\":" + (p.automatable ? "true" : "false") + "}";
+    }
+    return json + "]";
+}
 
 } // namespace daw
 

@@ -111,6 +111,7 @@ struct EngineClientTests {
     func cycleRejected() async throws {
         let engine = try EngineClient(.offline())
         let good = engine.applyGraph(masterGraph())
+        engine.waitForGraph(good, timeout: .seconds(5))  // else the cycle supersedes it unbuilt (coalescing)
         let cycle = EngineGraph(
             nodes: [.init(id: 1, kind: .master), .init(id: 2, kind: .bus), .init(id: 3, kind: .bus)],
             edges: [.init(id: 10, from: 2, to: 3), .init(id: 11, from: 3, to: 2), .init(id: 12, from: 3, to: 1)],

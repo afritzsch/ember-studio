@@ -20,6 +20,9 @@ struct FacadeTests {
     @Test("DW-050: ErrorCode::cycle crosses as FacadeErrorCode::cycle with the NodeIDs")
     func errorMapping() { expectPasses(daw.testing.facadeErrorMapping()) }
 
+    @Test("DW-041, DW-048, DW-071: a loaded asset plays through clip player → strip → export; strip meters via meter(NodeID)")
+    func builtinNodes() { expectPasses(daw.testing.facadePlaysAssetThroughBuiltinNodes()) }
+
     @Test("BRIDGE-008: realtime mode drives a DriverAdapter; setDevice restarts it; no driver → no devices")
     func driverSeam() { expectPasses(daw.testing.facadeRealtimeDriverSeam()) }
 }

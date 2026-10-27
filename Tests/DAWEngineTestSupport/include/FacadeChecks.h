@@ -30,4 +30,10 @@ CheckResult facadeErrorMapping();
 // setDevice restarts it and rejects a rate change; without a driver there are no devices.
 CheckResult facadeRealtimeDriverSeam();
 
+// DW-041, DW-048, DW-071, BRIDGE-005: the facade's registry has the built-in nodes. An asset
+// loaded through loadAsset plays through audioClipPlayer → channelStrip → master into an
+// export; the strip's meter reads back through meter(NodeID) and goes away with the node; the
+// strip's params are described by paramInfoJSON.
+CheckResult facadePlaysAssetThroughBuiltinNodes();
+
 } // namespace daw::testing

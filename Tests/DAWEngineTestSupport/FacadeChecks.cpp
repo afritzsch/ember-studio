@@ -510,4 +510,80 @@ CheckResult facadeRealtimeDriverSeam() {
     return checks;
 }
 
+CheckResult facadePlaysAssetThroughBuiltinNodes() {
+    CheckResult checks;
+    TempDir dir;
+    Harness h(EngineMode::offline);
+    EngineFacade& facade = *h.facade;
+
+    // A mono second of 0.5 DC; the player duplicates mono to both channels (DSP-001).
+    const auto file = dir.path() / "dc.wav";
+    DAW_CHECK(writeTestFile(file, "wav-f32", kRate, Channels{std::vector<float>(48000, 0.5f)}).ok());
+    const JobID load = facade.loadAsset(7, file.string());
+    JobStatus loaded;
+    DAW_CHECK(eventually([&] {
+        loaded = facade.pollJob(load);
+        return loaded.state == JobState::succeeded || loaded.state == JobState::failed;
+    }));
+    DAW_CHECK(loaded.state == JobState::succeeded && loaded.asset.frames == 48000 && loaded.asset.channels == 1);
+
+    const ParamID strip = facade.allocateParams(2);
+    facade.setParam(strip + 0, 1.0f);  // gain (ChannelStrip::kGain)
+    facade.setParam(strip + 1, 0.0f);  // pan, centre
+
+    // master(1) ← strip(3) ← player(2), one clip of the asset over the first second (1920 ticks).
+    GraphDescriptionBuilder b;
+    b.addNode(1, NodeKind::master, 1, 0, 0, "");
+    b.addNode(2, NodeKind::audioClipPlayer, 1, 0, 0, "");
+    b.addNode(3, NodeKind::channelStrip, 1, strip, 2, "");
+    b.addEdge(10, 2, 3, EdgeKind::audio, 0);
+    b.addEdge(11, 3, 1, EdgeKind::audio, 0);
+    b.addClip(2, 20, 0, 2 * kPPQ, 7, 0, 1.0f, 0, 0);
+    b.setTempo(0, 120.0);
+    b.setTimeSignature(0, 4, 4);
+    b.setMaster(1);
+    DAW_CHECK(published(facade, facade.applyGraph(b.description())));
+    DAW_CHECK(!facade.meter(3).valid || facade.meter(3).peak == 0.0f);  // nothing rendered yet
+
+    ExportSpecPOD spec;
+    spec.path = (dir.path() / "out.wav").string();
+    spec.tailEnabled = false;
+    const JobID job = facade.renderOffline(0, 4 * kPPQ, spec);  // 2 s: the clip, then silence
+    JobStatus status;
+    DAW_CHECK(eventually([&] {
+        status = facade.pollJob(job);
+        return status.state == JobState::succeeded || status.state == JobState::failed;
+    }, 20000ms));
+    DAW_CHECK(status.state == JobState::succeeded && status.render.rtViolations == 0);
+
+    auto back = readBack(spec.path, kRate);
+    DAW_CHECK(back.ok());
+    if (back && back->size() == 2 && (*back)[0].size() == 96000) {
+        const auto& left = (*back)[0];
+        const auto& right = (*back)[1];
+        // Mid-clip (past the strip's first-block ramp): both channels equal and audible; after the
+        // clip: silence.
+        DAW_CHECK(left[24000] == right[24000]);
+        DAW_CHECK(left[24000] > 0.3f && left[24000] <= 0.5f);
+        DAW_CHECK(left[72000] == 0.0f && right[72000] == 0.0f);
+    } else {
+        DAW_CHECK(false);
+    }
+
+    // DW-071: the strip has a meter, written during the export; the player doesn't.
+    DAW_CHECK(facade.meter(3).valid);
+    DAW_CHECK(!facade.meter(2).valid);
+    DAW_CHECK(!facade.meter(99).valid);
+    // Once the strip leaves the published graph, its MeterID may be reused: no reading.
+    DAW_CHECK(published(facade, facade.applyGraph(masterOnly())));
+    (void)facade.telemetry();  // pumps
+    DAW_CHECK(!facade.meter(3).valid);
+
+    const std::string info = facade.paramInfoJSON(NodeKind::channelStrip);
+    DAW_CHECK(info.find("\"id\":\"gain\"") != std::string::npos);
+    DAW_CHECK(info.find("\"id\":\"pan\"") != std::string::npos);
+    DAW_CHECK(facade.paramInfoJSON(NodeKind::reverb) == "[]");
+    return checks;
+}
+
 } // namespace daw::testing
