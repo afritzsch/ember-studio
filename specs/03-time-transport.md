@@ -16,6 +16,12 @@
 - Validation rejects the map (no clamping): sample rate in 1 kHz…768 kHz, bpm in 1…1000, numerator 1…64, denominator a power of two from 1 to 64, both event lists non-empty, starting at tick 0, with strictly increasing ticks. Checks run in a fixed order (sample rate, then tempo events, then time signatures, each list event by event) and the first failure is reported.
 - C++ and Swift use the same double arithmetic in the same order, and the C++ file disables FMA contraction, so both give bit-identical results (TIME-011).
 
+### Transport semantics (clarified in T-087, DW-062)
+- A segment's `[startTick, endTick)` is exactly the ticks whose events sound in it: the ticks `t` with `startSample ≤ tickToSample(t) < startSample + numFrames`.
+- A block while stopped, or with 0 frames, has `numSegments == 0`; `seg[0]` still carries the current position (with `numFrames == 0`).
+- The loop wraps only when playback crosses the loop end from before it. A playhead already at or past the loop end (e.g. after a locate there) plays on without wrapping.
+- Loop wraps never reset nodes; timeline nodes handle them per segment (TIME-006). Only `locate()` while playing resets them (TIME-008).
+
 ## Requirements
 
 | ID | Requirement | Acceptance |
@@ -27,7 +33,7 @@
 | TIME-005 | Per block the transport produces a `TransportBlock`: `startSample`, `startTick`, `numFrames`, `tempoAtStart`, and up to **2 segments** when a loop wrap occurs inside the block (each with its own sample/tick range and a `wrapped` flag). | Golden: loop-wrap mid-block is click-free and correct |
 | TIME-006 | Nodes that read the timeline (clip players, MIDI sequencers, automation) must honor segments: they process segment 1, then reset per-segment position and process segment 2. | Clip player golden |
 | TIME-007 | Tempo change inside a block: the block is processed at the tempo at block start. Event positions are still computed exactly through the TempoMap. | Documented limitation + test |
-| TIME-008 | `locate()` while playing calls `reset()` on timeline nodes (clears voices and tails of clip players only; effects keep their tails). | Golden |
+| TIME-008 | `locate()` while playing calls `reset()` on timeline nodes (clears voices and tails of clip players only; effects keep their tails). Loop wraps don't reset them (TIME-006 handles wraps). | Golden |
 | TIME-009 | The transport reports the **playhead position** (sample + tick) through an atomic for UI readout, compensated for output latency (`displayPos = samplePos − outputLatency`). | — |
 | TIME-010 | Metronome: built-in click node (accented downbeat), enabled per transport, sample-accurate from the tempo map. | Golden |
 | TIME-011 | The Swift mirror `DAWModel.TempoMap` has identical semantics for UI and model use; a shared test vector file `Tests/Fixtures/tempo_vectors.json` is checked by both the C++ and Swift tests. | Both suites pass the same vectors |
