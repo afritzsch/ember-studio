@@ -27,7 +27,7 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 | T-002 | E | Core utilities: `Result`, `DAW_RT`, `SpscQueue`, `AudioBufferPool` | ENG-060, ENG-061, CONV-RT-06 | T-001 | done |
 | T-003 | E | RT safety trap (Debug) | ENG-030..033 | T-001 | done |
 | T-004 | E | Node API, Engine::render, snapshot publish, epoch reclaim, NodePool, FTZ | ENG-001..004, 010..015, 040..042 | T-002 | wip(t-004-node-engine) |
-| T-005 | E | ParamSlotTable + ParamSmoother | ENG-020..023 | T-002 | wip(t-005-param-slots) |
+| T-005 | E | ParamSlotTable + ParamSmoother | ENG-020..023 | T-002 | done |
 | T-006 | E | Telemetry snapshot | ENG-050, 051 | T-004 | todo |
 | T-007 | M | TempoMap (C++ and Swift) + shared vector fixtures | TIME-001, 002, 011 | T-001 | done |
 | T-008 | E | Transport, TransportBlock, loop segments, playhead atomic | TIME-003..009 | T-004, T-007 | todo |
@@ -215,3 +215,9 @@ Recorded by the lead from worker reports.
 | DW-022 | T-007 | Swift interop can't call `daw::Result::value()` (ref-qualified overloads); T-007 used an inline helper — facade will hit the same | B (T-014) | todo |
 | DW-023 | T-085 | `test.sh` BUILD-002 check treats every target reaching DAWEngine as Swift; `DAWEngineTestSupport` carries a no-op `swiftSettings: cxxInterop` to pass. The check should skip C-family targets | E (T-084 / T-019) | todo |
 | DW-024 | T-085 | Telemetry `rtViolations` is process-wide, so in-process engine tests asserting on it (e.g. TEST-004 AllocatingNode) see RtTrapTests' deliberate violations. Nest such tests in `RtTrapTests`, or have the Engine count from its render `RtScope::violations()` — possibly an ENG-032 clarification | E (T-004 / T-006) + spec | todo |
+| DW-025 | lead | `scripts/bootstrap.sh` can exit 141 under `pipefail`: `xcodebuild -version \| awk '… exit'` (and `\| head -n 1`) close the pipe early, so the producer gets SIGPIPE. It made T-015's worktree setup fail once | E (T-084) / lead | todo |
+| DW-026 | T-005 | Golden `gain_ramp_smoothing` for ENG-022 | E (T-019) | todo |
+| DW-027 | T-005 | ENG-023 "fader sweep → 0 publishes" test needs Engine + GraphBuilder | E/B (T-012 / T-014) | todo |
+| DW-028 | T-005 | RtTrap data race: `LockHook::real` (RtTrap.cpp ~146-154) is a plain static written by `install()` while hooked locks read it on other threads; TSan flags it and one TSan run hung (malloc_logger/GOT rebinding vs TSan interceptors, unconfirmed). Make it atomic or set once (`std::call_once`). Blocks TEST-007's TSan job | E (T-003 follow-up) | todo |
+| DW-029 | T-005 | Free a node's ParamIDs only after the last graph referencing them is retired (a freed slot is reused at once, so an old graph could read another param for a block) | B / M (T-014, MODEL-022) | todo |
+| DW-030 | T-005 | `ParamSlot.generation` (counts writes, for PLUG-015) isn't in 02; record its meaning in the spec. Out-of-range ParamIDs are only `DAW_RT_ASSERT`ed (compiled out in Release), so GraphBuilder must validate IDs | spec (lead) + E (T-012) | todo |
