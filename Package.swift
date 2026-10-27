@@ -83,6 +83,12 @@ let engineCxxSettings: [CXXSetting] = vst3Defines + [
     .unsafeFlags(["-O3"], .when(configuration: .release)),
 ]
 
+// 10-plugin-hosting: the scanner's VST3 probe is C++ that includes the SDK, held to CONV §1 like
+// the engine. It has no RT code, so it carries no RT trap defines.
+let scannerCxxSettings: [CXXSetting] = vst3Defines + [
+    .unsafeFlags(["-Wall", "-Wextra", "-Werror", "-isystem", vst3Include]),
+]
+
 // BUILD-002: Swift targets that see DAWEngine (directly or through DAWModel) need C++ interop.
 let cxxInterop: [SwiftSetting] = [
     .interoperabilityMode(.Cxx),
@@ -146,9 +152,27 @@ let package = Package(
             dependencies: ["DAWModel", "DAWControl"],
             swiftSettings: cxxInterop
         ),
+
+        // MARK: Plugin scanning (10-plugin-hosting, PLUG-001..004)
+
+        // Discovery, the plugins.json cache and the scanner launcher. Plain Swift (no engine), so
+        // DAWModel/DAWControl or the app can use it without loading any plugin code in-process.
+        .target(
+            name: "PluginCatalog",
+            path: "Sources/PluginScanner/Catalog"
+        ),
+        // VST3 module probe (PLUG-003). C++ because it talks to the SDK hosting classes.
+        .target(
+            name: "PluginScannerVST3",
+            dependencies: ["VST3SDK"],
+            path: "Sources/PluginScanner/VST3Probe",
+            cxxSettings: scannerCxxSettings
+        ),
+        // PLUG-001: the out-of-process helper. Plugin code is only ever loaded here.
         .executableTarget(
             name: "PluginScanner",
-            dependencies: ["DAWEngine"],
+            dependencies: ["PluginCatalog", "PluginScannerVST3"],
+            path: "Sources/PluginScanner/Tool",
             swiftSettings: cxxInterop
         ),
 
@@ -168,6 +192,13 @@ let package = Package(
             name: "DAWControlTests",
             dependencies: ["DAWControl"],
             swiftSettings: cxxInterop
+        ),
+        .testTarget(
+            name: "PluginScannerTests",
+            // PluginScanner is listed so `swift test` builds the binary the tests launch.
+            dependencies: ["PluginCatalog", "PluginScanner"],
+            // Fixtures are C++ sources the tests compile into fake plugin bundles.
+            exclude: ["Fixtures"]
         ),
         .testTarget(
             name: "GoldenTests",
