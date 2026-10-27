@@ -1,0 +1,13 @@
+master output:1
+nodes:
+  input:1 bus v0
+  1 channelStrip v0 params 0+4
+  output:1 master v0 params 4+1
+edges:
+  input:1 -> 1 audio port 0 id 88d197caa07c8efd
+  1 -> output:1 audio port 0 id 54d85b451e08e0e6
+clips:
+notes:
+tempo:
+  @0 120.0 bpm
+  @0 4/4

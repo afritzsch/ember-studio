@@ -43,7 +43,7 @@ public enum EngineMode: Hashable, Sendable {
     case offline(sampleRate: Double = 48_000)
 }
 
-// MARK: Graph (BRIDGE-003, PROPOSED delta 4)
+// MARK: Graph (BRIDGE-003, 08 delta 4)
 
 /// The routing description the engine compiles (`daw::GraphDescription`, 05 Interfaces), as a
 /// Swift value. GraphDescriptionBuilder (MODEL-020) produces it from a Project. The engine
@@ -157,7 +157,7 @@ public struct EngineGraph: Hashable, Sendable {
     }
 }
 
-/// What became of the descriptions passed to `applyGraph` (DW-047, PROPOSED delta 3).
+/// What became of the descriptions passed to `applyGraph` (DW-047, 08 delta 3).
 public struct GraphStatus: Hashable, Sendable, Codable {
     /// The latest `applyGraph`.
     public var submittedVersion: UInt64

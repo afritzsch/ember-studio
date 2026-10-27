@@ -20,6 +20,9 @@ public final class ProjectStore {
     private var gestureStart: Project?
     private var gestureChange: ProjectChange?
 
+    /// MODEL-021: the engine this store keeps in step, if any (`attachEngine`).
+    @ObservationIgnored public private(set) var engineSync: EngineSync?
+
     @ObservationIgnored private var subscribers: [Int: AsyncStream<ProjectChange>.Continuation] = [:]
     @ObservationIgnored private var nextSubscriber = 0
 
@@ -105,6 +108,26 @@ public final class ProjectStore {
         return stream
     }
 
+    // MARK: Engine sync (MODEL-021/022)
+
+    /// Starts keeping `engine` in step with the project: allocates its param slots, applies its
+    /// graph now, and from then on syncs after every change (see `EngineSync`). Replaces (and
+    /// frees the slots of) a previously attached engine.
+    @discardableResult
+    public func attachEngine(
+        _ engine: any EngineProtocol, debounce: Duration = EngineSync.defaultDebounce
+    ) throws(DAWError) -> EngineSync {
+        detachEngine()
+        let sync = try EngineSync(engine: engine, project: project, debounce: debounce)
+        engineSync = sync
+        return sync
+    }
+
+    public func detachEngine() {
+        engineSync?.invalidate()
+        engineSync = nil
+    }
+
     // MARK: Persistence (MODEL-040..046, T-031)
 
     /// Not implemented yet: the project folder format is T-031.
@@ -162,6 +185,7 @@ public final class ProjectStore {
 
     private func publish(_ change: ProjectChange) {
         updateDirty()
+        if !change.isEmpty { engineSync?.update(to: project) }
         for continuation in subscribers.values {
             continuation.yield(change)
         }

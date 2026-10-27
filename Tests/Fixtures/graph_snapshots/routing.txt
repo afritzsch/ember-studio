@@ -1,0 +1,50 @@
+master output:1
+nodes:
+  source:2 audioClipPlayer v0
+  7 eq v0 params 24+3
+  8 compressor v0 params 27+4
+  2 channelStrip v0 params 4+4
+  source:3 audioClipPlayer v0
+  3 channelStrip v0 params 8+4
+  input:4 bus v0
+  4 channelStrip v0 params 12+4
+  input:5 bus v0
+  10 eq v0 params 35+3
+  5 channelStrip v0 params 16+4
+  input:6 bus v0
+  11 reverb v0 params 38+1
+  6 channelStrip v0 params 20+4
+  input:1 bus v0
+  12 delay v0 params 39+2
+  1 channelStrip v0 params 0+4
+  output:1 master v0 params 43+1
+  13 gain v0 params 41+1
+  14 gain v0 params 42+1
+edges:
+  source:2 -> 7 audio port 0 id 23034ce728abaa2f
+  7 -> 8 audio port 0 id 3c7ca5db7cec164
+  8 -> 2 audio port 0 id f1252aa61a140317
+  source:3 -> 3 audio port 0 id 1c50d9f28257a4fe
+  input:4 -> 4 audio port 0 id b308720efafa53d2
+  input:5 -> 10 audio port 0 id d9d839728d6fb57b
+  10 -> 5 audio port 0 id 85a0ff60b9957a06
+  input:6 -> 11 audio port 0 id 7806ed84e12f8530
+  11 -> 6 audio port 0 id 7f174962dcd7e84
+  input:1 -> 12 audio port 0 id cbfd6573d00f2628
+  12 -> 1 audio port 0 id 6e1cbc38ba5985ec
+  1 -> output:1 audio port 0 id 54d85b451e08e0e6
+  2 -> input:4 audio port 0 id a4cb1da8b069308
+  3 -> input:1 audio port 0 id f5b07f4b450de15c
+  4 -> input:5 audio port 0 id ef1c1554f7556320
+  5 -> input:1 audio port 0 id 1b36668d3410e134
+  6 -> input:1 audio port 0 id 3bf22128cc692aba
+  2 -> 13 audio port 0 id dad5477bd77dc10a
+  13 -> input:6 audio port 0 id ffb08c113d5dc2fa
+  source:3 -> 14 audio port 0 id ebed56c342852692
+  14 -> input:6 audio port 0 id d82b3e0e6cf2cbb8
+  source:3 -> 8 sidechain port 0 id 160fd07c02cd12e3
+clips:
+notes:
+tempo:
+  @0 120.0 bpm
+  @0 4/4

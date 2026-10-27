@@ -1,0 +1,26 @@
+master output:1
+nodes:
+  source:2 midiClipPlayer v0
+  4 sampler v0
+  2 channelStrip v0 params 4+4
+  3 channelStrip v0 params 8+4
+  input:1 bus v0
+  1 channelStrip v0 params 0+4
+  output:1 master v0 params 12+1
+edges:
+  source:2 -> 4 midi port 0 id ed2be21a44596044
+  4 -> 2 audio port 0 id 27e75af254d2521a
+  input:1 -> 1 audio port 0 id 88d197caa07c8efd
+  1 -> output:1 audio port 0 id 54d85b451e08e0e6
+  2 -> input:1 audio port 0 id e69af858c34946df
+  3 -> input:1 audio port 0 id f5b07f4b450de15c
+clips:
+notes:
+  source:2 @3840+480 pitch 60 vel 100 ch 0
+  source:2 @4320+480 pitch 64 vel 80 ch 1
+  source:2 @5520+240 pitch 67 vel 100 ch 0
+tempo:
+  @0 120.0 bpm
+  @7680 90.0 bpm
+  @0 4/4
+  @7680 3/4
