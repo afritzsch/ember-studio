@@ -79,7 +79,8 @@ let engineCxxSettings: [CXXSetting] = vst3Defines + [
     .define("DAW_RT_TRAP", to: "1", .when(configuration: .debug)),
     .define("DAW_RT_TRAP", to: "0", .when(configuration: .release)),
     // CONV §1. The SDK is a system include so its headers don't trip -Werror.
-    .unsafeFlags(["-Wall", "-Wextra", "-Werror", "-isystem", vst3Include]),
+    // CONV-RT-06: -Wfunction-effects makes clang check DAW_RT ([[clang::nonblocking]]) bodies.
+    .unsafeFlags(["-Wall", "-Wextra", "-Werror", "-Wfunction-effects", "-isystem", vst3Include]),
     .unsafeFlags(["-O3"], .when(configuration: .release)),
 ]
 
