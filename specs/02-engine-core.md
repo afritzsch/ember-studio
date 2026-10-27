@@ -99,4 +99,5 @@ public:
 |---|---|---|
 | ENG-060 | done (T-002) | `CoreUtilsTests` (SpscQueue cases) |
 | ENG-061 | done (T-002) | `CoreUtilsTests` (AudioBufferPool cases); "RenderGraph owns its pool" verified when RenderGraph lands (T-004/T-012) |
+| ENG-030..033 | done (T-003) | `RtTrapTests` (Debug only). Allocations caught via libmalloc `malloc_logger`, locks via GOT rebinding — not dyld `__interpose` (see DW-012). Not wired into render/telemetry yet (T-004/T-006) |
 | ENG-* (rest) | todo | |

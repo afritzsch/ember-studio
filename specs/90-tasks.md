@@ -25,7 +25,7 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 |---|---|---|---|---|---|
 | T-001 | E | Repo bootstrap, Package.swift, Xcode app stub, VST3 submodule, scripts | BUILD-001..008 | — | done |
 | T-002 | E | Core utilities: `Result`, `DAW_RT`, `SpscQueue`, `AudioBufferPool` | ENG-060, ENG-061, CONV-RT-06 | T-001 | done |
-| T-003 | E | RT safety trap (Debug) | ENG-030..033 | T-001 | wip(t-003-rt-trap) |
+| T-003 | E | RT safety trap (Debug) | ENG-030..033 | T-001 | done |
 | T-004 | E | Node API, Engine::render, snapshot publish, epoch reclaim, NodePool, FTZ | ENG-001..004, 010..015, 040..042 | T-002 | ready |
 | T-005 | E | ParamSlotTable + ParamSmoother | ENG-020..023 | T-002 | ready |
 | T-006 | E | Telemetry snapshot | ENG-050, 051 | T-004 | todo |
@@ -200,3 +200,7 @@ Recorded by the lead from worker reports.
 | DW-008 | T-002 | CONV-RT-06 wording: `DAW_RT` must expand to `noexcept [[clang::nonblocking]]` (clang warns on non-noexcept nonblocking, -Werror fails) — spec text needs updating | spec (user/lead) | todo |
 | DW-009 | T-002 | Run SpscQueue/AudioBufferPool RT paths inside the RT trap scope and assert rtViolations == 0 | E (after T-003) | todo |
 | DW-010 | T-002 | Generate compile_commands.json so editor diagnostics use the package's C++20 flags | lead (low) | todo |
+| DW-011 | T-003 | Wire the trap: `RtTrap::install()` at Engine construction + `daw::RtScope` in `Engine::render` (T-004); `Telemetry::rtViolations` from `RtTrap::violationCount()` and expose `RtTrap::firstViolation()` via telemetry/dawmcp (T-006) | E (T-004, T-006) | todo |
+| DW-012 | T-003 | ENG-031 says "interpose"; dyld `__interpose` doesn't apply to the test executable or dlopen'd bundles, so the trap uses `malloc_logger` + GOT rebinding. Gaps: locks inside system libraries and `dispatch_*` aren't counted; allocations invisible under ASan (matters for TEST-007). Spec wording needs a clarification note | spec (user/lead) | todo |
+| DW-013 | T-003 | Optional: `test.sh` engine-objects stage could also assert `_daw_rt_trap_install` is absent from Release | E (T-019) | todo |
+| DW-014 | T-003 | Unify C++ test binding styles (T-002 `@_silgen_name` via SelfTest.h vs T-003 `dlsym`); fold into DW-006 test-support target | E (with DW-006) | todo |
