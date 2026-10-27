@@ -430,7 +430,7 @@ public protocol EngineProtocol: AnyObject, Sendable {
     /// Queues `graph` for compilation and returns the version stamped on it (DW-047).
     @discardableResult func applyGraph(_ graph: EngineGraph) -> UInt64
     func graphStatus() -> GraphStatus
-    func waitForGraph(_ version: UInt64, timeout: Duration) -> GraphStatus
+    @discardableResult func waitForGraph(_ version: UInt64, timeout: Duration) -> GraphStatus
     /// ENG-020: `count` contiguous slots.
     func allocateParams(_ count: UInt32) throws(DAWError) -> ParamID
     /// DW-029: reused only once no graph that may read them is rendering.

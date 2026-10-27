@@ -103,14 +103,17 @@ OfflineResultPOD toResult(const OfflineRenderStats& stats, double sampleRate) {
 
 // The registry every facade builds graphs with: the engine's kinds, the built-in nodes (T-013)
 // reading this facade's assets, then whatever the creator adds.
-Result<NodeRegistry> makeRegistry(AssetTable& assets, const FacadeOptions& options) {
+Result<NodeRegistry> makeRegistry(AssetTable& assets, Telemetry& telemetry, const FacadeOptions& options) {
     NodeRegistry registry = NodeRegistry::withBuiltins();
 #if DAW_FACADE_HAS_BUILTIN_NODES
-    // DW-041: clip players resolve assetIDs here when daw.compile creates them.
-    auto registered = registerBuiltinNodes(registry, [&assets](uint64_t assetID) { return assets.find(assetID); });
+    // DW-041: clip players resolve assetIDs here when daw.compile creates them. DW-048: channel
+    // strips write their meters into the engine's telemetry.
+    auto registered = registerBuiltinNodes(
+        registry, [&assets](uint64_t assetID) { return assets.find(assetID); }, &telemetry);
     if (!registered) return registered.error();
 #else
     (void)assets;
+    (void)telemetry;
 #endif
     if (options.registerNodes) {
         auto registered = options.registerNodes(registry);
@@ -212,7 +215,7 @@ EngineFacade::Impl::Impl(EngineMode m, const DriverConfig& cfg, FacadeOptions op
     }
     if (!(sampleRate >= kMinSampleRate && sampleRate <= kMaxSampleRate)) sampleRate = 48000.0;
 
-    auto registry = makeRegistry(assets, options);
+    auto registry = makeRegistry(assets, engine.telemetry(), options);
     if (!registry) {
         // A registration hook failed: build graphs of the engine's kinds only, and say why.
         EngineEventPOD event;

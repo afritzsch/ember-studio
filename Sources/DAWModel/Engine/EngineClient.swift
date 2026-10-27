@@ -46,6 +46,7 @@ public final class EngineClient: EngineProtocol {
 
     public func graphStatus() -> GraphStatus { Self.swift(facade.graphStatus()) }
 
+    @discardableResult
     public func waitForGraph(_ version: UInt64, timeout: Duration) -> GraphStatus {
         Self.swift(facade.waitForGraph(version, Self.milliseconds(timeout)))
     }
@@ -235,6 +236,43 @@ public final class EngineClient: EngineProtocol {
         }
         builder.setMaster(graph.master)
         return builder.description()
+    }
+
+    /// BRIDGE-003 test hook: `graph` through the C++ builder and back, field by field.
+    static func roundTrip(_ graph: EngineGraph) -> EngineGraph { swift(description(for: graph)) }
+
+    private static func swift(_ d: daw.GraphDescription) -> EngineGraph {
+        var g = EngineGraph(tempoEvents: [], timeSignatures: [], master: d.master)
+        for n in d.nodes {
+            g.nodes.append(.init(id: n.id, kind: swift(n.kind), configVersion: n.configVersion,
+                                 firstParam: n.firstParam, numParams: n.numParams, configJSON: String(n.configJSON)))
+        }
+        for e in d.edges {
+            let kind: EngineGraph.EdgeKind = switch e.kind {
+            case .midi: .midi
+            case .sidechain: .sidechain
+            default: .audio
+            }
+            g.edges.append(.init(id: e.edgeID, from: e.from, to: e.to, kind: kind, toPort: e.toPort))
+        }
+        for c in d.audioClips {
+            g.audioClips.append(.init(player: c.player, clipID: c.clipID, start: Tick(c.start), length: Tick(c.length),
+                                      assetID: c.assetID, sourceOffsetSamples: c.sourceOffsetSamples, gain: c.gain,
+                                      fadeIn: Tick(c.fadeIn), fadeOut: Tick(c.fadeOut)))
+        }
+        for n in d.notes {
+            g.notes.append(.init(player: n.player, start: Tick(n.start), length: Tick(n.length), pitch: n.pitch,
+                                 velocity: n.velocity, channel: n.channel))
+        }
+        for t in d.tempo.tempos { g.tempoEvents.append(TempoEvent(tick: Tick(t.tick), bpm: t.bpm)) }
+        for s in d.tempo.timeSigs {
+            g.timeSignatures.append(TimeSignatureEvent(tick: Tick(s.tick), numerator: Int(s.num), denominator: Int(s.den)))
+        }
+        return g
+    }
+
+    private static func swift(_ kind: daw.NodeKind) -> NodeKind {
+        NodeKind.allCases.first { cxx($0) == kind } ?? .master
     }
 
     /// DW-050: a rejected cycle becomes `.routingCycle` with its NodeIDs.

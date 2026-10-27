@@ -91,6 +91,7 @@ public final class FakeEngine: EngineProtocol {
     }
 
     public func graphStatus() -> GraphStatus { state.withLock { $0.status } }
+    @discardableResult
     public func waitForGraph(_ version: UInt64, timeout: Duration) -> GraphStatus { graphStatus() }
 
     public func allocateParams(_ count: UInt32) throws(DAWError) -> ParamID {
