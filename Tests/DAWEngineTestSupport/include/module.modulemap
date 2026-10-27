@@ -3,11 +3,15 @@
 // Only test targets depend on DAWEngineTestSupport, so only they can import it.
 // Paths into Sources/DAWEngine are relative to this file. See specs/14-testing.md, "C++ unit tests".
 module DAWEngineTestSupport {
+  header "../../../Sources/DAWEngine/core/ParamSlotTable.h"
+  header "../../../Sources/DAWEngine/core/ParamSmoother.h"
   header "../../../Sources/DAWEngine/core/RtTrap.h"
   header "../../../Sources/DAWEngine/time/TempoMap.h"
   header "AudioFileChecks.h"
   header "Checks.h"
   header "CoreUtilsChecks.h"
+  header "EngineChecks.h"
+  header "ParamChecks.h"
   header "RtTrapTestSupport.h"
   header "TempoMapTestSupport.h"
   requires cplusplus

@@ -83,4 +83,10 @@ In headless tools, `ProjectStore` runs on `@MainActor` too (the CLI has a main r
 ## Status
 | ID | status | test |
 |---|---|---|
-| MODEL-* | todo | |
+| MODEL-001 | done (T-015) | `UndoStackTests`. `DAWError` lives in `Sources/DAWModel/DAWError.swift`; a throwing `apply` leaves the project unchanged |
+| MODEL-002 | done (T-015) | `UndoStackTests` (property test: random sequences, undo-all == original; `Project ==` ignores the ID allocator) |
+| MODEL-003 | done (T-015) | `UndoStackTests`, `ProjectStoreTests` (100-step drag → 1 undo entry); param-slot path is a seam for T-016 |
+| MODEL-004 | done (T-015) | `UndoStackTests` (`CompositeCommand`) |
+| MODEL-006 | done (T-015) | `CommandRegistryTests` (JSON round trip, stable `type`); only real command so far is `RenameTrack` |
+| MODEL-007 | done (T-015) | `ProjectStoreTests`; `save`/`open` throw `.notImplemented` until T-031 |
+| MODEL-* (rest) | todo | |

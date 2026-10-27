@@ -98,6 +98,12 @@ public:
 | ID | status | test |
 |---|---|---|
 | ENG-060 | done (T-002) | `CoreUtilsTests` (SpscQueue cases) |
-| ENG-061 | done (T-002) | `CoreUtilsTests` (AudioBufferPool cases); "RenderGraph owns its pool" verified when RenderGraph lands (T-004/T-012) |
-| ENG-030..033 | done (T-003) | `RtTrapTests` (Debug only). Allocations caught via libmalloc `malloc_logger`, locks via GOT rebinding — not dyld `__interpose` (see DW-012). Not wired into render/telemetry yet (T-004/T-006) |
+| ENG-061 | done (T-002, T-004) | `CoreUtilsTests` (AudioBufferPool cases); `EngineRenderTests.graphValidation` (RenderGraph owns its pool) |
+| ENG-030..033 | done (T-003) | `RtTrapTests` (Debug only). Allocations caught via libmalloc `malloc_logger`, locks via GOT rebinding — not dyld `__interpose` (see DW-012). Engine installs the trap and `render` runs in an `RtScope` (T-004); telemetry wiring is T-006 |
+| ENG-020, 021 | done (T-005) | `ParamSlotTableTests`, `ParamSlotTests`, `ParamRealtimeTests` (RtScope count 0). `allocate(count)` returns a contiguous range; `generation` counts writes |
+| ENG-022 | partial (T-005) | `ParamSmootherTests` (0→1 step = linear ramp for every block size 0..4096); golden pending (T-019) |
+| ENG-023 | partial (T-005) | `ParamSnapshotIsolationTests` (sweep leaves node config unchanged); "fader sweep → 0 publishes" pending Engine + GraphBuilder (T-012/T-014) |
+| ENG-001..004 | done (T-004) | `NodeAPITests` (lifecycle, replaced, nodeIO, midiWriter, randomBlockSizes 0..4096). RenderGraph doesn't route MIDI yet (T-012/T-040) |
+| ENG-010..015 | done (T-004) | `SnapshotTests` (10k publishes during render, freed on reclaim; stalled audio thread; idle reclaim; RetireQueue; silence). ASan clean; LSan unsupported on macOS, so the stress test counts frees. `renderEpoch` is odd during a block, even when idle (seq_cst) |
+| ENG-040..042 | done (T-004) | `EngineRenderTests` (renderOrder, flushToZero with decaying IIR, graphValidation). Transport (T-008) and telemetry (T-006) steps are marked seams in `Engine::render` |
 | ENG-* (rest) | todo | |
