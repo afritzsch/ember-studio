@@ -157,7 +157,13 @@ let package = Package(
         .testTarget(
             name: "DAWEngineTests",
             dependencies: ["DAWEngine"],
-            swiftSettings: cxxInterop
+            exclude: ["EngineInternals"],
+            // C++ unit tests reach engine headers that the public module map hides, through a
+            // test-only module map (Tests/DAWEngineTests/EngineInternals).
+            swiftSettings: cxxInterop + [
+                .unsafeFlags(["-Xcc", "-fmodule-map-file=" + Context.packageDirectory
+                    + "/Tests/DAWEngineTests/EngineInternals/module.modulemap"]),
+            ]
         ),
         .testTarget(
             name: "DAWModelTests",
