@@ -4,11 +4,10 @@
 
 #include <cstdint>
 
+#include "core/ParamSlotTable.h"
 #include "time/TransportBlock.h"
 
 namespace daw {
-
-class ParamSlotTable;
 
 struct ProcessContext {
     uint32_t numFrames;

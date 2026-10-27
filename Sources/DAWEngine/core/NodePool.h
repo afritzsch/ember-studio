@@ -39,7 +39,8 @@ public:
     std::shared_ptr<Node> get(NodeID id) const;
 
     // Forgets `id`. The node is released and destroyed on daw.reclaim once no graph uses it.
-    // Returns false if there was no such node.
+    // Returns false if there was no such node. It doesn't make the node's ParamIDs free-able:
+    // graphs that still reference them may be rendering (DW-029, see Engine::params()).
     bool remove(NodeID id);
     void clear();
 

@@ -10,6 +10,7 @@
 #include <memory>
 
 #include "core/NodePool.h"
+#include "core/ParamSlotTable.h"
 #include "core/Realtime.h"
 #include "core/Reclaimer.h"
 #include "core/RenderGraph.h"
@@ -18,8 +19,6 @@
 #include "time/TransportBlock.h"
 
 namespace daw {
-
-class ParamSlotTable;
 
 class Engine {
 public:
@@ -40,7 +39,11 @@ public:
     // numFrames exceeds the graph's maxBlock.
     void render(RenderTarget& target, uint32_t numFrames) DAW_RT;
 
-    ParamSlotTable& params();
+    // ENG-020/021: the session's param slots; graphs reference them by ParamID. DW-029: free a
+    // ParamID only once the last graph that references it has been reclaimed, never right after
+    // publishing a graph without it: a block may still be rendering the old graph, and a freed
+    // slot is handed out again at once.
+    ParamSlotTable& params() { return params_; }
     NodePool& nodes() { return nodes_; }  // non-RT
 
     // ENG-014: for RT code that is done with a heap object (audio thread only).
@@ -59,7 +62,7 @@ private:
     std::atomic<uint64_t> renderEpoch_{0};
     Reclaimer reclaimer_{renderEpoch_};
     NodePool nodes_{reclaimer_};
-    std::unique_ptr<ParamSlotTable> params_;
+    ParamSlotTable params_;
     // T-008: the transport produces this every block. Until then it stays stopped at 0.
     TransportBlock transport_{};
     // ENG-010/011. seq_cst on both sides, see Reclaimer.h.

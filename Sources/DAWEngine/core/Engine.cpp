@@ -4,7 +4,6 @@
 #include <utility>
 
 #include "core/Denormals.h"
-#include "core/ParamSlotTable.h"
 #include "core/ProcessContext.h"
 #include "core/RtTrap.h"
 
@@ -19,7 +18,7 @@ void silence(const AudioBufferView& out, uint32_t numFrames) DAW_RT {
 
 } // namespace
 
-Engine::Engine() : params_(std::make_unique<ParamSlotTable>()) {
+Engine::Engine() {
     // DW-011, ENG-033: hooks go in before the first render; only render()'s own RtScope is
     // checked, so CoreAudio's allocations during device start don't count.
     (void)RtTrap::install();
@@ -39,8 +38,6 @@ void Engine::publish(std::unique_ptr<RenderGraph> graph) {
     reclaimer_.retireGraph(std::unique_ptr<RenderGraph>(previous), epoch);
 }
 
-ParamSlotTable& Engine::params() { return *params_; }
-
 void Engine::render(RenderTarget& target, uint32_t numFrames) DAW_RT {
     RtScope rtScope;              // ENG-030, DW-011
     ScopedFlushDenormals ftz;     // ENG-042
@@ -59,7 +56,7 @@ void Engine::render(RenderTarget& target, uint32_t numFrames) DAW_RT {
         silence(out, n);  // ENG-015
     } else {
         // T-008 (ENG-041 "advance transport"): transport_ = transport.advance(n) goes here.
-        ProcessContext ctx{n, graph->sampleRate(), transport_, *params_};
+        ProcessContext ctx{n, graph->sampleRate(), transport_, params_};
         graph->process(ctx);
 
         // ENG-041: write master to the target.
