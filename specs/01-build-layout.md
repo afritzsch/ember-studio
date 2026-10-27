@@ -49,4 +49,5 @@ macDAW/
 ## Status
 | ID | status | test |
 |---|---|---|
-| BUILD-001..009 | todo | |
+| BUILD-001..008 | done (T-001) | `scripts/test.sh` stages: manifest, submodule, swift-build-debug/release, swift-test, engine-objects, xcodebuild, app-bundle, arch, bootstrap. BUILD-004 mic prompt not yet exercised (needs recording) |
+| BUILD-009 | todo (T-084) | |

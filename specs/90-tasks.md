@@ -23,13 +23,13 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 ### M1 — Engine skeleton: "play a WAV through a snapshot graph, verified via MCP"
 | Task | Lane | Title | Requirements | Depends on | Status |
 |---|---|---|---|---|---|
-| T-001 | E | Repo bootstrap, Package.swift, Xcode app stub, VST3 submodule, scripts | BUILD-001..008 | — | wip(t-001-bootstrap) |
-| T-002 | E | Core utilities: `Result`, `DAW_RT`, `SpscQueue`, `AudioBufferPool` | ENG-060, ENG-061, CONV-RT-06 | T-001 | todo |
-| T-003 | E | RT safety trap (Debug) | ENG-030..033 | T-001 | todo |
+| T-001 | E | Repo bootstrap, Package.swift, Xcode app stub, VST3 submodule, scripts | BUILD-001..008 | — | done |
+| T-002 | E | Core utilities: `Result`, `DAW_RT`, `SpscQueue`, `AudioBufferPool` | ENG-060, ENG-061, CONV-RT-06 | T-001 | ready |
+| T-003 | E | RT safety trap (Debug) | ENG-030..033 | T-001 | ready |
 | T-004 | E | Node API, Engine::render, snapshot publish, epoch reclaim, NodePool, FTZ | ENG-001..004, 010..015, 040..042 | T-002 | todo |
 | T-005 | E | ParamSlotTable + ParamSmoother | ENG-020..023 | T-002 | todo |
 | T-006 | E | Telemetry snapshot | ENG-050, 051 | T-004 | todo |
-| T-007 | M | TempoMap (C++ and Swift) + shared vector fixtures | TIME-001, 002, 011 | T-001 | todo |
+| T-007 | M | TempoMap (C++ and Swift) + shared vector fixtures | TIME-001, 002, 011 | T-001 | ready |
 | T-008 | E | Transport, TransportBlock, loop segments, playhead atomic | TIME-003..009 | T-004, T-007 | todo |
 | T-009 | E | OfflineDriver + AudioFileWriter | IO-010..013, IO-035 | T-004 | todo |
 | T-010 | E | AudioFileLoader, resampling, AudioAsset, peak mipmaps | IO-030..034 (IO-033 deferred to T-056) | T-002 | todo |
@@ -89,7 +89,7 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 ### M6 — Plugins
 | Task | Lane | Title | Requirements | Depends on | Status |
 |---|---|---|---|---|---|
-| T-060 | P | PluginScanner + cache + blocklist | PLUG-001..004 | T-001 | todo |
+| T-060 | P | PluginScanner + cache + blocklist | PLUG-001..004 | T-001 | ready |
 | T-061 | P | AU hosting node (FX + instrument), params, state, latency | PLUG-010, 012..016 (AU) | T-021, T-014 | todo |
 | T-062 | P | VST3 hosting node + build SDK `again` test plugin | PLUG-011..016 (VST3) | T-021, T-014 | todo |
 | T-063 | P+U | Plugin editor windows (AU view controller, VST3 IPlugView) | PLUG-017 | T-061, T-062, T-032 | todo |
@@ -190,4 +190,8 @@ Recorded by the lead from worker reports.
 
 | ID | Found by | Description | Proposed lane | Status |
 |---|---|---|---|---|
-| | | | | |
+| DW-001 | T-001 | Golden stage in `test.sh` only counts fixtures; harness must expose `fixtures/`+`references/` as GoldenTests resources and run real comparisons | E (T-019) | todo |
+| DW-002 | T-001 | `test.sh` engine-objects check relies on `daw_build_rt_trap_enabled` in `Sources/DAWEngine/BuildConfig.cpp` (defined only under `DAW_RT_TRAP`) to prove BUILD-005 — keep the symbol or update the check | E (T-003) | todo |
+| DW-003 | T-001 | `include/module.modulemap` exposes only placeholder `daw/EngineFacade.h`; bridge task must keep the module map pointing at it | B (T-014) | todo |
+| DW-004 | T-001 | `.patchbay.json` setup runs `git submodule update --init --recursive`, pulling VSTGUI/docs/tutorials the build excludes; `scripts/bootstrap.sh` alone fetches only what's needed | lead | todo |
+| DW-005 | T-001 | "No warnings" check only sees recompiled files; CI should do clean builds | E (T-084) | todo |
