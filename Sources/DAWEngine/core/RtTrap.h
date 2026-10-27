@@ -16,6 +16,8 @@
 // dyld __interpose would be simpler but only applies to dylibs loaded at launch: it ignores the
 // main executable and the dlopen'd test bundles `swift test` uses.
 
+#include "Realtime.h"
+
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -23,14 +25,6 @@
 
 #ifndef DAW_RT_TRAP
 #define DAW_RT_TRAP 0
-#endif
-
-// RtScope is entered from Engine::render(), which is DAW_RT (CONV-RT-06), so its constructor and
-// destructor must be callable from nonblocking code. TODO(T-002 merge): spell this DAW_RT.
-#if defined(__has_cpp_attribute) && __has_cpp_attribute(clang::nonblocking)
-#define DAW_RT_TRAP_SCOPE_RT noexcept [[clang::nonblocking]]
-#else
-#define DAW_RT_TRAP_SCOPE_RT noexcept
 #endif
 
 namespace daw {
@@ -72,8 +66,8 @@ public:
 
 private:
     friend class RtScope;
-    static void enterScope() DAW_RT_TRAP_SCOPE_RT;
-    static void exitScope() DAW_RT_TRAP_SCOPE_RT;
+    static void enterScope() DAW_RT;
+    static void exitScope() DAW_RT;
 };
 
 // ENG-030/033: marks the engine's own render scope. Only work done inside it is checked, so
@@ -81,11 +75,11 @@ private:
 class RtScope {
 public:
 #if DAW_RT_TRAP
-    RtScope() DAW_RT_TRAP_SCOPE_RT { RtTrap::enterScope(); }
-    ~RtScope() DAW_RT_TRAP_SCOPE_RT { RtTrap::exitScope(); }
+    RtScope() DAW_RT { RtTrap::enterScope(); }
+    ~RtScope() DAW_RT { RtTrap::exitScope(); }
 #else
-    RtScope() DAW_RT_TRAP_SCOPE_RT {}
-    ~RtScope() DAW_RT_TRAP_SCOPE_RT {}
+    RtScope() DAW_RT {}
+    ~RtScope() DAW_RT {}
 #endif
     RtScope(const RtScope&) = delete;
     RtScope& operator=(const RtScope&) = delete;

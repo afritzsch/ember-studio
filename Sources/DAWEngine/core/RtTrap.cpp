@@ -283,8 +283,8 @@ void RtTrap::resetViolations() noexcept {
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wunknown-warning-option"
 #pragma clang diagnostic ignored "-Wfunction-effects"
-void RtTrap::enterScope() DAW_RT_TRAP_SCOPE_RT { setScopeDepth(scopeDepth() + 1); }
-void RtTrap::exitScope() DAW_RT_TRAP_SCOPE_RT { setScopeDepth(scopeDepth() - 1); }
+void RtTrap::enterScope() DAW_RT { setScopeDepth(scopeDepth() + 1); }
+void RtTrap::exitScope() DAW_RT { setScopeDepth(scopeDepth() - 1); }
 #pragma clang diagnostic pop
 
 } // namespace daw
