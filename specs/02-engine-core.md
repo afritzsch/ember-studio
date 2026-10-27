@@ -97,4 +97,6 @@ public:
 ## Status
 | ID | status | test |
 |---|---|---|
-| ENG-* | todo | |
+| ENG-060 | done (T-002) | `CoreUtilsTests` (SpscQueue cases) |
+| ENG-061 | done (T-002) | `CoreUtilsTests` (AudioBufferPool cases); "RenderGraph owns its pool" verified when RenderGraph lands (T-004/T-012) |
+| ENG-* (rest) | todo | |

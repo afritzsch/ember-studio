@@ -24,15 +24,15 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 | Task | Lane | Title | Requirements | Depends on | Status |
 |---|---|---|---|---|---|
 | T-001 | E | Repo bootstrap, Package.swift, Xcode app stub, VST3 submodule, scripts | BUILD-001..008 | — | done |
-| T-002 | E | Core utilities: `Result`, `DAW_RT`, `SpscQueue`, `AudioBufferPool` | ENG-060, ENG-061, CONV-RT-06 | T-001 | wip(t-002-core-utils) |
+| T-002 | E | Core utilities: `Result`, `DAW_RT`, `SpscQueue`, `AudioBufferPool` | ENG-060, ENG-061, CONV-RT-06 | T-001 | done |
 | T-003 | E | RT safety trap (Debug) | ENG-030..033 | T-001 | wip(t-003-rt-trap) |
-| T-004 | E | Node API, Engine::render, snapshot publish, epoch reclaim, NodePool, FTZ | ENG-001..004, 010..015, 040..042 | T-002 | todo |
-| T-005 | E | ParamSlotTable + ParamSmoother | ENG-020..023 | T-002 | todo |
+| T-004 | E | Node API, Engine::render, snapshot publish, epoch reclaim, NodePool, FTZ | ENG-001..004, 010..015, 040..042 | T-002 | ready |
+| T-005 | E | ParamSlotTable + ParamSmoother | ENG-020..023 | T-002 | ready |
 | T-006 | E | Telemetry snapshot | ENG-050, 051 | T-004 | todo |
 | T-007 | M | TempoMap (C++ and Swift) + shared vector fixtures | TIME-001, 002, 011 | T-001 | wip(t-007-tempomap) |
 | T-008 | E | Transport, TransportBlock, loop segments, playhead atomic | TIME-003..009 | T-004, T-007 | todo |
 | T-009 | E | OfflineDriver + AudioFileWriter | IO-010..013, IO-035 | T-004 | todo |
-| T-010 | E | AudioFileLoader, resampling, AudioAsset, peak mipmaps | IO-030..034 (IO-033 deferred to T-056) | T-002 | todo |
+| T-010 | E | AudioFileLoader, resampling, AudioAsset, peak mipmaps | IO-030..034 (IO-033 deferred to T-056) | T-002 | ready |
 | T-011 | E | CoreAudioDriver, workgroup join, latency reporting | IO-001..005 | T-004 | todo |
 | T-012 | E | GraphDescription, GraphBuilder (topo sort, buffer liveness, summing, master) | MIX-001..004, MIX-009 | T-004, T-005 | todo |
 | T-013 | D | AudioClipPlayer + minimal ChannelStrip (gain/pan) | DSP-001, DSP-010 (partial), MIX-005 (gain/pan) | T-008, T-010, T-012 | todo |
@@ -195,3 +195,8 @@ Recorded by the lead from worker reports.
 | DW-003 | T-001 | `include/module.modulemap` exposes only placeholder `daw/EngineFacade.h`; bridge task must keep the module map pointing at it | B (T-014) | todo |
 | DW-004 | T-001 | `.patchbay.json` setup runs `git submodule update --init --recursive`, pulling VSTGUI/docs/tutorials the build excludes; `scripts/bootstrap.sh` alone fetches only what's needed | lead | todo |
 | DW-005 | T-001 | "No warnings" check only sees recompiled files; CI should do clean builds | E (T-084) | todo |
+| DW-006 | T-002 | C++ test-support target (Package.swift target + test-only module map) to replace the extern "C" self-test pattern in `core/CoreUtilsSelfTests.cpp`, which currently ships inside libDAWEngine.a | E (T-019 or earlier) | todo |
+| DW-007 | T-002 | Add `.headerSearchPath(".")` to DAWEngine so `#include "core/X.h"` works from any subfolder | E (lead) | todo |
+| DW-008 | T-002 | CONV-RT-06 wording: `DAW_RT` must expand to `noexcept [[clang::nonblocking]]` (clang warns on non-noexcept nonblocking, -Werror fails) — spec text needs updating | spec (user/lead) | todo |
+| DW-009 | T-002 | Run SpscQueue/AudioBufferPool RT paths inside the RT trap scope and assert rtViolations == 0 | E (after T-003) | todo |
+| DW-010 | T-002 | Generate compile_commands.json so editor diagnostics use the package's C++20 flags | lead (low) | todo |
