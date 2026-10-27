@@ -42,6 +42,7 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 | T-017 | B | DAWControl protocol + Dispatcher + `dawctl` (headless) | CTL-001..005, CTL-010, 012 | T-016 | todo |
 | T-018 | B | `dawmcp` headless + `.mcp.json` + command schema tool | CTL-020..022, 024, 025 | T-017 | todo |
 | T-019 | E | Golden harness, test-only nodes, M1 goldens, `scripts/test.sh` | TEST-001..004, BUILD-007 | T-017 | todo |
+| T-085 | E | Engine test-support cleanup: one C++ test pattern (test-only module map), no test code in libDAWEngine, `core/`-rooted includes, isolated RT-trap counters | DW-006, 007, 014, 019 | T-003, T-007 | wip(t-085-test-support) |
 
 **M1 exit:** through `dawmcp`, an agent creates a project, imports a 44.1k WAV into a 48k session, adds an audio track and clip, renders offline, and `daw_audio_analyze` shows the expected level and frequency; `rtViolations == 0`; the sine, resample and gain-ramp goldens pass.
 
@@ -195,20 +196,20 @@ Recorded by the lead from worker reports.
 | DW-003 | T-001 | `include/module.modulemap` exposes only placeholder `daw/EngineFacade.h`; bridge task must keep the module map pointing at it | B (T-014) | todo |
 | DW-004 | T-001 | `.patchbay.json` setup runs `git submodule update --init --recursive`, pulling VSTGUI/docs/tutorials the build excludes; `scripts/bootstrap.sh` alone fetches only what's needed | lead | todo |
 | DW-005 | T-001 | "No warnings" check only sees recompiled files; CI should do clean builds | E (T-084) | todo |
-| DW-006 | T-002 | C++ test-support target (Package.swift target + test-only module map) to replace the extern "C" self-test pattern in `core/CoreUtilsSelfTests.cpp`, which currently ships inside libDAWEngine.a | E (T-019 or earlier) | todo — now 3 patterns: T-002 `@_silgen_name` self-tests, T-003 `dlsym`, T-007 test-only module map (`Tests/DAWEngineTests/EngineInternals`). Pick one before wave 3 |
-| DW-007 | T-002, T-007 | Add `.headerSearchPath(".")` to DAWEngine so `#include "core/X.h"` / `"time/TempoMap.h"` work from any subfolder | E (lead) | todo |
+| DW-006 | T-002 | C++ test-support target (Package.swift target + test-only module map) to replace the extern "C" self-test pattern in `core/CoreUtilsSelfTests.cpp`, which currently ships inside libDAWEngine.a | E (T-019 or earlier) | wip(T-085) |
+| DW-007 | T-002, T-007 | Add `.headerSearchPath(".")` to DAWEngine so `#include "core/X.h"` / `"time/TempoMap.h"` work from any subfolder | E (lead) | wip(T-085) |
 | DW-008 | T-002 | CONV-RT-06 wording: `DAW_RT` must expand to `noexcept [[clang::nonblocking]]` (clang warns on non-noexcept nonblocking, -Werror fails) — spec text needs updating | spec (user/lead) | todo |
 | DW-009 | T-002 | Run SpscQueue/AudioBufferPool RT paths inside the RT trap scope and assert rtViolations == 0 | E (after T-003) | todo |
 | DW-010 | T-002 | Generate compile_commands.json so editor diagnostics use the package's C++20 flags | lead (low) | todo |
 | DW-011 | T-003 | Wire the trap: `RtTrap::install()` at Engine construction + `daw::RtScope` in `Engine::render` (T-004); `Telemetry::rtViolations` from `RtTrap::violationCount()` and expose `RtTrap::firstViolation()` via telemetry/dawmcp (T-006) | E (T-004, T-006) | todo |
 | DW-012 | T-003 | ENG-031 says "interpose"; dyld `__interpose` doesn't apply to the test executable or dlopen'd bundles, so the trap uses `malloc_logger` + GOT rebinding. Gaps: locks inside system libraries and `dispatch_*` aren't counted; allocations invisible under ASan (matters for TEST-007). Spec wording needs a clarification note | spec (user/lead) | todo |
 | DW-013 | T-003 | Optional: `test.sh` engine-objects stage could also assert `_daw_rt_trap_install` is absent from Release | E (T-019) | todo |
-| DW-014 | T-003 | Unify C++ test binding styles (T-002 `@_silgen_name` via SelfTest.h vs T-003 `dlsym`); fold into DW-006 test-support target | E (with DW-006) | todo |
+| DW-014 | T-003 | Unify C++ test binding styles (T-002 `@_silgen_name` via SelfTest.h vs T-003 `dlsym`); fold into DW-006 test-support target | E (with DW-006) | wip(T-085) |
 | DW-015 | T-060 | App can't use the scanner yet: embed `PluginScanner` in macDAW.app as an auxiliary executable, and expose `PluginCatalog` to the app — via a new library product (changes 01-build-layout Interfaces product list → needs approval) or through DAWModel | U + lead (with T-065) | todo |
 | DW-016 | T-060 | dawctl/dawmcp commands: scan, list plugins, list/reset blocked | B (after T-017) | todo |
 | DW-017 | T-060 | Convert Swift `PluginDescriptor` → `PluginDescriptorPOD` for `instantiatePlugin` | P/B (T-014/T-061) | todo |
 | DW-018 | T-060 | Optional: scan candidates in parallel (each hanging plugin costs up to 10 s serially) | P (later) | todo |
-| DW-019 | T-007 | RT-trap violation counters are process-wide; RtTrapTests violate on purpose while other suites run in parallel, so "0 violations" checks can be polluted (T-007 measures deltas + retries 3×). Needs per-scope counters or serialized RT tests | E (T-003 follow-up / T-006) | todo |
+| DW-019 | T-007 | RT-trap violation counters are process-wide; RtTrapTests violate on purpose while other suites run in parallel, so "0 violations" checks can be polluted (T-007 measures deltas + retries 3×). Needs per-scope counters or serialized RT tests | E (T-003 follow-up / T-006) | wip(T-085) |
 | DW-020 | T-007 | `TempoMap.sampleRate` duplicates `Project.sessionSampleRate` — choose one source of truth; `SetSessionSampleRate` must rebuild the map | M (T-015) | todo |
 | DW-021 | T-007 | Map Swift `TempoMapError` into `DAWError` once it exists | M (T-015) | todo |
 | DW-022 | T-007 | Swift interop can't call `daw::Result::value()` (ref-qualified overloads); T-007 used an inline helper — facade will hit the same | B (T-014) | todo |
