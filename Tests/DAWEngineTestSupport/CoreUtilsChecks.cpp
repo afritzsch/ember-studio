@@ -1,5 +1,5 @@
 // T-002 unit tests for Result, DAW_RT, SpscQueue and AudioBufferPool. Run from
-// Tests/DAWEngineTests/CoreUtilsTests.swift; see SelfTest.h for why they live here.
+// Tests/DAWEngineTests/CoreUtilsTests.swift; see CoreUtilsChecks.h for why they're C++.
 
 #include <array>
 #include <atomic>
@@ -8,11 +8,12 @@
 #include <string>
 #include <thread>
 
-#include "AudioBufferPool.h"
-#include "Realtime.h"
-#include "Result.h"
-#include "SelfTest.h"
-#include "SpscQueue.h"
+#include "CoreUtilsChecks.h"
+
+#include "core/AudioBufferPool.h"
+#include "core/Realtime.h"
+#include "core/Result.h"
+#include "core/SpscQueue.h"
 
 using namespace daw;
 
@@ -93,7 +94,10 @@ bool isAligned(const void* p) {
 
 } // namespace
 
-DAW_SELFTEST(result_value_and_error) {
+namespace daw::testing {
+
+CheckResult resultValueAndError() {
+    CheckResult checks;
     auto good = parsePositive(5);
     DAW_CHECK(good.ok());
     DAW_CHECK(static_cast<bool>(good));
@@ -106,18 +110,22 @@ DAW_SELFTEST(result_value_and_error) {
     DAW_CHECK(bad.error().code == ErrorCode::invalidArgument);
     DAW_CHECK(bad.error().message == "not positive");
     DAW_CHECK(bad.valueOr(-1) == -1);
+    return checks;
 }
 
-DAW_SELFTEST(result_void) {
+CheckResult resultVoid() {
+    CheckResult checks;
     Result<void> ok = succeedIf(true);
     DAW_CHECK(ok.ok());
     Result<void> bad = succeedIf(false);
     DAW_CHECK(!bad);
     DAW_CHECK(bad.error().code == ErrorCode::notFound);
     DAW_CHECK(bad.error().message == "missing");
+    return checks;
 }
 
-DAW_SELFTEST(result_move_only_and_converting) {
+CheckResult resultMoveOnlyAndConverting() {
+    CheckResult checks;
     auto r = makeBase();
     DAW_CHECK(r.ok());
     DAW_CHECK(r.value() != nullptr);
@@ -129,12 +137,14 @@ DAW_SELFTEST(result_move_only_and_converting) {
     DAW_CHECK(s->size() == 3);
     Result<std::string> e = makeError(ErrorCode::io);
     DAW_CHECK(std::move(e).valueOr("fallback") == "fallback");
+    return checks;
 }
 
 // CONV-RT-06: DAW_RT expands to [[clang::nonblocking]] with this toolchain, so RT bodies are
 // compiler-checked rather than just tagged. The negative half (an allocating DAW_RT function
 // fails to build) is in CoreUtilsTests.swift, since it has to invoke the compiler.
-DAW_SELFTEST(rt_annotation_nonblocking) {
+CheckResult rtAnnotationNonblocking() {
+    CheckResult checks;
     DAW_CHECK(DAW_RT_NONBLOCKING == 1);
     // DAW_RT also implies noexcept, which is visible to the type system.
     auto rtLambda = [](int x) DAW_RT { return x + 1; };
@@ -144,13 +154,15 @@ DAW_SELFTEST(rt_annotation_nonblocking) {
     auto queue = std::make_unique<SpscQueue<Message, 8>>();
     auto pool = AudioBufferPool::create(1, 2, 64);
     DAW_CHECK(pool.ok());
-    if (!pool.ok()) return;
+    if (!pool.ok()) return checks;
     const AudioBufferPool& p = *pool;
     DAW_CHECK(noexcept(rtRoundTrip(*queue, p)));
     DAW_CHECK(rtRoundTrip(*queue, p) > 0);
+    return checks;
 }
 
-DAW_SELFTEST(spsc_fifo_full_empty) {
+CheckResult spscFifoFullEmpty() {
+    CheckResult checks;
     SpscQueue<int, 8> q;
     int out = -1;
     DAW_CHECK(q.emptyApprox());
@@ -168,9 +180,11 @@ DAW_SELFTEST(spsc_fifo_full_empty) {
     }
     DAW_CHECK(!q.pop(out));
     DAW_CHECK(q.emptyApprox());
+    return checks;
 }
 
-DAW_SELFTEST(spsc_wraparound) {
+CheckResult spscWraparound() {
+    CheckResult checks;
     // Indices run far past N, so masking and the full/empty arithmetic are exercised.
     SpscQueue<uint32_t, 4> q;
     uint32_t next = 0, expect = 0, out = 0;
@@ -181,9 +195,11 @@ DAW_SELFTEST(spsc_wraparound) {
     }
     DAW_CHECK(expect == next);
     DAW_CHECK(q.emptyApprox());
+    return checks;
 }
 
-DAW_SELFTEST(spsc_bulk) {
+CheckResult spscBulk() {
+    CheckResult checks;
     SpscQueue<int, 8> q;
     std::array<int, 6> in{0, 1, 2, 3, 4, 5};
     std::array<int, 6> out{};
@@ -206,9 +222,11 @@ DAW_SELFTEST(spsc_bulk) {
     // Empty spans are no-ops.
     DAW_CHECK(q.push(std::span<const int>()) == 0);
     DAW_CHECK(q.pop(std::span<int>()) == 0);
+    return checks;
 }
 
-DAW_SELFTEST(spsc_two_threads) {
+CheckResult spscTwoThreads() {
+    CheckResult checks;
     // One producer, one consumer, mixing single and bulk operations. Every message arrives once,
     // in order, untorn. Also the TSan target for ENG-060 (TEST-007).
     constexpr uint64_t kCount = 500'000;
@@ -258,12 +276,14 @@ DAW_SELFTEST(spsc_two_threads) {
     DAW_CHECK(producerFailures.load() == 0);
     Message extra{};
     DAW_CHECK(!q->pop(extra));
+    return checks;
 }
 
-DAW_SELFTEST(pool_layout) {
+CheckResult poolLayout() {
+    CheckResult checks;
     auto created = AudioBufferPool::create(4, 2, 500);
     DAW_CHECK(created.ok());
-    if (!created.ok()) return;
+    if (!created.ok()) return checks;
     const AudioBufferPool& pool = *created;
 
     DAW_CHECK(pool.numBuffers() == 4);
@@ -304,13 +324,15 @@ DAW_SELFTEST(pool_layout) {
     // Zero-frame views are valid (ENG-004 allows numFrames == 0).
     DAW_CHECK(pool.view(3, 0).empty());
     pool.clear(3, 0);
+    return checks;
 }
 
-DAW_SELFTEST(pool_mixed_channel_counts) {
+CheckResult poolMixedChannelCounts() {
+    CheckResult checks;
     const uint32_t counts[] = {1, 2, 0, 6};
     auto created = AudioBufferPool::create(std::span<const uint32_t>(counts), 4096);
     DAW_CHECK(created.ok());
-    if (!created.ok()) return;
+    if (!created.ok()) return checks;
     const AudioBufferPool& pool = *created;
 
     DAW_CHECK(pool.numBuffers() == 4);
@@ -330,9 +352,11 @@ DAW_SELFTEST(pool_mixed_channel_counts) {
             prevEnd = v.channel(c) + 4096;
         }
     }
+    return checks;
 }
 
-DAW_SELFTEST(pool_errors_and_empty) {
+CheckResult poolErrorsAndEmpty() {
+    CheckResult checks;
     auto zeroFrames = AudioBufferPool::create(2, 2, 0);
     DAW_CHECK(!zeroFrames.ok());
     DAW_CHECK(!zeroFrames.ok() && zeroFrames.error().code == ErrorCode::invalidArgument);
@@ -348,12 +372,14 @@ DAW_SELFTEST(pool_errors_and_empty) {
 
     AudioBufferPool empty;
     DAW_CHECK(empty.numBuffers() == 0);
+    return checks;
 }
 
-DAW_SELFTEST(pool_move) {
+CheckResult poolMove() {
+    CheckResult checks;
     auto created = AudioBufferPool::create(2, 2, 256);
     DAW_CHECK(created.ok());
-    if (!created.ok()) return;
+    if (!created.ok()) return checks;
     AudioBufferPool a = std::move(created).value();
     float* sample = a.view(1, 256).channel(1);
     sample[7] = 3.5f;
@@ -370,4 +396,7 @@ DAW_SELFTEST(pool_move) {
     DAW_CHECK(b.numBuffers() == 0);
     DAW_CHECK(c.numBuffers() == 2 && c.maxFrames() == 256);
     DAW_CHECK(c.view(1, 256).channel(1) == sample);
+    return checks;
 }
+
+} // namespace daw::testing

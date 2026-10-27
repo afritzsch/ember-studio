@@ -84,6 +84,10 @@ let engineCxxSettings: [CXXSetting] = vst3Defines + [
     .unsafeFlags(["-O3"], .when(configuration: .release)),
 ]
 
+// DW-007: engine code includes engine headers rooted at Sources/DAWEngine ("core/RtTrap.h",
+// "time/TempoMap.h"), from any folder. Test code that reaches engine internals needs the same root.
+let engineSourceRoot: String = Context.packageDirectory + "/Sources/DAWEngine"
+
 // 10-plugin-hosting: the scanner's VST3 probe is C++ that includes the SDK, held to CONV §1 like
 // the engine. It has no RT code, so it carries no RT trap defines.
 let scannerCxxSettings: [CXXSetting] = vst3Defines + [
@@ -128,7 +132,7 @@ let package = Package(
         .target(
             name: "DAWEngine",
             dependencies: ["VST3SDK"],
-            cxxSettings: engineCxxSettings
+            cxxSettings: engineCxxSettings + [.headerSearchPath(".")]
         ),
 
         // MARK: Swift
@@ -179,15 +183,30 @@ let package = Package(
 
         // MARK: Tests
 
+        // C++ test support for engine tests (specs/14-testing.md, "C++ unit tests"). Its module map
+        // (include/module.modulemap) is the test-only view of engine headers the DAWEngine module
+        // map hides; its sources hold C++ test code (checks, deliberate RT violations) so none of
+        // it ships in DAWEngine. Built with the engine's flags, so DAW_RT bodies are checked and
+        // DAW_RT_TRAP matches. Only test targets may depend on it.
+        .target(
+            name: "DAWEngineTestSupport",
+            dependencies: ["DAWEngine"],
+            path: "Tests/DAWEngineTestSupport",
+            cxxSettings: engineCxxSettings + [.unsafeFlags(["-I", engineSourceRoot])],
+            // No Swift sources. Listed for scripts/test.sh's BUILD-002 check, which expects every
+            // target that reaches DAWEngine to declare C++ interop.
+            swiftSettings: cxxInterop
+        ),
         .testTarget(
             name: "DAWEngineTests",
-            dependencies: ["DAWEngine"],
-            exclude: ["EngineInternals"],
-            // C++ unit tests reach engine headers that the public module map hides, through a
-            // test-only module map (Tests/DAWEngineTests/EngineInternals).
+            dependencies: ["DAWEngine", "DAWEngineTestSupport"],
             swiftSettings: cxxInterop + [
-                .unsafeFlags(["-Xcc", "-fmodule-map-file=" + Context.packageDirectory
-                    + "/Tests/DAWEngineTests/EngineInternals/module.modulemap"]),
+                // The clang importer parses engine headers (via DAWEngineTestSupport's module map)
+                // with these flags, not the engine's, so it needs the same include root and the
+                // same DAW_RT_TRAP (BUILD-005); otherwise it sees the no-op Release RtTrap.
+                .unsafeFlags(["-Xcc", "-I" + engineSourceRoot]),
+                .unsafeFlags(["-Xcc", "-DDAW_RT_TRAP=1"], .when(configuration: .debug)),
+                .unsafeFlags(["-Xcc", "-DDAW_RT_TRAP=0"], .when(configuration: .release)),
             ]
         ),
         .testTarget(
