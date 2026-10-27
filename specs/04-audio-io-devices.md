@@ -1,0 +1,59 @@
+# 04 — Audio I/O, Devices & File Loading
+
+**Depends on:** 02, 03 · **Owns:** `Sources/DAWEngine/io/` (DeviceDriver, OfflineDriver, DeviceMonitor, AudioFileLoader, AudioFileWriter).
+
+## Device driver
+
+| ID | Requirement | Acceptance |
+|---|---|---|
+| IO-001 | `CoreAudioDriver` uses the AUHAL output unit (input enabled when recording/monitoring is armed) and calls `Engine::render` from the IO proc. | Plays a test sine through the default device |
+| IO-002 | The audio thread joins the device's `os_workgroup` (`kAudioDevicePropertyIOThreadOSWorkgroup`). | Verified via `os_workgroup` API return codes in a test log |
+| IO-003 | Configurable buffer size (32–2048, default 256) and sample rate (44.1/48/88.2/96 kHz, default = device nominal). | — |
+| IO-004 | Separate input and output devices are supported only when they share a clock (aggregate devices are user-made). Otherwise input = output device. | — |
+| IO-005 | Report `inputLatency` and `outputLatency` in samples = device latency + safety offset + buffer size (+ stream latency) from CoreAudio properties. | Telemetry shows values |
+
+## Offline driver
+
+| ID | Requirement | Acceptance |
+|---|---|---|
+| IO-010 | `OfflineDriver` calls `Engine::render` in a loop on a non-RT thread with a fixed block size, as fast as possible, writing to an `AudioFileWriter`. It needs no device. | Renders a 60 s project in < 10 s for a simple project |
+| IO-011 | The offline render is **bit-identical** to itself across runs (determinism: no time-based randomness; reverb/delay use seeded state). | Golden test runs twice and compares |
+| IO-012 | Offline render applies a tail: after the range end it continues until output < −90 dBFS for 1 s or 10 s max (configurable). | — |
+| IO-013 | The RT trap remains active in offline mode, so offline tests catch RT violations. | — |
+
+## Hot-swap, rate changes, overload (D-12, D-26)
+
+| ID | Requirement | Acceptance |
+|---|---|---|
+| IO-020 | `DeviceMonitor` listens to `kAudioHardwarePropertyDevices`, `DefaultOutputDevice`, `kAudioDevicePropertyDeviceIsAlive` and `NominalSampleRate`. | — |
+| IO-021 | On device loss or rate change: (1) stop transport, (2) if recording, finalize recordings (09), (3) stop the driver, (4) select the system default output, (5) if the rate changed, set `sessionRate` (or keep the project rate if the device supports it), re-prepare all nodes, re-resample loaded audio (IO-033), rebuild the graph, (6) restart the driver, (7) emit `EngineEvent.deviceChanged{reason}` for a UI toast. | Simulated test: a `FakeDeviceDriver` triggers loss; the sequence is observed in order |
+| IO-022 | No callback to the UI happens on the audio thread; events go through `SpscQueue<EngineEvent>` and are polled by the facade. | — |
+| IO-023 | **Xrun detection:** count `kAudioDeviceProcessorOverload` notifications and render-time > block-duration events; expose them via telemetry and as `EngineEvent.overload`. No auto-bypass in v1. | Test with a deliberately slow node |
+
+## Audio files (D-10, D-27)
+
+| ID | Requirement | Acceptance |
+|---|---|---|
+| IO-030 | Import copies (or references, user option, default copy) the original file into `Project/Audio/` unchanged. | — |
+| IO-031 | `AudioFileLoader` (on `daw.loader`) decodes WAV/AIFF/CAF/MP3/AAC/FLAC via `ExtAudioFile`/`AVAudioFile` into a non-interleaved float32 `AudioAsset` in RAM at the **session rate**, resampling with `AVAudioConverter` (quality `.max`, `sampleRateConverterAlgorithm = Mastering`). | Null-ish test: 48k→44.1k→48k round trip with residual < −80 dB in band |
+| IO-032 | `AudioAsset` is immutable, ref-counted and retired through the reclaim mechanism (ENG-014). | — |
+| IO-033 | A session-rate change re-converts every asset from the original files in the background; new assets swap in through a new snapshot; playback stays stopped until done (with progress events). | — |
+| IO-034 | Waveform overview: at import/load, compute min/max peak mipmaps (block sizes 256, 1024, 4096, 16384), cached as `Project/Cache/<assetID>.peaks`. | UI reads them (12) |
+| IO-035 | `AudioFileWriter` writes 32-bit float CAF (recording) or WAV/AIFF 16/24/32f (export) with optional TPDF dither for 16/24-bit. | Export test |
+
+## Interfaces (contract)
+```cpp
+namespace daw {
+class AudioDriver { public: virtual Result<void> start(const DriverConfig&) = 0; virtual void stop() = 0;
+  virtual DeviceLatency latency() const = 0; virtual ~AudioDriver() = default; };
+class CoreAudioDriver final : public AudioDriver { ... };
+class OfflineDriver { public: Result<void> render(Engine&, Tick from, Tick to, const ExportSpec&, ProgressFn); };
+enum class EngineEventType : uint8_t { deviceChanged, overload, recordingFinalized, assetsReloaded, pluginCrashed };
+struct AudioAsset { uint64_t assetID; double sampleRate; uint32_t channels; int64_t frames; const float* const* data; };
+}
+```
+
+## Status
+| ID | status | test |
+|---|---|---|
+| IO-* | todo | |

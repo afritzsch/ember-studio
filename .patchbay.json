@@ -1,0 +1,3 @@
+{
+  "setup": "git submodule update --init --recursive && if [ -x scripts/bootstrap.sh ]; then scripts/bootstrap.sh; fi"
+}
