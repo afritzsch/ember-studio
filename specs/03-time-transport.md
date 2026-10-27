@@ -8,6 +8,14 @@
 - **TempoMap**: ordered tempo events `(tick, bpm)` (step changes only in v1; no ramps) and time-signature events `(tick, num, den)`. Event 0 is always at tick 0.
 - Audio clips are tick-anchored: tempo changes move their **start** but never stretch them (D-06).
 
+### Conversion semantics (clarified in T-007)
+- `tickToSample(t)` is the exact position rounded **half away from zero** (`llround`). `sampleToTick(s)` is the last tick `t` with `tickToSample(t) ≤ s` (the tick sounding at `s`), so `tickToSample(sampleToTick(s)) ≤ s < tickToSample(sampleToTick(s) + 1)`.
+- Positions before tick 0 (or sample 0) extrapolate the first tempo / time signature backwards. Ticks before 0 fall in bar 0, −1, …
+- `BBT{bar, beat, tick}`: bar and beat are 1-based, `tick` is the offset inside the beat. The beat is one 1/den note (6/8 has six 480-tick beats).
+- A time-signature event always starts a new bar. If it isn't on a bar line of the previous signature, that bar is cut short (and still counts as a bar).
+- Validation rejects the map (no clamping): sample rate in 1 kHz…768 kHz, bpm in 1…1000, numerator 1…64, denominator a power of two from 1 to 64, both event lists non-empty, starting at tick 0, with strictly increasing ticks. Checks run in a fixed order (sample rate, then tempo events, then time signatures, each list event by event) and the first failure is reported.
+- C++ and Swift use the same double arithmetic in the same order, and the C++ file disables FMA contraction, so both give bit-identical results (TIME-011).
+
 ## Requirements
 
 | ID | Requirement | Acceptance |
