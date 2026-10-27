@@ -26,18 +26,18 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 | T-001 | E | Repo bootstrap, Package.swift, Xcode app stub, VST3 submodule, scripts | BUILD-001..008 | — | done |
 | T-002 | E | Core utilities: `Result`, `DAW_RT`, `SpscQueue`, `AudioBufferPool` | ENG-060, ENG-061, CONV-RT-06 | T-001 | done |
 | T-003 | E | RT safety trap (Debug) | ENG-030..033 | T-001 | done |
-| T-004 | E | Node API, Engine::render, snapshot publish, epoch reclaim, NodePool, FTZ | ENG-001..004, 010..015, 040..042 | T-002 | ready |
-| T-005 | E | ParamSlotTable + ParamSmoother | ENG-020..023 | T-002 | ready |
+| T-004 | E | Node API, Engine::render, snapshot publish, epoch reclaim, NodePool, FTZ | ENG-001..004, 010..015, 040..042 | T-002 | wip(t-004-node-engine) |
+| T-005 | E | ParamSlotTable + ParamSmoother | ENG-020..023 | T-002 | wip(t-005-param-slots) |
 | T-006 | E | Telemetry snapshot | ENG-050, 051 | T-004 | todo |
 | T-007 | M | TempoMap (C++ and Swift) + shared vector fixtures | TIME-001, 002, 011 | T-001 | done |
 | T-008 | E | Transport, TransportBlock, loop segments, playhead atomic | TIME-003..009 | T-004, T-007 | todo |
 | T-009 | E | OfflineDriver + AudioFileWriter | IO-010..013, IO-035 | T-004 | todo |
-| T-010 | E | AudioFileLoader, resampling, AudioAsset, peak mipmaps | IO-030..034 (IO-033 deferred to T-056) | T-002 | ready |
+| T-010 | E | AudioFileLoader, resampling, AudioAsset, peak mipmaps | IO-030..034 (IO-033 deferred to T-056) | T-002 | wip(t-010-audio-loader) |
 | T-011 | E | CoreAudioDriver, workgroup join, latency reporting | IO-001..005 | T-004 | todo |
 | T-012 | E | GraphDescription, GraphBuilder (topo sort, buffer liveness, summing, master) | MIX-001..004, MIX-009 | T-004, T-005 | todo |
 | T-013 | D | AudioClipPlayer + minimal ChannelStrip (gain/pan) | DSP-001, DSP-010 (partial), MIX-005 (gain/pan) | T-008, T-010, T-012 | todo |
 | T-014 | B | EngineFacade v0, EngineClient, EngineProtocol, FakeEngine | BRIDGE-001..008 (transport, graph, params, assets, offline, telemetry, events) | T-006, T-009, T-012 | todo |
-| T-015 | M | Project types, IDAllocator, Command protocol, UndoStack, gestures, ProjectStore, CommandRegistry | MODEL-001..004, 006, 007 | T-007 | ready |
+| T-015 | M | Project types, IDAllocator, Command protocol, UndoStack, gestures, ProjectStore, CommandRegistry | MODEL-001..004, 006, 007 | T-007 | wip(t-015-project-commands) |
 | T-016 | M | GraphDescriptionBuilder + engine sync (structural vs param) | MODEL-020..022 | T-014, T-015 | todo |
 | T-017 | B | DAWControl protocol + Dispatcher + `dawctl` (headless) | CTL-001..005, CTL-010, 012 | T-016 | todo |
 | T-018 | B | `dawmcp` headless + `.mcp.json` + command schema tool | CTL-020..022, 024, 025 | T-017 | todo |
