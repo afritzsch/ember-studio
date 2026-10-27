@@ -23,7 +23,7 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 ### M1 — Engine skeleton: "play a WAV through a snapshot graph, verified via MCP"
 | Task | Lane | Title | Requirements | Depends on | Status |
 |---|---|---|---|---|---|
-| T-001 | E | Repo bootstrap, Package.swift, Xcode app stub, VST3 submodule, scripts | BUILD-001..008 | — | todo |
+| T-001 | E | Repo bootstrap, Package.swift, Xcode app stub, VST3 submodule, scripts | BUILD-001..008 | — | wip(t-001-bootstrap) |
 | T-002 | E | Core utilities: `Result`, `DAW_RT`, `SpscQueue`, `AudioBufferPool` | ENG-060, ENG-061, CONV-RT-06 | T-001 | todo |
 | T-003 | E | RT safety trap (Debug) | ENG-030..033 | T-001 | todo |
 | T-004 | E | Node API, Engine::render, snapshot publish, epoch reclaim, NodePool, FTZ | ENG-001..004, 010..015, 040..042 | T-002 | todo |
