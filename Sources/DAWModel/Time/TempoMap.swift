@@ -39,8 +39,9 @@ public struct BBT: Hashable, Codable, Sendable {
     }
 }
 
-/// Mirrors `daw::TempoMapError` (without `ok`).
-public enum TempoMapError: Error, Hashable, Sendable {
+/// Mirrors `daw::TempoMapError` (without `ok`). Codable (as its case name) because it travels
+/// inside `DAWError.invalidTempoMap` (DW-021).
+public enum TempoMapError: String, Error, Hashable, Sendable, Codable {
     case noTempoEvents
     case noTimeSignatures
     case firstEventNotAtTickZero
@@ -65,6 +66,8 @@ public struct TempoMap: Hashable, Codable, Sendable {
 
     public let tempoEvents: [TempoEvent]
     public let timeSignatures: [TimeSignatureEvent]
+    /// The rate the sample conversions use. Inside a `Project` this always equals
+    /// `Project.sessionSampleRate`, which is the source of truth (DW-020).
     public let sampleRate: Double
 
     // Precomputed per event, as in the engine (TIME-001).
@@ -102,6 +105,11 @@ public struct TempoMap: Hashable, Codable, Sendable {
             throw error
         }
         self.init(validated: tempoEvents, timeSignatures, sampleRate)
+    }
+
+    /// The same events at another rate (DW-020: changing the session rate rebuilds the map).
+    public func withSampleRate(_ sampleRate: Double) throws(TempoMapError) -> TempoMap {
+        try TempoMap(tempoEvents: tempoEvents, timeSignatures: timeSignatures, sampleRate: sampleRate)
     }
 
     /// The first problem found, in the same order as `daw::TempoMap::validate`, or nil.
