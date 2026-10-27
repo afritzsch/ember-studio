@@ -12,7 +12,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		DA0000000000000000000004 /* EmberStudio.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = EmberStudio.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		DA0000000000000000000004 /* Ember Studio.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Ember Studio.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		DA0000000000000000000006 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		DA0000000000000000000007 /* EmberStudio.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = EmberStudio.entitlements; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -51,7 +51,7 @@
 		DA0000000000000000000003 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				DA0000000000000000000004 /* EmberStudio.app */,
+				DA0000000000000000000004 /* Ember Studio.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -80,7 +80,7 @@
 				DA0000000000000000000022 /* DAWControl */,
 			);
 			productName = EmberStudio;
-			productReference = DA0000000000000000000004 /* EmberStudio.app */;
+			productReference = DA0000000000000000000004 /* Ember Studio.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -207,7 +207,8 @@
 				MARKETING_VERSION = 0.1;
 				OTHER_CODE_SIGN_FLAGS = "--options=runtime";
 				PRODUCT_BUNDLE_IDENTIFIER = dev.emberstudio.EmberStudio;
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_MODULE_NAME = EmberStudio;
+				PRODUCT_NAME = "Ember Studio";
 				SWIFT_OBJC_INTEROP_MODE = objcxx;
 				SWIFT_VERSION = 6.0;
 			};
@@ -229,7 +230,8 @@
 				MARKETING_VERSION = 0.1;
 				OTHER_CODE_SIGN_FLAGS = "--options=runtime";
 				PRODUCT_BUNDLE_IDENTIFIER = dev.emberstudio.EmberStudio;
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_MODULE_NAME = EmberStudio;
+				PRODUCT_NAME = "Ember Studio";
 				SWIFT_OBJC_INTEROP_MODE = objcxx;
 				SWIFT_VERSION = 6.0;
 			};

@@ -161,7 +161,7 @@ check_arch() {
         bins+=("$dir/dawctl" "$dir/dawmcp" "$dir/PluginScanner")
     done
     if (( run_xcode )); then
-        bins+=("$xcode_derived/Build/Products/Debug/EmberStudio.app/Contents/MacOS/EmberStudio")
+        bins+=("$xcode_derived/Build/Products/Debug/Ember Studio.app/Contents/MacOS/Ember Studio")
     fi
     for bin in "${bins[@]}"; do
         archs=$(lipo -archs "$bin" 2>&1)
@@ -183,7 +183,7 @@ xcode_build() {
 }
 
 check_app_bundle() {
-    local app="$xcode_derived/Build/Products/Debug/EmberStudio.app" ok=0
+    local app="$xcode_derived/Build/Products/Debug/Ember Studio.app" ok=0
     # T-086: the bundle carries the product identity (bundle ID, menu-bar and Finder name).
     local key want got
     for key in CFBundleIdentifier=dev.emberstudio.EmberStudio CFBundleName="Ember Studio" \

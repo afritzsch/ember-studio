@@ -15,7 +15,7 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "DA0000000000000000000010"
-               BuildableName = "EmberStudio.app"
+               BuildableName = "Ember Studio.app"
                BlueprintName = "EmberStudio"
                ReferencedContainer = "container:EmberStudio.xcodeproj">
             </BuildableReference>
@@ -43,7 +43,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "DA0000000000000000000010"
-            BuildableName = "EmberStudio.app"
+            BuildableName = "Ember Studio.app"
             BlueprintName = "EmberStudio"
             ReferencedContainer = "container:EmberStudio.xcodeproj">
          </BuildableReference>
@@ -60,7 +60,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "DA0000000000000000000010"
-            BuildableName = "EmberStudio.app"
+            BuildableName = "Ember Studio.app"
             BlueprintName = "EmberStudio"
             ReferencedContainer = "container:EmberStudio.xcodeproj">
          </BuildableReference>
