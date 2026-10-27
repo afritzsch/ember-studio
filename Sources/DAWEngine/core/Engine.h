@@ -1,0 +1,69 @@
+#pragma once
+// ENG-010..015, ENG-040..042: the engine. Non-RT threads publish immutable RenderGraphs; the
+// audio thread renders whichever graph is current, one block per render() call.
+//
+// Threads: publish() from any non-RT thread; render() from one thread at a time (the device or
+// offline driver, D-15). Destroy the engine only after rendering has stopped.
+
+#include <atomic>
+#include <cstdint>
+#include <memory>
+
+#include "core/NodePool.h"
+#include "core/Realtime.h"
+#include "core/Reclaimer.h"
+#include "core/RenderGraph.h"
+#include "core/RenderTarget.h"
+#include "core/RetireQueue.h"
+#include "time/TransportBlock.h"
+
+namespace daw {
+
+class ParamSlotTable;
+
+class Engine {
+public:
+    // Non-RT. Starts daw.reclaim; in Debug also installs the RT trap (ENG-030, DW-011).
+    Engine();
+    // Non-RT. Requires that no render() is running or will run. Everything still alive (the
+    // current graph, pooled nodes) is freed on daw.reclaim before this returns.
+    ~Engine();
+    Engine(const Engine&) = delete;
+    Engine& operator=(const Engine&) = delete;
+
+    // ENG-010: non-RT, any thread. Makes `graph` current from the next block on and retires the
+    // previous one (ENG-012). Null unpublishes: render outputs silence (ENG-015).
+    void publish(std::unique_ptr<RenderGraph> graph);
+
+    // ENG-040: the single RT entry point. Renders `numFrames` frames of the current graph into
+    // target.output (clamped to its numFrames). Outputs silence when no graph is published or
+    // numFrames exceeds the graph's maxBlock.
+    void render(RenderTarget& target, uint32_t numFrames) DAW_RT;
+
+    ParamSlotTable& params();
+    NodePool& nodes() { return nodes_; }  // non-RT
+
+    // ENG-014: for RT code that is done with a heap object (audio thread only).
+    RetireQueue& retireQueue() { return reclaimer_.rtQueue(); }
+
+    // Non-RT diagnostics.
+    const Reclaimer& reclaimer() const { return reclaimer_; }
+    // Completed blocks so far (each block bumps the raw epoch twice, see Reclaimer.h).
+    uint64_t blocksRendered() const { return renderEpoch_.load(std::memory_order_acquire) / 2; }
+
+    // T-006 (ENG-050): const Telemetry& telemetry() const;
+
+private:
+    // Declaration order is destruction order in reverse: the reclaimer outlives the pool and
+    // the epoch outlives the reclaimer.
+    std::atomic<uint64_t> renderEpoch_{0};
+    Reclaimer reclaimer_{renderEpoch_};
+    NodePool nodes_{reclaimer_};
+    std::unique_ptr<ParamSlotTable> params_;
+    // T-008: the transport produces this every block. Until then it stays stopped at 0.
+    TransportBlock transport_{};
+    // ENG-010/011. seq_cst on both sides, see Reclaimer.h.
+    std::atomic<RenderGraph*> current_{nullptr};
+};
+
+} // namespace daw

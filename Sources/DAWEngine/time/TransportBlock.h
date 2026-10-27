@@ -10,8 +10,6 @@
 
 namespace daw {
 
-class TempoMap;
-
 struct TransportSegment {
     SamplePos startSample;
     Tick startTick;
