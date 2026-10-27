@@ -31,9 +31,12 @@ private:
 
 // A sum of sines (50 Hz … 18 kHz, a different phase per channel) with 20 ms raised-cosine fades
 // at both ends, peaking below 0.5. It is defined in continuous time, so sampling it at another
-// rate gives the exact reference for a resampled load. Everything is inside 20 kHz, and the
-// fades keep the edges band-limited too.
-Channels synthTones(double sampleRate, int64_t frames, uint32_t channels);
+// rate gives the exact reference for a resampled load, provided the reference uses the source's
+// `duration` (the fade-out is anchored to it; frames / sampleRate differs by the rounding of the
+// resampled length). Everything is inside 20 kHz, and the fades keep the edges band-limited.
+// `maxFrequency` drops the tones above it, for lossy codecs that low-pass.
+Channels synthTones(double sampleRate, int64_t frames, uint32_t channels, double duration = 0,
+                    double maxFrequency = 20000);
 
 // The same duration at another rate, rounded like the loader's resampled length.
 int64_t framesAtRate(int64_t frames, double fromRate, double toRate);
@@ -51,7 +54,7 @@ struct TestFormat {
     std::string name;
     std::string extension;
     double maxResidualDb; // what the encoding itself costs, vs the float source
-    bool lossy;
+    double maxFrequency;  // highest test tone the codec keeps
 };
 const std::vector<TestFormat>& testFormats();
 const TestFormat* findTestFormat(const std::string& name);

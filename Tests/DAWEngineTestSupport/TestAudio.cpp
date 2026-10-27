@@ -29,18 +29,19 @@ TempDir::~TempDir() {
     fs::remove_all(path_, ec);
 }
 
-Channels synthTones(double sampleRate, int64_t frames, uint32_t channels) {
+Channels synthTones(double sampleRate, int64_t frames, uint32_t channels, double duration,
+                    double maxFrequency) {
     constexpr double kTones[][2] = {{50, 0.08},    {440, 0.08},   {1000, 0.07}, {3150, 0.06},
                                     {7000, 0.05},  {11025, 0.05}, {15000, 0.04}, {18000, 0.04}};
     constexpr double kFade = 0.020;
-    const double duration = static_cast<double>(frames) / sampleRate;
+    if (duration <= 0) duration = static_cast<double>(frames) / sampleRate;
     Channels out(channels, std::vector<float>(static_cast<size_t>(frames)));
     for (uint32_t c = 0; c < channels; ++c) {
         for (int64_t i = 0; i < frames; ++i) {
             const double t = static_cast<double>(i) / sampleRate;
             double x = 0;
             for (const auto& [freq, amp] : kTones)
-                x += amp * std::sin(2 * std::numbers::pi * freq * t + 0.7 * c + freq * 1e-3);
+                if (freq <= maxFrequency) x += amp * std::sin(2 * std::numbers::pi * freq * t + 0.7 * c + freq * 1e-3);
             const double edge = std::min(t, duration - t);
             if (edge < kFade) x *= edge <= 0 ? 0 : 0.5 - 0.5 * std::cos(std::numbers::pi * edge / kFade);
             out[c][static_cast<size_t>(i)] = static_cast<float>(x);
@@ -91,16 +92,17 @@ Channels copyChannels(const AudioAsset& asset) {
 }
 
 const std::vector<TestFormat>& testFormats() {
-    // maxResidualDb: 16-bit quantization of this signal is about −88 dB; 24-bit about −135 dB.
-    // AAC is lossy, so its bound only proves decoding and priming alignment (a one-sample shift
-    // of an 18 kHz tone alone is worse than −20 dB).
+    // maxResidualDb: 16-bit quantization of this signal is about −83 dB; 24-bit about −131 dB.
+    // AAC is lossy and low-passes around 16 kHz, so it gets tones up to 11 kHz and a bound that
+    // only proves decoding and priming alignment (a one-sample shift alone is worse than −20 dB
+    // at 11 kHz).
     static const std::vector<TestFormat> formats{
-        {"wav-i16", ".wav", -80, false},   {"wav-i24", ".wav", -120, false},
-        {"wav-f32", ".wav", -140, false},  {"aiff-i16", ".aiff", -80, false},
-        {"aiff-i24", ".aiff", -120, false}, {"caf-f32", ".caf", -140, false},
-        {"caf-i24", ".caf", -120, false},  {"flac-i16", ".flac", -80, false},
-        {"flac-i24", ".flac", -120, false}, {"alac-i24", ".m4a", -120, false},
-        {"aac", ".m4a", -20, true},
+        {"wav-i16", ".wav", -80, 20000},   {"wav-i24", ".wav", -120, 20000},
+        {"wav-f32", ".wav", -140, 20000},  {"aiff-i16", ".aiff", -80, 20000},
+        {"aiff-i24", ".aiff", -120, 20000}, {"caf-f32", ".caf", -140, 20000},
+        {"caf-i24", ".caf", -120, 20000},  {"flac-i16", ".flac", -80, 20000},
+        {"flac-i24", ".flac", -120, 20000}, {"alac-i24", ".m4a", -120, 20000},
+        {"aac", ".m4a", -20, 11025},
     };
     return formats;
 }

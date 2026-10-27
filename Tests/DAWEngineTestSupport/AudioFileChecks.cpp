@@ -79,8 +79,10 @@ CheckResult decodeFormat(const char* formatName) {
 
     TempDir dir;
     const int64_t frames = 66'157;
+    const double duration = frames / 44100.0;
+    auto tones = [&](double rate, int64_t n) { return synthTones(rate, n, 2, duration, format->maxFrequency); };
     const fs::path file = dir.path() / ("tones" + format->extension);
-    const Result<void> written = writeTestFile(file, format->name, 44100, synthTones(44100, frames, 2));
+    const Result<void> written = writeTestFile(file, format->name, 44100, tones(44100, frames));
     DAW_CHECK(written.ok());
     if (!written) {
         checks.firstFailure += " (" + written.error().message + ")";
@@ -95,7 +97,7 @@ CheckResult decodeFormat(const char* formatName) {
         DAW_CHECK(!same->resampled && same->fileSampleRate == 44100 && same->fileFrames == frames);
         const AudioAsset& a = *same->asset;
         DAW_CHECK(a.channels == 2 && a.frames == frames && a.sampleRate == 44100);
-        DAW_CHECK(residualDb(a, synthTones(44100, frames, 2)) < format->maxResidualDb);
+        DAW_CHECK(residualDb(a, tones(44100, frames)) < format->maxResidualDb);
     }
 
     // At another session rate: resampled to the signal sampled at 48 kHz (D-27).
@@ -106,7 +108,7 @@ CheckResult decodeFormat(const char* formatName) {
         DAW_CHECK(resampled->resampled && resampled->fileFrames == frames);
         const AudioAsset& a = *resampled->asset;
         DAW_CHECK(a.channels == 2 && a.frames == expected && a.sampleRate == 48000);
-        DAW_CHECK(residualDb(a, synthTones(48000, expected, 2)) < std::max(format->maxResidualDb, -80.0));
+        DAW_CHECK(residualDb(a, tones(48000, expected)) < std::max(format->maxResidualDb, -80.0));
     }
     return checks;
 }
@@ -124,7 +126,7 @@ CheckResult decodeChannelCounts() {
             if (!loaded) continue;
             const int64_t expected = framesAtRate(frames, 96000, rate);
             DAW_CHECK(loaded->asset->channels == channels && loaded->asset->frames == expected);
-            DAW_CHECK(residualDb(*loaded->asset, synthTones(rate, expected, channels)) < -80);
+            DAW_CHECK(residualDb(*loaded->asset, synthTones(rate, expected, channels, frames / 96000.0)) < -80);
         }
     }
     // An empty file loads as an empty asset, resampled or not.
@@ -318,10 +320,10 @@ CheckResult peakFileRejectsCorrupt() {
     bad[8] = 2;
     DAW_CHECK(rejects(bad)); // version
     bad = good;
-    bad[48] = 0;
+    bad[49] = 0; // 256 → 0
     DAW_CHECK(rejects(bad)); // block size
     bad = good;
-    bad[32] = static_cast<char>(0xFF);
+    bad[33] = static_cast<char>(0xFF); // 3000 → 65464 frames
     DAW_CHECK(rejects(bad)); // frames no longer match the block counts
     DAW_CHECK(rejects(good.substr(0, good.size() - 1)));
     DAW_CHECK(rejects(good + "x"));
