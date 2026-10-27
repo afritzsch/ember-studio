@@ -6,6 +6,10 @@
 // copies violationCount() into rtViolations (T-006). In Release (DAW_RT_TRAP=0) everything here
 // is an inline no-op and RtTrap.cpp compiles to nothing (BUILD-005).
 //
+// Each violation is counted twice: process-wide (violationCount, what telemetry reports) and on
+// the offending thread (threadViolationCount, RtScope::violations). Only the thread's own count
+// is immune to other threads, so "this code makes 0 violations" checks use it (DW-019).
+//
 // How calls are caught (macOS has no supported interposition for an already running process):
 //   - allocations: libmalloc's malloc_logger hook. It sees every malloc-family call from every
 //     image (our code, libc++, the Swift runtime, system frameworks), including malloc, calloc,
@@ -16,7 +20,7 @@
 // dyld __interpose would be simpler but only applies to dylibs loaded at launch: it ignores the
 // main executable and the dlopen'd test bundles `swift test` uses.
 
-#include "Realtime.h"
+#include "core/Realtime.h"
 
 #include <cstdint>
 #include <optional>
@@ -57,6 +61,12 @@ public:
     static uint64_t violationCount() noexcept;
     static uint64_t violationCount(RtViolationKind) noexcept;
 
+    // DW-019: violations made by the calling thread since it started, all kinds or one. Never
+    // reset (resetViolations() leaves them alone), so callers take differences; RtScope::
+    // violations() does that for one scope.
+    static uint64_t threadViolationCount() DAW_RT;
+    static uint64_t threadViolationCount(RtViolationKind) DAW_RT;
+
     // Non-RT. std::nullopt until a violation happened (or when the trap is compiled out).
     static std::optional<RtViolationReport> firstViolation();
 
@@ -75,14 +85,37 @@ private:
 class RtScope {
 public:
 #if DAW_RT_TRAP
-    RtScope() DAW_RT { RtTrap::enterScope(); }
+    RtScope() DAW_RT {
+        for (int kind = 0; kind < kRtViolationKindCount; ++kind)
+            start_[kind] = RtTrap::threadViolationCount(static_cast<RtViolationKind>(kind));
+        RtTrap::enterScope();
+    }
     ~RtScope() DAW_RT { RtTrap::exitScope(); }
+
+    // DW-019: violations this thread made since the scope was entered (nested scopes included).
+    // Other threads can't change it, whatever they do to the process-wide count.
+    uint64_t violations(RtViolationKind kind) const DAW_RT {
+        return RtTrap::threadViolationCount(kind) - start_[static_cast<int>(kind)];
+    }
+    uint64_t violations() const DAW_RT {
+        uint64_t total = 0;
+        for (int kind = 0; kind < kRtViolationKindCount; ++kind)
+            total += violations(static_cast<RtViolationKind>(kind));
+        return total;
+    }
 #else
     RtScope() DAW_RT {}
     ~RtScope() DAW_RT {}
+    uint64_t violations(RtViolationKind) const DAW_RT { return 0; }
+    uint64_t violations() const DAW_RT { return 0; }
 #endif
     RtScope(const RtScope&) = delete;
     RtScope& operator=(const RtScope&) = delete;
+
+private:
+#if DAW_RT_TRAP
+    uint64_t start_[kRtViolationKindCount];
+#endif
 };
 
 #if !DAW_RT_TRAP
@@ -92,6 +125,8 @@ inline bool RtTrap::installed() { return false; }
 inline bool RtTrap::inRealtimeContext() noexcept { return false; }
 inline uint64_t RtTrap::violationCount() noexcept { return 0; }
 inline uint64_t RtTrap::violationCount(RtViolationKind) noexcept { return 0; }
+inline uint64_t RtTrap::threadViolationCount() DAW_RT { return 0; }
+inline uint64_t RtTrap::threadViolationCount(RtViolationKind) DAW_RT { return 0; }
 inline std::optional<RtViolationReport> RtTrap::firstViolation() { return std::nullopt; }
 inline void RtTrap::resetViolations() noexcept {}
 #endif

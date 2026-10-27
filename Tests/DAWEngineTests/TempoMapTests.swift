@@ -1,4 +1,4 @@
-import DAWEngineInternals
+import DAWEngineTestSupport
 import Foundation
 import Testing
 
@@ -113,15 +113,13 @@ struct EngineTempoMapTests {
     }
 
     #if DEBUG
-    // CONV §5.3: the trap exists only in Debug (BUILD-005).
+    // CONV §5.3: the trap exists only in Debug (BUILD-005). The count is the RtScope's own
+    // (DW-019), so RtTrapTests provoking violations in parallel can't leak into it.
     @Test("TIME-001/002: conversions make no RT violations under the RT trap")
-    func conversionsAreRealtimeSafe() {
-        var buffer = [CChar](repeating: 0, count: 1024)
-        let failures = buffer.withUnsafeMutableBufferPointer {
-            tempoMapConversionsRtSafe($0.baseAddress, $0.count)
-        }
-        let message = buffer.withUnsafeBufferPointer { String(cString: $0.baseAddress!) }
-        #expect(failures == 0, "\(failures) failed check(s); first: \(message)")
+    func conversionsAreRealtimeSafe() throws {
+        #expect(daw.RtTrap.install())
+        let map = try #require(daw.testing.makeRtCheckTempoMap().value)
+        #expect(daw.testing.conversionViolations(map) == 0)
     }
     #endif
 
@@ -136,12 +134,6 @@ struct EngineTempoMapTests {
 }
 
 // MARK: - Helpers
-
-#if DEBUG
-// Sources/DAWEngine/time/TempoMapSelfTests.cpp (needs RtScope, so it runs as C++).
-@_silgen_name("daw_selftest_tempomap_conversions_rt_safe")
-private func tempoMapConversionsRtSafe(_ message: UnsafeMutablePointer<CChar>?, _ capacity: Int) -> Int32
-#endif
 
 private func eventLists(
     _ tempos: [(Int64, Double)], _ sigs: [(Int64, Int32, Int32)]

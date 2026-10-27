@@ -8,8 +8,8 @@
 #include <cstdint>
 #include <vector>
 
-#include "../core/Realtime.h"
-#include "../core/Result.h"
+#include "core/Realtime.h"
+#include "core/Result.h"
 
 namespace daw {
 

@@ -9,9 +9,9 @@
 #include <memory>
 #include <span>
 
-#include "AudioBufferView.h"
-#include "Realtime.h"
-#include "Result.h"
+#include "core/AudioBufferView.h"
+#include "core/Realtime.h"
+#include "core/Result.h"
 
 namespace daw {
 

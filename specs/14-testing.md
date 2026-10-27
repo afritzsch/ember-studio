@@ -50,6 +50,29 @@ When an agent finishes an audio-affecting task it must:
 3. Check `daw_engine_telemetry.rtViolations == 0`.
 4. For UI tasks: attach mode → `daw_ui_perform` → `daw_ui_state` assertions → `daw_ui_snapshot` for visual review.
 
+## C++ unit tests
+Engine tests are Swift Testing suites in `Tests/DAWEngineTests` that call engine C++ directly through the test-only module `DAWEngineTestSupport` (`Tests/DAWEngineTestSupport`, T-085). Nothing test-only goes into `Sources/DAWEngine`: no test functions, no `extern "C"` hooks, no deliberate violations.
+
+- **Exposing a header.** Add the engine header to `Tests/DAWEngineTestSupport/include/module.modulemap` (path relative to that file) and `import DAWEngineTestSupport`. Engine headers include each other rooted at `Sources/DAWEngine` (`#include "core/RtTrap.h"`). The public `DAWEngine` module map stays facade-only (01 Interfaces).
+- **Prefer Swift.** Call `daw::` types from Swift when interop allows it. Put small inline adapters in a test-support header, e.g. `daw::testing::makeTempoMap` to unwrap `Result` (see DW-022).
+- **When it has to be C++.** Use C++ for templates, non-movable or move-only types, threads, `RtScope`, and `DAW_RT` bodies (only the C++ compiler checks them). Declare a `daw::testing::` function in `include/<Area>TestSupport.h` or `<Area>Checks.h` and define it in a `.cpp` next to `include/`. That target builds with the engine's flags, so `-Wfunction-effects -Werror` and `DAW_RT_TRAP` match the engine. Multi-assert C++ bodies return `daw::testing::CheckResult` (`Checks.h`, `DAW_CHECK`) and Swift asserts them with `expectPasses(...)`.
+- **RT "0 violations" checks** (CONV §5.3) use the scope's own count, never the process-wide one. Other suites provoke violations in parallel, and only the scope's count is immune to them:
+  ```cpp
+  uint64_t fooViolations(Foo& foo) {   // DAWEngineTestSupport
+      RtScope scope;
+      foo.process();                    // the DAW_RT path under test
+      return scope.violations();        // this thread, this scope only (DW-019)
+  }
+  ```
+  ```swift
+  #if DEBUG  // the trap exists only in Debug (BUILD-005)
+  #expect(daw.RtTrap.install())
+  #expect(daw.testing.fooViolations(&foo) == 0)
+  #endif
+  ```
+  Work on another thread (e.g. a render thread) opens its own `RtScope` there and reports that scope's count.
+- **Process-wide trap state.** Deliberate violations and anything that reads or resets `violationCount()`, `firstViolation()` or `resetViolations()` belong only in the serialized `RtTrapTests` suite. Nest new suites inside it (`extension RtTrapTests { @Suite struct … }`) and use the probes in `RtTrapTestSupport.h`.
+
 ## Status
 | ID | status | test |
 |---|---|---|
