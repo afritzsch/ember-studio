@@ -125,7 +125,9 @@ void recordViolation(RtViolationKind kind) noexcept {
 
 // MARK: Allocations (ENG-031)
 
-malloc_logger_t* previousLogger = nullptr;
+// Written by install() before malloc_logger points at the hook, read by the hook on every thread;
+// atomic for the same reason as LockHook::real (DW-028).
+std::atomic<malloc_logger_t*> previousLogger{nullptr};
 
 void mallocLoggerHook(uint32_t type, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3,
                       uintptr_t result, uint32_t numHotFramesToSkip) {
@@ -136,35 +138,43 @@ void mallocLoggerHook(uint32_t type, uintptr_t arg1, uintptr_t arg2, uintptr_t a
         else if (type & kMallocLogDeallocate)
             recordViolation(RtViolationKind::deallocation);
     }
-    if (previousLogger)
-        previousLogger(type, arg1, arg2, arg3, result, numHotFramesToSkip + 1);
+    if (malloc_logger_t* previous = previousLogger.load(std::memory_order_acquire))
+        previous(type, arg1, arg2, arg3, result, numHotFramesToSkip + 1);
 }
 
 // MARK: Locks (ENG-031, CONV-RT-02)
 
 // One counting forwarder per hooked function. `real` is resolved with dlsym before any symbol
 // pointer is rebound, so the forwarder never calls itself.
+//
+// DW-028: `real` is written once (installLockHooks, under call_once) and read by every thread that
+// takes a hooked lock, so it's an atomic: release store before the first rebind, acquire load in
+// the forwarder. A plain pointer was a data race (TSan flagged it). On arm64 both are plain
+// ldr/str plus ordering, so the forwarder stays as cheap as before.
 template <int Index, typename Signature> struct LockHook;
 template <int Index, typename R, typename... Args> struct LockHook<Index, R(Args...)> {
-    static inline R (*real)(Args...) = nullptr;
+    using Fn = R (*)(Args...);
+    static inline std::atomic<Fn> real{nullptr};
     static R hook(Args... args) {
         if (scopeDepth() != 0)
             recordViolation(RtViolationKind::lock);
-        return real(args...);
+        return real.load(std::memory_order_acquire)(args...);
+    }
+    static void setReal(void* resolved) {
+        real.store(reinterpret_cast<Fn>(resolved), std::memory_order_release);
     }
 };
 
 struct LockTarget {
     const char* symbol; // as passed to dlsym
     void* hook;
-    void** real;
+    void (*setReal)(void*);
     void* resolved;
 };
 
 template <int Index, typename Signature> LockTarget lockTarget(const char* symbol) {
     using H = LockHook<Index, Signature>;
-    return {symbol, reinterpret_cast<void*>(&H::hook), reinterpret_cast<void**>(&H::real),
-            nullptr};
+    return {symbol, reinterpret_cast<void*>(&H::hook), &H::setReal, nullptr};
 }
 
 // C++ member functions take `this` as their first argument (Itanium ABI), so they're forwarded
@@ -211,8 +221,9 @@ void rebindLockSymbols(const mach_header* header, intptr_t slide) {
                                        VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY) != KERN_SUCCESS)
                             break;
                         // An aligned pointer store; threads calling through it see old or new.
+                        // Release, so `real` (stored before) is visible to whoever sees the hook.
                         reinterpret_cast<std::atomic<void*>*>(&slots[slot])
-                            ->store(target.hook, std::memory_order_relaxed);
+                            ->store(target.hook, std::memory_order_release);
                         if (segment->flags & SG_READ_ONLY)
                             vm_protect(mach_task_self(), address, sizeof(void*), false,
                                        VM_PROT_READ);
@@ -229,7 +240,7 @@ void rebindLockSymbols(const mach_header* header, intptr_t slide) {
 void installLockHooks() {
     for (LockTarget& target : lockTargets) {
         target.resolved = dlsym(RTLD_DEFAULT, target.symbol);
-        *target.real = target.resolved;
+        target.setReal(target.resolved);
     }
     _dyld_register_func_for_add_image(rebindLockSymbols);
 }
@@ -252,7 +263,7 @@ bool RtTrap::install() {
                            std::memory_order_relaxed);
 
     if (malloc_logger != &mallocLoggerHook) {
-        previousLogger = malloc_logger;
+        previousLogger.store(malloc_logger, std::memory_order_release);
         malloc_logger = &mallocLoggerHook;
     }
     return installed();

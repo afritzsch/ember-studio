@@ -19,7 +19,7 @@ TempDir::TempDir() {
     static std::atomic<int> counter{0};
     std::error_code ec;
     path_ = fs::temp_directory_path(ec) /
-            ("macdaw-t010-" + std::to_string(::getpid()) + "-" + std::to_string(counter++));
+            ("emberstudio-test-" + std::to_string(::getpid()) + "-" + std::to_string(counter++));
     fs::remove_all(path_, ec);
     fs::create_directories(path_, ec);
 }

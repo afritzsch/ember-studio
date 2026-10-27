@@ -35,8 +35,9 @@ public:
     GraphBuilder(NodeRegistry registry, double sampleRate, uint32_t maxBlock = kMaxBlock);
 
     // MIX-001. Non-RT; meant for daw.compile. Errors:
-    //   invalidArgument: the description is malformed. A cycle's message is "cycle: " followed by
-    //     the NodeIDs on it, ascending (MIX-002).
+    //   cycle: the edges form a cycle. Error::nodes holds the NodeIDs on it, ascending, and the
+    //     message is "cycle: " followed by the same IDs (MIX-002, DW-050).
+    //   invalidArgument: the description is malformed.
     //   unsupported: a node's kind has no factory.
     //   or whatever a factory returns.
     // On success, nodes this builder created that the description no longer has are removed

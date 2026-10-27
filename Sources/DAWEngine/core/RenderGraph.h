@@ -66,8 +66,9 @@ struct RenderStepDesc {
     RenderPortDesc sidechain;
     uint32_t output = kNoBuffer; // kNoBuffer: the node writes nothing (e.g. a pure MIDI sink)
     std::vector<RenderFeedDesc> feeds;  // requires an output
-    // TIME-008 (T-008): the node reads the timeline (clip players), so a locate or loop jump
-    // must reset() it before the next block. GraphBuilder sets it from NodeKind
+    // TIME-008 (T-008): the node reads the timeline (clip players), so a locate while playing
+    // must reset() it before the next block. Loop wraps don't reset it: they can fall mid-block,
+    // and the node handles them per segment (TIME-006, DW-062). GraphBuilder sets it from NodeKind
     // (audioClipPlayer, midiClipPlayer); see RenderGraph::resetTimelineNodes().
     bool resetOnLocate = false;
 };
@@ -107,7 +108,8 @@ public:
     // TIME-008: whether step `step` holds a timeline node that a locate must reset.
     bool resetsOnLocate(uint32_t step) const DAW_RT { return steps_[step].resetOnLocate; }
     // TIME-008: calls reset() on every step flagged resetOnLocate, in step order. For Engine to
-    // call (audio thread) after a locate or loop jump, before processing the block.
+    // call (audio thread) after a locate while playing, before processing the block; never on a
+    // loop wrap (DW-062).
     void resetTimelineNodes() const DAW_RT;
 
     // ENG-041, the per-node part of a block: for each step in order, gather its inputs, then
