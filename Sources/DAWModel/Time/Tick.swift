@@ -1,0 +1,29 @@
+/// A musical position at 960 PPQ (D-06). Every musical position in the model is a `Tick`.
+public struct Tick: Hashable, Comparable, Codable, Sendable {
+    /// Ticks per quarter note, `daw::kPPQ` in the engine.
+    public static let ppq: Int64 = 960
+
+    public var raw: Int64
+
+    public init(_ raw: Int64) { self.raw = raw }
+    public init(raw: Int64) { self.raw = raw }
+
+    public static func < (lhs: Tick, rhs: Tick) -> Bool { lhs.raw < rhs.raw }
+
+    // A bare integer in JSON, so project files stay readable.
+    public init(from decoder: any Decoder) throws {
+        raw = try decoder.singleValueContainer().decode(Int64.self)
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(raw)
+    }
+}
+
+extension Tick: ExpressibleByIntegerLiteral {
+    public init(integerLiteral value: Int64) { raw = value }
+}
+
+/// A sample position at the session rate, `daw::SamplePos` in the engine.
+public typealias SamplePos = Int64
