@@ -57,7 +57,25 @@ public protocol EngineProtocol: AnyObject, Sendable {
 }
 ```
 
+### Contract deltas (T-014, accepted by the user 2026-10-28)
+These amend the contract above; where they differ, they win.
+
+1. **`setDevice` returns `FacadeError`, not `Result<void>`.** `core/Result.h` isn't on the include path Swift sees (`include/` only, 01 Interfaces), and Swift can't call `Result::value()` (DW-022). `FacadeError { FacadeErrorCode code; std::string message; std::vector<NodeID> cycle; }`, where `code == none` means success. It is also how jobs and graph builds report errors. `FacadeErrorCode` mirrors `daw::ErrorCode` plus `none`. For `cycle`, `Error::nodes` crosses as `FacadeError::cycle` (DW-050).
+2. **`EngineEventType` (04 Interfaces) is defined in `EngineFacade.h` and gets more cases.** Swift has to see the enum, so it can't live in `io/`. The added cases are facade-produced: `assetLoaded`, `assetLoadFailed` (DW-041; the model re-applies the graph with the affected clip players' `configVersion` bumped, DW-051), `graphRejected` (a failed build, e.g. a cycle) and `jobFinished`. `overload` is raised when telemetry's xrun count grows (IO-023).
+3. **Additive facade API.** `GraphStatusPOD graphStatus() const` and `GraphStatusPOD waitForGraph(uint64_t version, uint32_t timeoutMs)` let callers learn the outcome of a build without callbacks (BRIDGE-002). `std::vector<NodeLatencyPOD> nodeLatencies() const` covers CTL `engine.telemetry`'s per-node latency. `applyGraph` stamps the description's `version` itself (1, 2, …) and returns it, so versions are unique and `TelemetryPOD.graphVersion` can be waited on (DW-047). `GraphDescriptionBuilder` (BRIDGE-003) is declared in `EngineFacade.h`. Diagnostics: `instanceID()` and `static isLive(id)` (the BRIDGE-001 leak test). `ByteVector` names `std::vector<uint8_t>` so Swift can build plugin state (BRIDGE-006).
+4. **Swift `EngineProtocol.applyGraph(_ graph: EngineGraph) -> UInt64`** takes `EngineGraph`, a Swift value mirror of `GraphDescription`, instead of `(Project, RuntimeIDs)`. Turning a Project into a description is MODEL-020 (T-016), and `RuntimeIDs` (MODEL-022) doesn't exist yet. A plain value keeps the protocol a mirror of the facade, lets `FakeEngine` record exactly what would cross, and gives T-016 something to snapshot-test. T-016 can add `applyGraph(_ project:runtime:)` as an extension on top.
+5. **The facade's config type is `DriverConfigPOD`.** T-011 defined `daw::DriverConfig` in `io/DriverConfig.h` (04 `AudioDriver::start`), which Swift can't see, and two `daw::DriverConfig`s can't coexist. So `create`/`setDevice` take `DriverConfigPOD`, which mirrors the io fields (device AudioObjectIDs, rate, `bufferFrames`, channels). It leaves out `inputEnabled`, which the facade derives from `armInput` (DW-067: turning input on or off restarts the driver). `DeviceInfoPOD` identifies devices by `deviceID` (AudioObjectID).
+
+Affected: T-016 (builds `EngineGraph`, reacts to `assetLoaded`), T-017/T-018 (dispatcher uses `EngineProtocol`, `waitForGraph`, events), T-011/T-051 (driver adapter seam `facade/DriverAdapter.h` with `CoreAudioDriverAdapter`; `DriverConfigPOD`; IO-021/023 events).
+
 ## Status
 | ID | status | test |
 |---|---|---|
-| BRIDGE-* | todo | |
+| BRIDGE-001 | done (T-014) | `EngineClientTests` "the facade is a Swift class reference; created and destroyed repeatedly without leaks" (`instanceID`/`isLive`) |
+| BRIDGE-002 | done (T-014) | `FacadeTests` export job via `pollJob`; `EngineClientTests` loadAsset on daw.loader, renderOffline on a job thread; `waitForGraph`/`graphStatus` |
+| BRIDGE-003 | done (T-014) | `EngineClientTests` "EngineGraph crosses as a GraphDescription built through GraphDescriptionBuilder" |
+| BRIDGE-004 | done (T-014) | `EngineClientTests` loadAsset status and events (`assetLoaded`/`assetLoadFailed`); `graphRejected`, `jobFinished` |
+| BRIDGE-005 | done (T-014) | `EngineClientTests` "telemetry, meters, plugin stubs and param info cross as Swift values"; `FacadeTests` strip meters via `meter(NodeID)` (DW-071) |
+| BRIDGE-006 | done (T-014) | `EngineClientTests` (strings, `ByteVector` ↔ `Data`, plugin stubs; DW-017) |
+| BRIDGE-007 | done (T-014) | suite "FakeEngine (BRIDGE-007)": "the model drives the engine through EngineProtocol; FakeEngine records it"; FakeEngine mirrors rejection, asset events, jobs |
+| BRIDGE-008 | done (T-014) | `EngineClientTests` offline mode (bad rate throws, no device); `FacadeTests` realtime mode drives a `DriverAdapter`, `setDevice` restarts it (fake driver; `CoreAudioDriverAdapter` in realtime) |

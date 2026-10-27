@@ -15,6 +15,7 @@ module DAWEngineTestSupport {
   header "CoreUtilsChecks.h"
   header "DeviceDriverChecks.h"
   header "EngineChecks.h"
+  header "FacadeChecks.h"
   header "GraphChecks.h"
   header "OfflineChecks.h"
   header "ParamChecks.h"
