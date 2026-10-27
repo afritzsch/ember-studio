@@ -43,7 +43,8 @@ enum class WorkgroupState : uint8_t {
     joined,         // this thread joined (join returned 0)
     alreadyMember,  // join returned EALREADY: the IO thread was already in a workgroup
     failed,         // join returned another error (lastJoinResult); cycles still render
-    left,           // left on request; cycles output silence until the next attach()
+    left,           // a leave was requested and done (if this thread had joined); cycles output
+                    // silence until the next attach()
 };
 
 class WorkgroupJoin {
