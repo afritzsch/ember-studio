@@ -37,7 +37,7 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 | T-012 | E | GraphDescription, GraphBuilder (topo sort, buffer liveness, summing, master) | MIX-001..004, MIX-009 | T-004, T-005 | todo |
 | T-013 | D | AudioClipPlayer + minimal ChannelStrip (gain/pan) | DSP-001, DSP-010 (partial), MIX-005 (gain/pan) | T-008, T-010, T-012 | todo |
 | T-014 | B | EngineFacade v0, EngineClient, EngineProtocol, FakeEngine | BRIDGE-001..008 (transport, graph, params, assets, offline, telemetry, events) | T-006, T-009, T-012 | todo |
-| T-015 | M | Project types, IDAllocator, Command protocol, UndoStack, gestures, ProjectStore, CommandRegistry | MODEL-001..004, 006, 007 | T-007 | wip(t-015-project-commands) |
+| T-015 | M | Project types, IDAllocator, Command protocol, UndoStack, gestures, ProjectStore, CommandRegistry | MODEL-001..004, 006, 007 | T-007 | done |
 | T-016 | M | GraphDescriptionBuilder + engine sync (structural vs param) | MODEL-020..022 | T-014, T-015 | todo |
 | T-017 | B | DAWControl protocol + Dispatcher + `dawctl` (headless) | CTL-001..005, CTL-010, 012 | T-016 | todo |
 | T-018 | B | `dawmcp` headless + `.mcp.json` + command schema tool | CTL-020..022, 024, 025 | T-017 | todo |
@@ -102,10 +102,10 @@ DSP effects (T-070..073) depend only on the Node API and can be **pulled forward
 
 | Task | Lane | Title | Requirements | Depends on | Status |
 |---|---|---|---|---|---|
-| T-070 | D | EQ | DSP-030, 040, 041 | T-005 | todo |
+| T-070 | D | EQ | DSP-030, 040, 041 | T-004, T-005 | todo |
 | T-071 | D | Compressor (+ sidechain) | DSP-031, 040, 041 | T-005, T-023 | todo |
 | T-072 | D | Delay (tempo sync) | DSP-032, 040, 041 | T-008 | todo |
-| T-073 | D | Reverb (FDN, deterministic) | DSP-033, 040, 041 | T-005 | todo |
+| T-073 | D | Reverb (FDN, deterministic) | DSP-033, 040, 041 | T-004, T-005 | todo |
 | T-074 | E+M | Automation lanes model + AutomationPlayer + plugin param path | AUTO-001..005, 008..010 | T-030, T-061/T-062 (for AUTO-009) | todo |
 | T-075 | U+M | Automation recording (touch/latch/write) + lane UI | AUTO-006, 007, UI-015 | T-074, T-033 | todo |
 | T-076 | U | Mixer view + meters + routing pickers | UI-030, 031, 033 | T-022, T-032 | todo |
@@ -210,8 +210,8 @@ Recorded by the lead from worker reports.
 | DW-017 | T-060 | Convert Swift `PluginDescriptor` → `PluginDescriptorPOD` for `instantiatePlugin` | P/B (T-014/T-061) | todo |
 | DW-018 | T-060 | Optional: scan candidates in parallel (each hanging plugin costs up to 10 s serially) | P (later) | todo |
 | DW-019 | T-007 | RT-trap violation counters are process-wide; RtTrapTests violate on purpose while other suites run in parallel, so "0 violations" checks can be polluted (T-007 measures deltas + retries 3×). Needs per-scope counters or serialized RT tests | E (T-003 follow-up / T-006) | done (T-085) |
-| DW-020 | T-007 | `TempoMap.sampleRate` duplicates `Project.sessionSampleRate` — choose one source of truth; `SetSessionSampleRate` must rebuild the map | M (T-015) | todo |
-| DW-021 | T-007 | Map Swift `TempoMapError` into `DAWError` once it exists | M (T-015) | todo |
+| DW-020 | T-007 | `TempoMap.sampleRate` duplicates `Project.sessionSampleRate` — choose one source of truth; `SetSessionSampleRate` must rebuild the map | M (T-015) | done (T-015) |
+| DW-021 | T-007 | Map Swift `TempoMapError` into `DAWError` once it exists | M (T-015) | done (T-015) |
 | DW-022 | T-007 | Swift interop can't call `daw::Result::value()` (ref-qualified overloads); T-007 used an inline helper — facade will hit the same | B (T-014) | todo |
 | DW-023 | T-085 | `test.sh` BUILD-002 check treats every target reaching DAWEngine as Swift; `DAWEngineTestSupport` carries a no-op `swiftSettings: cxxInterop` to pass. The check should skip C-family targets | E (T-084 / T-019) | todo |
 | DW-024 | T-085 | Telemetry `rtViolations` is process-wide, so in-process engine tests asserting on it (e.g. TEST-004 AllocatingNode) see RtTrapTests' deliberate violations. Nest such tests in `RtTrapTests`, or have the Engine count from its render `RtScope::violations()` — possibly an ENG-032 clarification | E (T-004 / T-006) + spec | todo |
@@ -221,3 +221,6 @@ Recorded by the lead from worker reports.
 | DW-028 | T-005 | RtTrap data race: `LockHook::real` (RtTrap.cpp ~146-154) is a plain static written by `install()` while hooked locks read it on other threads; TSan flags it and one TSan run hung (malloc_logger/GOT rebinding vs TSan interceptors, unconfirmed). Make it atomic or set once (`std::call_once`). Blocks TEST-007's TSan job | E (T-003 follow-up) | todo |
 | DW-029 | T-005 | Free a node's ParamIDs only after the last graph referencing them is retired (a freed slot is reused at once, so an old graph could read another param for a block) | B / M (T-014, MODEL-022) | todo |
 | DW-030 | T-005 | `ParamSlot.generation` (counts writes, for PLUG-015) isn't in 02; record its meaning in the spec. Out-of-range ParamIDs are only `DAW_RT_ASSERT`ed (compiled out in Release), so GraphBuilder must validate IDs | spec (lead) + E (T-012) | todo |
+| DW-031 | T-015 | MODEL-032: run `Project.validate()` after every command in Debug (hook in `UndoStack.perform`); decoding should also move the ID allocator past the largest ID in the file | M (T-022 / T-031) | todo |
+| DW-032 | T-015 | Change detection diffs the whole project after every command and gesture step; may need tuning for large projects / fast drags | M (T-016) | todo |
+| DW-033 | T-015 | `Project.init` uses a random UUID; headless `project.new` should pass a fixed id so runs are deterministic | B (T-017, CTL-004) | todo |
