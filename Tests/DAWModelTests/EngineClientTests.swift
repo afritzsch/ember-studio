@@ -181,7 +181,8 @@ struct EngineClientTests {
 
         let missing = engine.loadAsset(8, path: dir.appending(path: "nope.wav").path)
         let failed = await engine.waitForJob(missing)
-        #expect(failed.state == .failed && failed.error != nil)
+        #expect(failed.state == .failed)
+        if case .engine(.notFound, _)? = failed.error {} else { Issue.record("DW-076: expected .engine(.notFound), got \(String(describing: failed.error))") }
         #expect(engine.loadAsset(9, path: "") == 0)
 
         let events = engine.pollEvents()
@@ -275,5 +276,22 @@ struct FakeEngineTests {
         fake.play()
         fake.locate(960)
         #expect(fake.transport().playing && fake.transport().tick == 960)
+    }
+
+    @Test("DW-076: engine I/O, out-of-memory, not-found and internal errors map to DAWError.engine")
+    func errorMapping() {
+        func facadeError(_ code: daw.FacadeErrorCode, _ message: String = "m") -> daw.FacadeError {
+            var e = daw.FacadeError()
+            e.code = code
+            e.message = std.string(message)
+            return e
+        }
+        #expect(EngineClient.error(facadeError(.none)) == nil)
+        #expect(EngineClient.error(facadeError(.io, "cannot open x")) == .engine(code: .io, detail: "cannot open x"))
+        #expect(EngineClient.error(facadeError(.outOfMemory)) == .engine(code: .outOfMemory, detail: "m"))
+        #expect(EngineClient.error(facadeError(.notFound)) == .engine(code: .notFound, detail: "m"))
+        #expect(EngineClient.error(facadeError(.internal)) == .engine(code: .internal, detail: "m"))
+        #expect(EngineClient.error(facadeError(.invalidArgument)) == .invalidArgument("m"))
+        #expect(DAWError.engine(code: .io, detail: "x").code == "engine")
     }
 }

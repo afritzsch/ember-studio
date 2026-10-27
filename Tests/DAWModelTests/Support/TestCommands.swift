@@ -7,7 +7,7 @@ enum TestCommands {
     static let all: [any Command.Type] = [
         TestAddTrack.self, TestRemoveTrack.self, TestInsertTrack.self, TestSetGain.self,
         TestAddClip.self, TestRemoveClip.self, TestInsertClip.self, TestNudgeClip.self,
-        TestFailAfterMutation.self, TestBrokenInverse.self,
+        TestFailAfterMutation.self, TestBrokenInverse.self, TestSetProject.self,
     ]
 
     /// Idempotent, so every suite can call it.
@@ -160,5 +160,27 @@ struct TestBrokenInverse: Command {
     func apply(to project: inout Project) throws(DAWError) -> any Command {
         project.name += "!"
         return TestFailAfterMutation()
+    }
+}
+
+/// Replaces the whole project, so engine-sync tests can make any edit (strip, sends, devices,
+/// routing) before the real commands exist (T-022/T-030).
+struct TestSetProject: Command {
+    static let type = "TestSetProject"
+    var project: Project
+    var label: String { "Edit" }
+
+    func apply(to project: inout Project) throws(DAWError) -> any Command {
+        defer { project = self.project }
+        return TestSetProject(project: project)
+    }
+}
+
+extension ProjectStore {
+    /// Performs `body` on a copy of the project as one command.
+    func edit(_ body: (inout Project) -> Void) throws {
+        var p = project
+        body(&p)
+        try perform(TestSetProject(project: p))
     }
 }
