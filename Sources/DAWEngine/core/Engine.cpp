@@ -16,14 +16,6 @@ void silence(const AudioBufferView& out, uint32_t numFrames) DAW_RT {
         std::memset(out.channels[c], 0, std::size_t{numFrames} * sizeof(float));
 }
 
-// TIME-008: a locate while playing resets the timeline nodes (clip and MIDI players), so they
-// drop voices and tails from the old position; effects keep their tails.
-void resetTimelineNodes(const RenderGraph& graph) DAW_RT {
-    // T-012 seam: needs RenderGraph's per-step resetOnLocate flag (set from NodeKind). Until it
-    // exists no step is known to be a timeline node, so none is reset.
-    (void)graph;
-}
-
 } // namespace
 
 Engine::Engine() {
@@ -65,10 +57,13 @@ void Engine::render(RenderTarget& target, uint32_t numFrames) DAW_RT {
         silence(out, n);  // ENG-015
     } else {
         // ENG-041 "advance transport": queued commands apply from this block's first frame
-        // (TIME-004), then the block is laid out on the timeline (TIME-005).
-        // T-012 seam: fallbackTempo_ becomes graph->tempoMap() (TIME-003).
-        const TransportBlock& block = transport_.advance(fallbackTempo_, n);
-        if (transport_.locatedWhilePlaying()) resetTimelineNodes(*graph);  // TIME-008
+        // (TIME-004), then the block is laid out on the timeline (TIME-005) with the map this
+        // graph was built with (TIME-003), so a tempo edit takes effect with its snapshot.
+        const TransportBlock& block = transport_.advance(graph->tempoMap(), n);
+        // TIME-008: a locate while playing resets the timeline nodes (clip and MIDI players), so
+        // they drop voices and tails from the old position; effects keep their tails. Loop wraps
+        // don't reset: they can fall mid-block, and nodes handle them per segment (TIME-006).
+        if (transport_.locatedWhilePlaying()) graph->resetTimelineNodes();
         ProcessContext ctx{n, graph->sampleRate(), block, params_};
         graph->process(ctx);
 

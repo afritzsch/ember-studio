@@ -17,7 +17,6 @@
 #include "core/RenderTarget.h"
 #include "core/RetireQueue.h"
 #include "core/Telemetry.h"
-#include "time/TempoMap.h"
 #include "time/Transport.h"
 
 namespace daw {
@@ -74,10 +73,6 @@ private:
     ParamSlotTable params_;
     // TIME-004..009: advanced at the start of every block that renders a graph.
     Transport transport_;
-    // T-012 seam (TIME-003): render() should hand the transport graph->tempoMap() (approved 05
-    // Interfaces addition: the RenderGraph owns the map GraphBuilder built at the engine's rate).
-    // Until T-012 merges, every graph plays at this map's 120 bpm, 4/4, 48 kHz.
-    TempoMap fallbackTempo_;
     // ENG-010/011. seq_cst on both sides, see Reclaimer.h.
     std::atomic<RenderGraph*> current_{nullptr};
     // ENG-050: written by render() once per block (the "publish telemetry" step).

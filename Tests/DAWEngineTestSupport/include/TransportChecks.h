@@ -47,12 +47,14 @@ CheckResult segmentContinuity();
 CheckResult tempoChangeInsideBlock();
 
 // TIME-003: each block uses the tempo map it is given, never one cached from an earlier block;
-// loop points and locates resolve through it. Through the Engine, nodes see a non-null map.
+// loop points and locates resolve through it. Through the Engine, nodes see the current graph's
+// own map, and a newly published graph's map from the next block on.
 CheckResult tempoMapPerBlock();
 CheckResult engineHandsNodesTheTransportBlock();
 
 // TIME-008: locatedWhilePlaying() is set for a locate applied while playing, only for that
-// block; through the Engine, non-timeline nodes keep their state (no reset()).
+// block. Through the Engine, the graph's resetOnLocate steps are reset once before the block at
+// the new position; other steps, loop wraps and locates while stopped reset nothing.
 CheckResult locateWhilePlayingFlagsReset();
 
 // TIME-009: the playhead is compensated for output latency, clamps to where playback started,

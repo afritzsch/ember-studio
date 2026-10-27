@@ -117,13 +117,27 @@ uint64_t renderCounted(Engine& engine, RenderTarget& target, uint32_t numFrames)
     return scope.violations();
 }
 
-std::unique_ptr<RenderGraph> oneNodeGraph(std::shared_ptr<Node> node) {
+struct GraphStep {
+    std::shared_ptr<Node> node;
+    bool resetOnLocate = false;  // TIME-008: a timeline node
+};
+
+// One step per node, each writing its own buffer; the first is the master. The graph owns
+// `tempo` (TIME-003) and runs at its sample rate.
+std::unique_ptr<RenderGraph> makeGraph(std::vector<GraphStep> steps, const TempoMap& tempo) {
     RenderGraphDesc desc;
-    desc.buffers = std::move(AudioBufferPool::create(1, 2, kMaxBlock)).value();
-    RenderStepDesc step;
-    step.node = std::move(node);
-    step.output = 0;
-    desc.steps.push_back(std::move(step));
+    desc.sampleRate = tempo.sampleRate();
+    desc.tempo = tempo;
+    desc.buffers =
+        std::move(AudioBufferPool::create(static_cast<uint32_t>(steps.size()), 2, kMaxBlock))
+            .value();
+    for (std::size_t i = 0; i < steps.size(); ++i) {
+        RenderStepDesc step;
+        step.node = std::move(steps[i].node);
+        step.output = static_cast<uint32_t>(i);
+        step.resetOnLocate = steps[i].resetOnLocate;
+        desc.steps.push_back(std::move(step));
+    }
     desc.master = 0;
     return std::move(RenderGraph::create(std::move(desc))).value();
 }
@@ -187,9 +201,13 @@ private:
 class TransportProbe final : public Node {
 public:
     void prepare(const PrepareInfo&) override {}
-    void reset() DAW_RT override { resets.fetch_add(1, std::memory_order_relaxed); }
+    void reset() DAW_RT override {
+        resets.fetch_add(1, std::memory_order_relaxed);
+        resetPending_ = true;
+    }
     void process(ProcessContext& ctx, NodeIO& io) DAW_RT override {
         const TransportBlock& block = ctx.transport;
+        tempo = block.tempo;
         sawNullTempo = sawNullTempo || block.tempo == nullptr;
         if (block.tempo != nullptr) {
             bpm = tempoAtStart(block);
@@ -198,17 +216,26 @@ public:
         playing = block.playing;
         numSegments = block.numSegments;
         frames = segmentFrames(block);
+        if (resetPending_) {  // the block a reset() came before
+            resetBefore = blockStartSample(block);
+            resetPending_ = false;
+        }
         for (uint32_t c = 0; c < io.audioOut.numChannels; ++c)
             for (uint32_t f = 0; f < ctx.numFrames; ++f) io.audioOut.channels[c][f] = 0.0f;
     }
 
     std::atomic<int> resets{0};
+    SamplePos resetBefore = -1;  // start of the block processed right after the last reset()
+    const TempoMap* tempo = nullptr;
     bool sawNullTempo = false;
     bool playing = false;
     double bpm = 0;
     SamplePos startSample = -1;
     uint8_t numSegments = 99;
     uint32_t frames = 0;
+
+private:
+    bool resetPending_ = false;
 };
 
 } // namespace
@@ -563,7 +590,8 @@ CheckResult transportLoopEdgeCases() {
 CheckResult timelineNodeHonorsSegments() {
     CheckResult checks;
     Engine engine;
-    const TempoMap map;  // the Engine's map until T-012: 120 bpm, 48 kHz, 25 samples per tick
+    // The graph's own map (TIME-003): a tempo change inside the loop.
+    const TempoMap map = makeMap({{0, 97.0}, {3000, 143.5}});
 
     // Events every 37 ticks, plus ones on the loop's start and end ticks.
     constexpr Tick kLoopStart = 1000, kLoopEnd = 1000 + 4 * 960;
@@ -574,7 +602,7 @@ CheckResult timelineNodeHonorsSegments() {
     std::sort(eventSamples.begin(), eventSamples.end());
 
     auto node = put(engine, 1, std::make_unique<TickImpulseNode>(events));
-    engine.publish(oneNodeGraph(node));
+    engine.publish(makeGraph({{node, true}}, map));
     DAW_CHECK(engine.transport().setLoop(true, kLoopStart, kLoopEnd));
     DAW_CHECK(engine.transport().locate(200) && engine.transport().play());
 
@@ -683,33 +711,50 @@ CheckResult engineHandsNodesTheTransportBlock() {
     CheckResult checks;
     Engine engine;
     auto probe = std::make_shared<TransportProbe>();
-    engine.publish(oneNodeGraph(probe));
+    const TempoMap slow = makeMap({{0, 60.0}});   // 50 samples per tick
+    const TempoMap fast = makeMap({{0, 120.0}});  // 25 samples per tick
+    auto first = makeGraph({{probe}}, slow);
+    const TempoMap* firstMap = &first->tempoMap();
+    engine.publish(std::move(first));
     Target out(kMaxBlock);
     uint64_t violations = 0;
 
     violations += renderCounted(engine, out.target, 256);
     DAW_CHECK(!probe->playing && probe->numSegments == 0 && probe->startSample == 0);
+    // TIME-003: the block points at the current graph's own map.
+    DAW_CHECK(probe->tempo == firstMap && probe->bpm == 60.0);
 
-    // Commands from this thread apply at the next render's first frame (TIME-004, ENG-041).
+    // Commands from this thread apply at the next render's first frame (TIME-004, ENG-041), and
+    // the locate resolves through the graph's map.
     DAW_CHECK(engine.transport().locate(960) && engine.transport().play());
     DAW_CHECK(!engine.transport().playhead().playing);
     violations += renderCounted(engine, out.target, 256);
     DAW_CHECK(probe->playing && probe->numSegments == 1 && probe->frames == 256);
-    DAW_CHECK(probe->startSample == 24000);
-    // T-012 seam: the fallback map until RenderGraph::tempoMap() exists.
-    DAW_CHECK(!probe->sawNullTempo && probe->bpm == 120.0);
+    DAW_CHECK(probe->startSample == 48000);
     DAW_CHECK(engine.transport().playhead().playing);
-    DAW_CHECK(engine.transport().playhead().sample == 24000);
+    DAW_CHECK(engine.transport().playhead().sample == 48000);
+    DAW_CHECK(engine.transport().playhead().tick == 960);
 
+    // TIME-003: a tempo edit is a new snapshot; the next block uses its map. The position keeps
+    // its sample; the tick under it follows the new map.
+    auto second = makeGraph({{probe}}, fast);
+    const TempoMap* secondMap = &second->tempoMap();
+    engine.publish(std::move(second));
     violations += renderCounted(engine, out.target, 128);
-    DAW_CHECK(probe->startSample == 24256);
+    DAW_CHECK(probe->tempo == secondMap && probe->bpm == 120.0);
+    DAW_CHECK(probe->startSample == 48256);
+    DAW_CHECK(engine.transport().playhead().tick == fast.sampleToTick(48256));
+    DAW_CHECK(engine.transport().locate(960));
+    violations += renderCounted(engine, out.target, 128);
+    DAW_CHECK(probe->startSample == 24000);
 
     // Without a graph nothing renders and the transport stands still.
     engine.publish(nullptr);
     violations += renderCounted(engine, out.target, 128);
-    engine.publish(oneNodeGraph(probe));
+    engine.publish(makeGraph({{probe}}, fast));
     violations += renderCounted(engine, out.target, 128);
-    DAW_CHECK(probe->startSample == 24384);
+    DAW_CHECK(probe->startSample == 24128);
+    DAW_CHECK(!probe->sawNullTempo);
     DAW_CHECK(violations == 0);
     return checks;
 }
@@ -747,20 +792,41 @@ CheckResult locateWhilePlayingFlagsReset() {
         DAW_CHECK(!t.locatedWhilePlaying());
     }
     {
-        // Through the Engine: a non-timeline node (an effect) keeps its state on a locate.
-        // T-012 seam: once RenderGraph marks timeline steps (resetOnLocate), this also checks
-        // that a timeline node is reset exactly once.
+        // Through the Engine, with a real graph: a timeline step (resetOnLocate) is reset once,
+        // before the block at the new position; an effect step keeps its state.
         Engine engine;
+        auto timeline = std::make_shared<TransportProbe>();
         auto effect = std::make_shared<TransportProbe>();
-        engine.publish(oneNodeGraph(effect));
+        engine.publish(makeGraph({{timeline, true}, {effect, false}}, map));
         Target out(kMaxBlock);
         uint64_t violations = 0;
         DAW_CHECK(engine.transport().play());
         violations += renderCounted(engine, out.target, 64);
+        DAW_CHECK(timeline->resets.load() == 0);  // starting playback isn't a locate
+
         DAW_CHECK(engine.transport().locate(960));
         violations += renderCounted(engine, out.target, 64);
-        DAW_CHECK(effect->startSample == 24000);
-        DAW_CHECK(effect->resets.load() == 0);
+        DAW_CHECK(timeline->resets.load() == 1 && timeline->resetBefore == 24000);
+        DAW_CHECK(effect->resets.load() == 0 && effect->startSample == 24000);
+        violations += renderCounted(engine, out.target, 64);
+        DAW_CHECK(timeline->resets.load() == 1);  // only that block
+
+        // Loop wraps (mid-block and on a block boundary) don't reset: nodes handle them per
+        // segment (TIME-006).
+        DAW_CHECK(engine.transport().setLoop(true, 0, 40) && engine.transport().locate(30));
+        violations += renderCounted(engine, out.target, 64);   // the locate: reset #2
+        DAW_CHECK(timeline->resets.load() == 2 && timeline->resetBefore == 750);
+        violations += renderCounted(engine, out.target, 186);  // ends on the loop end (1000)
+        violations += renderCounted(engine, out.target, 600);  // starts after the wrap
+        violations += renderCounted(engine, out.target, 4096);  // wraps mid-block
+        DAW_CHECK(timeline->resets.load() == 2);
+
+        // Stopped: a locate just moves the position.
+        DAW_CHECK(engine.transport().stop());
+        violations += renderCounted(engine, out.target, 64);
+        DAW_CHECK(engine.transport().locate(0));
+        violations += renderCounted(engine, out.target, 64);
+        DAW_CHECK(timeline->resets.load() == 2 && effect->resets.load() == 0);
         DAW_CHECK(violations == 0);
     }
     DAW_CHECK(advance.violations == 0);

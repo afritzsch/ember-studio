@@ -50,13 +50,13 @@ struct TransportTempoTests {
     @Test("TIME-003: each block uses the tempo map it is given; loop and locate resolve through it")
     func mapPerBlock() { expectPasses(daw.testing.tempoMapPerBlock()) }
 
-    @Test("TIME-003, ENG-041: Engine::render advances the transport and hands nodes the block")
+    @Test("TIME-003, ENG-041: Engine::render hands nodes the block, pointing at the current graph's tempo map")
     func engineBlock() { expectPasses(daw.testing.engineHandsNodesTheTransportBlock()) }
 }
 
 @Suite("Locate (TIME-008)")
 struct TransportLocateTests {
-    @Test("TIME-008: locate while playing flags a reset for one block; effects keep their state")
+    @Test("TIME-008: locate while playing resets the graph's timeline nodes once; effects keep their state")
     func locateFlagsReset() { expectPasses(daw.testing.locateWhilePlayingFlagsReset()) }
 }
 
