@@ -1,8 +1,7 @@
 #pragma once
-// 03-time-transport Interfaces: what the transport hands the graph for one block (TIME-005).
-// Defined here by T-004, verbatim from the contract, because ProcessContext (ENG-001) holds a
-// reference to one and Engine::render must bind a real object every block. Plain data only:
-// producing it (advancing the transport, loop segments) is T-008's.
+// 03-time-transport Interfaces: what the transport hands the graph for one block (TIME-005),
+// verbatim from the contract. Plain data: Transport::advance (Transport.h) produces it, and
+// TransportSegments.h says what the fields mean and how timeline nodes read them (TIME-006).
 
 #include <cstdint>
 

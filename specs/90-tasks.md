@@ -30,7 +30,7 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 | T-005 | E | ParamSlotTable + ParamSmoother | ENG-020..023 | T-002 | done |
 | T-006 | E | Telemetry snapshot | ENG-050, 051 | T-004 | done |
 | T-007 | M | TempoMap (C++ and Swift) + shared vector fixtures | TIME-001, 002, 011 | T-001 | done |
-| T-008 | E | Transport, TransportBlock, loop segments, playhead atomic | TIME-003..009 | T-004, T-007 | wip(t-008-transport) |
+| T-008 | E | Transport, TransportBlock, loop segments, playhead atomic | TIME-003..009 | T-004, T-007 | done |
 | T-009 | E | OfflineDriver + AudioFileWriter | IO-010..013, IO-035 | T-004 | done |
 | T-010 | E | AudioFileLoader, resampling, AudioAsset, peak mipmaps | IO-030..034 (IO-033 deferred to T-056) | T-002 | done |
 | T-011 | E | CoreAudioDriver, workgroup join, latency reporting | IO-001..005 | T-004 | ready |
@@ -229,7 +229,7 @@ Recorded by the lead from worker reports.
 | DW-035 | T-004 | 00-conventions §3 gives no QoS for `daw.reclaim`; T-004 used `QOS_CLASS_UTILITY`. Record in the spec | spec (lead) | todo |
 | DW-036 | T-004 | GraphBuilder: a `NodeDesc.configVersion` bump must `NodePool::put` a new prepared instance (a node a live graph may render can't be re-prepared in place). RenderGraph doesn't route MIDI yet (`midiIn` empty, `midiOut` capacity 0) | E (T-012), D (T-040) | done (T-012) |
 | DW-037 | T-004 | Telemetry: fill the seam in `Engine::render`; count oversize blocks (rendered as silence) and RetireQueue-full; DW-024 can use the render `RtScope` count | E (T-006) | done (T-006) |
-| DW-038 | T-004 | `time/TransportBlock.h` was created by T-004 verbatim from 03 Interfaces; T-008 owns it and fills the "advance transport" seam | E (T-008) | todo |
+| DW-038 | T-004 | `time/TransportBlock.h` was created by T-004 verbatim from 03 Interfaces; T-008 owns it and fills the "advance transport" seam | E (T-008) | done (T-008) |
 | DW-039 | T-004 | LSan isn't supported on macOS; TEST-007 leak checks need `leaks --atExit` or similar | E (T-084 / T-019) | todo |
 | DW-040 | T-010 | Reclaim API gaps: no non-RT retire path (RetireQueue is audio-thread-only; Reclaimer takes only graphs/nodes from other threads), and no Release-safe "am I the render thread?" query (`RtTrap::inRealtimeContext()` is false in Release, not nonblocking). So asset retirement is an explicit call, not automatic | E (T-004 follow-up) | todo |
 | DW-041 | T-010 | Something must own the `AudioFileLoader` (daw.loader) and forward its completions as EngineEvents | E/B (T-014) | todo |
@@ -249,3 +249,8 @@ Recorded by the lead from worker reports.
 | DW-055 | T-009 | Fill the marked seam in `OfflineDriver::render`: `transport.locate(from)` + `play()` before the loop, `stop()` after. Rendering twice on one engine is bit-identical only for stateless nodes, so the pre-render locate must reset timeline nodes even when stopped (TIME-008 covers locate while playing), or IO-011 needs an engine-level reset | E (T-009 follow-up after T-008) | todo |
 | DW-056 | T-009 | `ExportSpec.blockSize` can't be checked against the published graph's `maxBlock` (Engine doesn't expose it); an oversize block renders silence silently. Add a non-RT `Engine::currentMaxBlock()` or check in the facade. `ExportSpec`/`ProgressFn` were undefined in the specs; T-009 defined them in `io/ExportSpec.h` (carries the TempoMap; now that `RenderGraph::tempoMap()` exists, reconsider) | E / B (T-014) | todo |
 | DW-057 | T-009 | Facade: map `ExportSpecPOD` → `daw::ExportSpec`, run offline render on a job thread with the device driver stopped, turn `OfflineProgress` into job status. Cancellation would need `ErrorCode::cancelled` | B (T-014) | todo |
+| DW-058 | T-008 | Goldens `loop_wrap_midblock` (TIME-005) and locate/no-stuck-voices (TIME-008) | E (T-019) | todo |
+| DW-059 | T-008 | Driver calls `Engine::transport().setOutputLatency(samples)`; facade `TransportPOD` maps from `TransportPlayhead` | E (T-011), B (T-014) | todo |
+| DW-060 | T-008 | Loops shorter than a block (< 4096 samples) play once then leave a gap (contract allows 2 segments). Model should enforce a minimum loop length | M (T-030 SetLoop) | todo |
+| DW-061 | T-008 | Product question: on a tempo edit the playhead keeps its sample position, so its musical position shifts. Keeping the tick instead needs a decision | user | todo |
+| DW-062 | T-008 | 03 clarifications: a segment's [startTick, endTick) is exactly the ticks whose events sound in it; a stopped/0-frame block has 0 segments and seg[0] carries the position; past the loop end plays on; loop wraps don't reset nodes. Also `RenderStepDesc::resetOnLocate` comment in `core/RenderGraph.h` says "locate or loop jump" — should say locate only | spec (lead) + E (small) | todo |

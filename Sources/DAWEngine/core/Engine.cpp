@@ -56,8 +56,15 @@ void Engine::render(RenderTarget& target, uint32_t numFrames) DAW_RT {
     if (graph == nullptr || n > graph->maxBlock()) {
         silence(out, n);  // ENG-015
     } else {
-        // T-008 (ENG-041 "advance transport"): transport_ = transport.advance(n) goes here.
-        ProcessContext ctx{n, graph->sampleRate(), transport_, params_};
+        // ENG-041 "advance transport": queued commands apply from this block's first frame
+        // (TIME-004), then the block is laid out on the timeline (TIME-005) with the map this
+        // graph was built with (TIME-003), so a tempo edit takes effect with its snapshot.
+        const TransportBlock& block = transport_.advance(graph->tempoMap(), n);
+        // TIME-008: a locate while playing resets the timeline nodes (clip and MIDI players), so
+        // they drop voices and tails from the old position; effects keep their tails. Loop wraps
+        // don't reset: they can fall mid-block, and nodes handle them per segment (TIME-006).
+        if (transport_.locatedWhilePlaying()) graph->resetTimelineNodes();
+        ProcessContext ctx{n, graph->sampleRate(), block, params_};
         graph->process(ctx);
 
         // ENG-041: write master to the target.

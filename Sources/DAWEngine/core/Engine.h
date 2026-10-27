@@ -17,7 +17,7 @@
 #include "core/RenderTarget.h"
 #include "core/RetireQueue.h"
 #include "core/Telemetry.h"
-#include "time/TransportBlock.h"
+#include "time/Transport.h"
 
 namespace daw {
 
@@ -47,6 +47,10 @@ public:
     ParamSlotTable& params() { return params_; }
     NodePool& nodes() { return nodes_; }  // non-RT
 
+    // TIME-004/009: commands and the playhead from any non-RT thread; render() advances it.
+    Transport& transport() { return transport_; }
+    const Transport& transport() const { return transport_; }
+
     // ENG-014: for RT code that is done with a heap object (audio thread only).
     RetireQueue& retireQueue() { return reclaimer_.rtQueue(); }
 
@@ -67,8 +71,8 @@ private:
     Reclaimer reclaimer_{renderEpoch_};
     NodePool nodes_{reclaimer_};
     ParamSlotTable params_;
-    // T-008: the transport produces this every block. Until then it stays stopped at 0.
-    TransportBlock transport_{};
+    // TIME-004..009: advanced at the start of every block that renders a graph.
+    Transport transport_;
     // ENG-010/011. seq_cst on both sides, see Reclaimer.h.
     std::atomic<RenderGraph*> current_{nullptr};
     // ENG-050: written by render() once per block (the "publish telemetry" step).

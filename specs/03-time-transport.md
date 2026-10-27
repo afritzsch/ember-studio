@@ -55,4 +55,11 @@ public struct TempoMap: Codable, Sendable { ... same API ... }
 | ID | status | test |
 |---|---|---|
 | TIME-001, TIME-002, TIME-011 | done (T-007) | `DAWEngineTests/TempoMapTests` + `DAWModelTests/TempoMapTests` against shared `Tests/Fixtures/tempo_vectors.json` (incl. bit-exact vectors); conversions run inside RtScope with 0 violations |
+| TIME-003 | done (T-008) | `TransportTests` (each block uses the map it's given; Engine points `TransportBlock.tempo` at the current graph's `tempoMap()`) |
+| TIME-004 | done (T-008) | `TransportTests` (commands apply in order at block start, validated, full queue refuses; several producers, each applied once). Producers serialize on a send-side mutex; queue holds 256 |
+| TIME-005 | partial (T-008) | `TransportTests` (one segment without loop; wrap mid-block → 2 segments; wrap at block boundary; random block sizes vs frame model; edge cases). Golden `loop_wrap_midblock` pending (T-019) |
+| TIME-006 | done (T-008) | `TransportTests` (test timeline node through Engine places every event exactly; `SegmentContinuity`). Helpers in `time/TransportSegments.h`; clip player golden with T-013 |
+| TIME-007 | done (T-008) | `TransportTests` (block spanning a tempo change runs at start tempo; events exact) |
+| TIME-008 | partial (T-008) | `TransportTests` (locate while playing resets timeline nodes once; effects keep state). Loop wraps don't reset (TIME-006 handles them). Golden pending (T-019) |
+| TIME-009 | done (T-008) | `TransportTests` (latency-compensated playhead, clamped at play start, unwrapped after wrap; seqlock, never torn) |
 | TIME-* (rest) | todo | |
