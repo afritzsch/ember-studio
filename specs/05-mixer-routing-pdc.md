@@ -21,7 +21,7 @@ Sidechain: any track/bus (pre- or post-fader) → a plugin's sidechain input
 | MIX-001 | `GraphBuilder::build(const GraphDescription&, NodePool&, ParamSlotTable&) → Result<unique_ptr<RenderGraph>>` runs on `daw.compile`. It is the only producer of RenderGraphs. | Unit |
 | MIX-002 | Topological sort (Kahn). A cycle returns `Error::cycle` with the offending NodeIDs. The model should have prevented it (MODEL-030), so this is a defensive check. | Unit with crafted cyclic description |
 | MIX-003 | Buffer allocation: assign scratch buffers by liveness (graph coloring over the topo order) to minimize memory. | Test: 100-track project uses ≤ (max fan-in + depth) buffers |
-| MIX-004 | Summing: multiple edges into one input are summed. Stereo throughout v1 (mono sources are duplicated to L/R at the clip player). | Golden |
+| MIX-004 | Summing: multiple edges into one input are summed. Stereo throughout v1 (mono sources are duplicated to L/R at the clip player). Ports in v1: `audio` edges use `toPort` 0 (the node's main input); `sidechain` edges feed the node's sidechain input (`toPort` 0); other `toPort` values are rejected with `invalidArgument`. | Golden |
 | MIX-005 | Channel strip: gain (−∞..+12 dB, slot), pan (−1..1, slot, **−3 dB constant-power pan law**), mute, solo, phase invert, peak + RMS meter (300 ms window) into telemetry. | Golden: pan hard-left/center/right levels |
 | MIX-006 | Solo logic: if any track is soloed, non-soloed tracks are muted, except tracks feeding a soloed bus and buses that soloed tracks feed (solo-in-place). Computed in the builder, not at RT. Mute/solo are slots read per block to avoid rebuilds. | Unit truth table |
 | MIX-007 | Sends: per-send level slot, pre/post-fader tap, target bus. | Golden |
@@ -51,23 +51,16 @@ struct EdgeDesc { uint64_t edgeID; NodeID from; NodeID to; EdgeKind kind; uint8_
 struct ClipDesc { NodeID player; uint64_t clipID; Tick start; Tick length; uint64_t assetID;
                   int64_t sourceOffsetSamples; float gain; Tick fadeIn, fadeOut; /* audio */ };
 struct NoteDesc { NodeID player; Tick start; Tick length; uint8_t pitch, velocity, channel; };
+struct TempoPointDesc { Tick tick; double bpm; };              // mirrors daw::TempoEvent (03)
+struct TimeSigDesc    { Tick tick; int32_t num; int32_t den; }; // mirrors daw::TimeSigEvent (03)
+struct TempoMapDesc   { std::vector<TempoPointDesc> tempos; std::vector<TimeSigDesc> timeSigs; };
 struct GraphDescription { uint64_t version; std::vector<NodeDesc> nodes; std::vector<EdgeDesc> edges;
                           std::vector<ClipDesc> audioClips; std::vector<NoteDesc> notes;
                           TempoMapDesc tempo; NodeID master; };
 }
 ```
 
-> **PROPOSED (T-012): define `TempoMapDesc`.** The contract above uses `TempoMapDesc`, but no spec or header defines it, so `GraphDescription.h` can't be written "exactly per 05 Interfaces". Proposed addition (same header, before `GraphDescription`):
-> ```cpp
-> struct TempoPointDesc { Tick tick; double bpm; };              // mirrors daw::TempoEvent (03)
-> struct TimeSigDesc    { Tick tick; int32_t num; int32_t den; }; // mirrors daw::TimeSigEvent (03)
-> struct TempoMapDesc   { std::vector<TempoPointDesc> tempos; std::vector<TimeSigDesc> timeSigs; };
-> ```
-> - **Own POD structs, not 03's `TempoEvent`/`TimeSigEvent`.** `include/daw/` is what Swift sees through the facade (01 Interfaces). It can't `#include "time/TempoMap.h"`, because that path isn't on the public include path and would pull `Result`/`Realtime` into the Swift module. For the same reason, `GraphDescription.h` redeclares `NodeID`, `ParamID` and `Tick` as identical aliases (`uint64_t`, `uint32_t`, `int64_t`), which is legal C++.
-> - **No sample rate in the desc.** `GraphBuilder` builds the map with `TempoMap::make(tempos, sigs, <the rate it prepares nodes at>)`, which keeps the engine's rate the single source of truth on the C++ side (cf. DW-020). An invalid map makes `build()` fail with `invalidArgument`. The model has already validated it (`Project.setTempoMap`), so this is a defensive check.
-> - **The RenderGraph owns the built `TempoMap`** (TIME-003: immutable within a RenderGraph) and exposes `const TempoMap& tempoMap() const`. `Engine::render` points `TransportBlock.tempo` at it.
->
-> Affected: **T-012** (header + builder), **T-008** (Engine's transport seam takes `TransportBlock.tempo` from the current graph), **T-014** (facade converts / passes it through, 08), **T-016** (model fills it from `Project.tempoMap.tempoEvents/timeSignatures`). Specs: 05 (this section), 03 (TIME-003, where the map lives), 08.
+`TempoMapDesc` (approved T-012) uses its own POD event structs rather than 03's `TempoEvent`/`TimeSigEvent`, because `include/daw/` is what Swift sees (01 Interfaces) and can't include `time/TempoMap.h`. For the same reason, the header redeclares `NodeID`, `ParamID` and `Tick` as identical aliases. The desc carries no sample rate: `GraphBuilder` builds the `TempoMap` at the rate it prepares nodes at (fails with `invalidArgument` on an invalid map), and the RenderGraph owns it (`RenderGraph::tempoMap()`, TIME-003).
 
 ## Status
 | ID | status | test |
