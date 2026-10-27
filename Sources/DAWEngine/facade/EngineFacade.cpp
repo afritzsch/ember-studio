@@ -34,6 +34,7 @@
 #include "graph/GraphCompiler.h"
 #include "graph/NodeRegistry.h"
 #include "io/AudioFileLoader.h"
+#include "io/DriverConfig.h"
 #include "io/ExportSpec.h"
 #include "io/OfflineDriver.h"
 #include "time/TempoMap.h"
@@ -54,6 +55,10 @@ namespace {
 constexpr std::size_t kMaxEvents = 1024;      // BRIDGE-004: polled at 60 Hz; overflow drops oldest
 constexpr std::size_t kMaxFinishedJobs = 1024;
 constexpr auto kExportGraphWait = std::chrono::seconds(30);
+
+// DW-067: graphs must be prepared for the device's whole buffer, or its blocks render silence.
+// GraphCompiler prepares for kMaxBlock, above any buffer a driver accepts (IO-003).
+static_assert(kMaxBlock >= kMaxDeviceBuffer);
 
 // BRIDGE-001 diagnostics: the facades alive in this process.
 std::mutex liveMutex;
@@ -127,12 +132,15 @@ Result<NodeRegistry> makeRegistry(AssetTable& assets, Telemetry& telemetry, cons
 // MARK: Impl
 
 struct EngineFacade::Impl {
-    Impl(EngineMode mode, const DriverConfig& config, FacadeOptions options);
+    Impl(EngineMode mode, const DriverConfigPOD& config, FacadeOptions options);
     ~Impl();
 
     // Everything below runs with `mutex` held.
     void pump();
     void pushEvent(EngineEventPOD event);
+    // What the driver is started with: the requested config, input while anything is armed.
+    DriverConfig driverConfig() const;
+    Result<void> restartDriver();
     bool rendererActive() const { return exportRunning || (driver && driver->running()); }
     void applyTransportCommands();
     JobID addJob(JobKind kind, JobState state);
@@ -151,7 +159,8 @@ struct EngineFacade::Impl {
     // before the state their callbacks touch, and the engine outlives everything rendering
     // into it. ~Impl stops the driver and the export thread first.
     mutable std::mutex mutex;
-    DriverConfig config;
+    DriverConfigPOD config;
+    std::set<NodeID> armedTracks;  // DW-067: input runs while this isn't empty
     double sampleRate = 0;
 
     // Graphs (DW-047, DW-053). applyGraph is the compiler's only submitter, so its tickets are
@@ -195,13 +204,13 @@ struct EngineFacade::Impl {
     std::thread exportThread;    // last: started once everything above exists
 };
 
-EngineFacade::Impl::Impl(EngineMode m, const DriverConfig& cfg, FacadeOptions options)
+EngineFacade::Impl::Impl(EngineMode m, const DriverConfigPOD& cfg, FacadeOptions options)
     : mode(m), config(cfg) {
     sampleRate = cfg.sampleRate;
     if (mode == EngineMode::realtime) {
         driver = std::move(options.driver);
         if (driver) {
-            auto started = driver->start(engine, config);
+            auto started = driver->start(engine, driverConfig());
             if (started) {
                 driverStarted = true;
                 sampleRate = driver->sampleRate();
@@ -237,6 +246,27 @@ EngineFacade::Impl::~Impl() {
     exportWake.notify_all();
     exportThread.join();
     // The loader and compiler join in their destructors, then the engine frees what's left.
+}
+
+DriverConfig EngineFacade::Impl::driverConfig() const {
+    DriverConfig out;
+    out.outputDevice = config.outputDevice;
+    out.inputDevice = config.inputDevice;
+    out.inputEnabled = !armedTracks.empty();
+    out.sampleRate = config.sampleRate;
+    out.bufferFrames = config.bufferFrames;
+    out.outputChannels = config.outputChannels;
+    out.inputChannels = config.inputChannels;
+    return out;
+}
+
+// Stops and starts the device with driverConfig(); an export restarts it itself when it ends.
+Result<void> EngineFacade::Impl::restartDriver() {
+    if (!driver || exportRunning) return {};
+    driver->stop();
+    auto started = driver->start(engine, driverConfig());
+    driverStarted = started.ok();
+    return started;
 }
 
 void EngineFacade::Impl::pushEvent(EngineEventPOD event) {
@@ -436,7 +466,7 @@ void EngineFacade::Impl::runExport(JobID jobID, Tick from, Tick to, const Export
     if (render) {
         exportRunning = false;
         if (driverStarted && driver && !stopping) {
-            auto restarted = driver->start(engine, config);
+            auto restarted = driver->start(engine, driverConfig());
             if (!restarted) {
                 driverStarted = false;
                 EngineEventPOD event;
@@ -474,13 +504,13 @@ bool EngineFacade::isLive(uint64_t instanceID) {
     return liveFacades.count(instanceID) != 0;
 }
 
-EngineFacade* EngineFacade::create(EngineMode mode, const DriverConfig& config) {
+EngineFacade* EngineFacade::create(EngineMode mode, const DriverConfigPOD& config) {
     FacadeOptions options;
     if (mode == EngineMode::realtime) options.driver = makeDefaultDriverAdapter();
     return EngineFacadeAccess::create(mode, config, std::move(options));
 }
 
-EngineFacade* EngineFacadeAccess::create(EngineMode mode, const DriverConfig& config, FacadeOptions options) {
+EngineFacade* EngineFacadeAccess::create(EngineMode mode, const DriverConfigPOD& config, FacadeOptions options) {
     // BRIDGE-008: offline mode renders at the configured session rate.
     if (mode == EngineMode::offline &&
         !(config.sampleRate >= kMinSampleRate && config.sampleRate <= kMaxSampleRate))
@@ -645,7 +675,25 @@ JobStatus EngineFacade::pollJob(JobID job) const {
 
 // MARK: Recording and plugins: later tasks (09, 10)
 
-void EngineFacade::armInput(NodeID, uint32_t, bool) {}  // REC (T-030s)
+// DW-067: no live input switch, so input on/off restarts the device. Routing the channel pair
+// to the track is 09 (T-030s).
+void EngineFacade::armInput(NodeID track, uint32_t, bool armed) {
+    std::lock_guard lock(impl_->mutex);
+    Impl& impl = *impl_;
+    const bool wasEnabled = !impl.armedTracks.empty();
+    if (armed)
+        impl.armedTracks.insert(track);
+    else
+        impl.armedTracks.erase(track);
+    if (wasEnabled == impl.armedTracks.empty() && impl.driverStarted) {
+        if (auto restarted = impl.restartDriver(); !restarted) {
+            EngineEventPOD event;
+            event.type = EngineEventType::deviceChanged;
+            event.error = toFacadeError(restarted.error());
+            impl.pushEvent(std::move(event));
+        }
+    }
+}
 
 JobID EngineFacade::instantiatePlugin(NodeID, const PluginDescriptorPOD&) {
     std::lock_guard lock(impl_->mutex);
@@ -684,7 +732,7 @@ std::vector<DeviceInfoPOD> EngineFacade::devices() const {
     return impl_->driver ? impl_->driver->devices() : std::vector<DeviceInfoPOD>{};
 }
 
-FacadeError EngineFacade::setDevice(const DriverConfig& config) {
+FacadeError EngineFacade::setDevice(const DriverConfigPOD& config) {
     std::lock_guard lock(impl_->mutex);
     Impl& impl = *impl_;
     if (impl.mode != EngineMode::realtime || !impl.driver)
@@ -695,10 +743,7 @@ FacadeError EngineFacade::setDevice(const DriverConfig& config) {
     impl.config = config;
     // During an export the device is paused; it restarts with the new config afterwards.
     if (impl.exportRunning) return {};
-    impl.driver->stop();
-    auto started = impl.driver->start(impl.engine, config);
-    impl.driverStarted = started.ok();
-    if (!started) return toFacadeError(started.error());
+    if (auto started = impl.restartDriver(); !started) return toFacadeError(started.error());
     if (impl.driver->sampleRate() != impl.sampleRate) {
         impl.driver->stop();
         impl.driverStarted = false;

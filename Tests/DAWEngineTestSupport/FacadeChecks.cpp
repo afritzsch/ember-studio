@@ -24,6 +24,7 @@
 #include "facade/DriverAdapter.h"
 #include "facade/FacadeErrors.h"
 #include "facade/FacadeOptions.h"
+#include "io/DriverConfig.h"
 #include "graph/NodeRegistry.h"
 
 using namespace daw;
@@ -73,8 +74,9 @@ public:
     }
     bool running() const override { return running_; }
     double sampleRate() const override { return rate_; }
+    uint32_t bufferFrames() const override { return config().bufferFrames; }
     std::vector<DeviceInfoPOD> devices() const override {
-        return {DeviceInfoPOD{"fake-uid", "Fake Output", 0, 2, rate_, true}};
+        return {DeviceInfoPOD{42, "Fake Output", 0, 2, rate_, true}};
     }
 
     // `blocks` blocks of kBlock frames while running. Returns the RT violations they counted.
@@ -155,7 +157,7 @@ struct Harness {
                 return std::unique_ptr<Node>(new ParamSource(info.desc.firstParam));
             }});
         };
-        DriverConfig config;
+        DriverConfigPOD config;
         config.sampleRate = mode == EngineMode::offline ? kRate : 0;
         facade = EngineFacadeAccess::create(mode, config, std::move(options));
     }
@@ -433,7 +435,7 @@ CheckResult facadeRealtimeDriverSeam() {
         DAW_CHECK(t.deviceRunning);
         DAW_CHECK(t.sampleRate == 44100.0);  // graphs are built at the device's rate
         const auto devices = facade.devices();
-        DAW_CHECK(devices.size() == 1 && devices[0].uid == "fake-uid");
+        DAW_CHECK(devices.size() == 1 && devices[0].deviceID == 42);
 
         // Transport commands are applied by the device's blocks, not by the facade.
         DAW_CHECK(published(facade, facade.applyGraph(masterOnly())));
@@ -447,13 +449,25 @@ CheckResult facadeRealtimeDriverSeam() {
         DAW_CHECK(h.driver->render(1) == 0);
         DAW_CHECK(!facade.transport().playing);
 
-        DriverConfig config;
-        config.outputDeviceUID = "fake-uid";
-        config.bufferSize = 128;
+        DriverConfigPOD config;
+        config.outputDevice = 42;
+        config.bufferFrames = 128;
         config.sampleRate = 0;  // the device's rate
         DAW_CHECK(facade.setDevice(config).ok());
-        DAW_CHECK(h.driver->config().bufferSize == 128);
+        DAW_CHECK(h.driver->config().bufferFrames == 128 && h.driver->config().outputDevice == 42);
         DAW_CHECK((h.driver->log() == std::vector<std::string>{"start", "stop", "start"}));
+        DAW_CHECK(!h.driver->config().inputEnabled);
+
+        // DW-067: arming the first track turns input on by restarting the device; more tracks
+        // don't; disarming the last turns it off again.
+        facade.armInput(7, 0, true);
+        DAW_CHECK(h.driver->config().inputEnabled && h.driver->log().size() == 5);
+        facade.armInput(8, 1, true);
+        facade.armInput(7, 0, false);
+        DAW_CHECK(h.driver->config().inputEnabled && h.driver->log().size() == 5);
+        facade.armInput(8, 1, false);
+        DAW_CHECK(!h.driver->config().inputEnabled && h.driver->log().size() == 7);
+        DAW_CHECK(h.driver->running());
         config.sampleRate = 96000;
         DAW_CHECK(facade.setDevice(config).code == FacadeErrorCode::unsupported);
 
@@ -468,7 +482,7 @@ CheckResult facadeRealtimeDriverSeam() {
         auto fake = std::make_unique<FakeDriver>();
         fake->failStarts(true);
         options.driver = std::move(fake);
-        EngineFacade* facade = EngineFacadeAccess::create(EngineMode::realtime, DriverConfig{}, std::move(options));
+        EngineFacade* facade = EngineFacadeAccess::create(EngineMode::realtime, DriverConfigPOD{}, std::move(options));
         DAW_CHECK(facade != nullptr);
         if (facade) {
             DAW_CHECK(!facade->telemetry().deviceRunning);
@@ -479,18 +493,18 @@ CheckResult facadeRealtimeDriverSeam() {
         }
     }
     {
-        // No driver at all (realtime before T-011).
-        EngineFacade* facade = EngineFacadeAccess::create(EngineMode::realtime, DriverConfig{}, FacadeOptions{});
+        // No driver attached.
+        EngineFacade* facade = EngineFacadeAccess::create(EngineMode::realtime, DriverConfigPOD{}, FacadeOptions{});
         DAW_CHECK(facade != nullptr);
         if (facade) {
             DAW_CHECK(facade->devices().empty());
-            DAW_CHECK(facade->setDevice(DriverConfig{}).code == FacadeErrorCode::unsupported);
+            DAW_CHECK(facade->setDevice(DriverConfigPOD{}).code == FacadeErrorCode::unsupported);
             DAW_CHECK(facade->telemetry().sampleRate == 48000.0);
             releaseFacade(facade);
         }
     }
     // Offline mode rejects an unusable session rate.
-    DriverConfig bad;
+    DriverConfigPOD bad;
     bad.sampleRate = 10;
     DAW_CHECK(EngineFacade::create(EngineMode::offline, bad) == nullptr);
     return checks;

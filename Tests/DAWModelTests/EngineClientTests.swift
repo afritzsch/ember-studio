@@ -52,18 +52,18 @@ struct EngineClientTests {
         #expect(ids.allSatisfy { !EngineClient.isLive($0) })
     }
 
-    @Test("BRIDGE-008: offline mode at the session rate; a bad rate throws; realtime without a driver has no device")
+    @Test("BRIDGE-008: offline mode at the session rate; a bad rate throws; offline has no device")
     func modes() throws {
         let offline = try EngineClient(.offline(sampleRate: 44_100))
         #expect(offline.telemetry().sampleRate == 44_100)
         #expect(offline.mode == .offline(sampleRate: 44_100))
         #expect(throws: DAWError.self) { try EngineClient(.offline(sampleRate: 10)) }
 
-        // T-011 attaches the CoreAudio driver; until then realtime mode doesn't render.
-        let realtime = try EngineClient(.realtime(DriverConfig()))
-        #expect(realtime.devices().isEmpty)
-        #expect(!realtime.telemetry().deviceRunning)
-        #expect(throws: DAWError.self) { try realtime.setDevice(DriverConfig()) }
+        // Realtime mode would start CoreAudio, which tests never do; the driver seam is covered
+        // with a fake driver in DAWEngineTests (FacadeTests).
+        #expect(offline.devices().isEmpty)
+        #expect(!offline.telemetry().deviceRunning)
+        #expect(throws: DAWError.self) { try offline.setDevice(DriverConfig()) }
     }
 
     @Test("BRIDGE-003: EngineGraph crosses as a GraphDescription built through GraphDescriptionBuilder")

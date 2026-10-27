@@ -44,12 +44,17 @@ enum class EngineMode : uint8_t {
     offline,   // no device: renders only through renderOffline (dawctl, dawmcp, tests)
 };
 
-// IO-003/004. In offline mode only sampleRate matters: it is the session rate.
-struct DriverConfig {
-    std::string outputDeviceUID;  // empty: the system default output
-    std::string inputDeviceUID;   // empty: same as the output device (IO-004)
+// IO-003/004: mirrors io/DriverConfig.h's DriverConfig (PROPOSED: the 08 contract calls it
+// DriverConfig, which the io type already is; Swift can't see io/). The facade decides
+// inputEnabled itself (DW-067: input runs while a track is armed). In offline mode only
+// sampleRate matters: it is the session rate.
+struct DriverConfigPOD {
+    uint32_t outputDevice = 0;    // AudioObjectID; 0: the system default output
+    uint32_t inputDevice = 0;     // 0: the system default input (IO-004 may pick the output)
     double sampleRate = 48000.0;  // 0 in realtime mode: the device's nominal rate
-    uint32_t bufferSize = 256;    // 32…2048
+    uint32_t bufferFrames = 256;  // 32…2048
+    uint32_t outputChannels = 2;
+    uint32_t inputChannels = 2;
 };
 
 // Mirrors daw::ErrorCode (core/Result.h), plus `none` for success. DW-050: `cycle` is a
@@ -222,7 +227,7 @@ struct EngineEventPOD {
 // MARK: Devices and plugins (04, 10)
 
 struct DeviceInfoPOD {
-    std::string uid;
+    uint32_t deviceID = 0;  // AudioObjectID, for DriverConfigPOD
     std::string name;
     uint32_t inputChannels = 0;
     uint32_t outputChannels = 0;
@@ -300,7 +305,7 @@ public:
     // BRIDGE-008. Returns with one reference (Swift takes it over). Null if `config` is invalid
     // in offline mode (sample rate out of range). Realtime mode without a device driver yet
     // (T-011) gives an engine that never renders: devices() is empty, setDevice fails.
-    static EngineFacade* create(EngineMode mode, const DriverConfig& config) SWIFT_RETURNS_RETAINED;
+    static EngineFacade* create(EngineMode mode, const DriverConfigPOD& config) SWIFT_RETURNS_RETAINED;
 
     EngineFacade(const EngineFacade&) = delete;
     EngineFacade& operator=(const EngineFacade&) = delete;
@@ -349,6 +354,8 @@ public:
 
     // MARK: Recording (09) and plugins (10): later tasks
 
+    // DW-067: the device's input runs while any track is armed; turning it on or off restarts
+    // the driver. Routing input to tracks is 09 (T-030s).
     void armInput(NodeID track, uint32_t inputChannelPair, bool armed);
     JobID instantiatePlugin(NodeID slot, const PluginDescriptorPOD& plugin);
     ByteVector getPluginState(NodeID slot);
@@ -365,7 +372,7 @@ public:
     // MARK: Device (04)
 
     std::vector<DeviceInfoPOD> devices() const;
-    FacadeError setDevice(const DriverConfig& config);  // PROPOSED: not Result<void>
+    FacadeError setDevice(const DriverConfigPOD& config);  // PROPOSED: not Result<void>
 
     // MARK: Observability (BRIDGE-004/005)
 

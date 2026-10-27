@@ -23,7 +23,7 @@ struct FacadeOptions {
 class EngineFacadeAccess {
 public:
     // Like EngineFacade::create (one reference, for releaseFacade), with `options`.
-    static EngineFacade* create(EngineMode mode, const DriverConfig& config, FacadeOptions options);
+    static EngineFacade* create(EngineMode mode, const DriverConfigPOD& config, FacadeOptions options);
 };
 
 } // namespace daw

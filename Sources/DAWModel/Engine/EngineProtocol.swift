@@ -10,23 +10,28 @@ public typealias ParamID = UInt32
 /// rejected before a job was created.
 public typealias JobID = UInt64
 
-/// IO-003/004. In offline mode only `sampleRate` matters: it is the session rate.
+/// IO-003/004 (`daw::DriverConfigPOD`). The engine turns input on while a track is armed
+/// (DW-067). In offline mode only `sampleRate` matters: it is the session rate.
 public struct DriverConfig: Hashable, Sendable, Codable {
-    /// Empty: the system default output.
-    public var outputDeviceUID: String
-    /// Empty: the output device (IO-004).
-    public var inputDeviceUID: String
+    /// AudioObjectID (`AudioDeviceInfo.id`); 0: the system default output.
+    public var outputDevice: UInt32
+    /// 0: the system default input (IO-004 may use the output device instead).
+    public var inputDevice: UInt32
     /// 0 in realtime mode: the device's nominal rate.
     public var sampleRate: Double
     /// 32…2048.
-    public var bufferSize: UInt32
+    public var bufferFrames: UInt32
+    public var outputChannels: UInt32
+    public var inputChannels: UInt32
 
-    public init(outputDeviceUID: String = "", inputDeviceUID: String = "", sampleRate: Double = 48_000,
-                bufferSize: UInt32 = 256) {
-        self.outputDeviceUID = outputDeviceUID
-        self.inputDeviceUID = inputDeviceUID
+    public init(outputDevice: UInt32 = 0, inputDevice: UInt32 = 0, sampleRate: Double = 0,
+                bufferFrames: UInt32 = 256, outputChannels: UInt32 = 2, inputChannels: UInt32 = 2) {
+        self.outputDevice = outputDevice
+        self.inputDevice = inputDevice
         self.sampleRate = sampleRate
-        self.bufferSize = bufferSize
+        self.bufferFrames = bufferFrames
+        self.outputChannels = outputChannels
+        self.inputChannels = inputChannels
     }
 }
 
@@ -277,16 +282,17 @@ public struct EngineEvent: Hashable, Sendable, Codable {
 }
 
 public struct AudioDeviceInfo: Hashable, Sendable, Codable {
-    public var uid: String
+    /// AudioObjectID, for `DriverConfig`.
+    public var id: UInt32
     public var name: String
     public var inputChannels: UInt32
     public var outputChannels: UInt32
     public var nominalSampleRate: Double
     public var isDefaultOutput: Bool
 
-    public init(uid: String, name: String, inputChannels: UInt32, outputChannels: UInt32,
+    public init(id: UInt32, name: String, inputChannels: UInt32, outputChannels: UInt32,
                 nominalSampleRate: Double, isDefaultOutput: Bool) {
-        self.uid = uid
+        self.id = id
         self.name = name
         self.inputChannels = inputChannels
         self.outputChannels = outputChannels

@@ -12,10 +12,11 @@ public final class EngineClient: EngineProtocol {
     private let facade: daw.EngineFacade
     public let mode: EngineMode
 
-    /// BRIDGE-008. Offline mode needs a session rate in 1 kHz…768 kHz. Realtime mode without a
-    /// device driver (until T-011) creates an engine that doesn't render.
+    /// BRIDGE-008. Offline mode needs a session rate in 1 kHz…768 kHz. Realtime mode starts the
+    /// CoreAudio driver; if the device can't start, the engine exists without rendering and a
+    /// `deviceChanged` event says why.
     public init(_ mode: EngineMode) throws(DAWError) {
-        var config = daw.DriverConfig()
+        var config = daw.DriverConfigPOD()
         let cxxMode: daw.EngineMode
         switch mode {
         case .realtime(let driver):
@@ -151,7 +152,7 @@ public final class EngineClient: EngineProtocol {
 
     public func devices() -> [AudioDeviceInfo] {
         facade.devices().map {
-            AudioDeviceInfo(uid: String($0.uid), name: String($0.name), inputChannels: $0.inputChannels,
+            AudioDeviceInfo(id: $0.deviceID, name: String($0.name), inputChannels: $0.inputChannels,
                             outputChannels: $0.outputChannels, nominalSampleRate: $0.nominalSampleRate,
                             isDefaultOutput: $0.isDefaultOutput)
         }
@@ -330,12 +331,14 @@ public final class EngineClient: EngineProtocol {
         }
     }
 
-    private static func cxx(_ config: DriverConfig) -> daw.DriverConfig {
-        var out = daw.DriverConfig()
-        out.outputDeviceUID = std.string(config.outputDeviceUID)
-        out.inputDeviceUID = std.string(config.inputDeviceUID)
+    private static func cxx(_ config: DriverConfig) -> daw.DriverConfigPOD {
+        var out = daw.DriverConfigPOD()
+        out.outputDevice = config.outputDevice
+        out.inputDevice = config.inputDevice
         out.sampleRate = config.sampleRate
-        out.bufferSize = config.bufferSize
+        out.bufferFrames = config.bufferFrames
+        out.outputChannels = config.outputChannels
+        out.inputChannels = config.inputChannels
         return out
     }
 
