@@ -1,6 +1,6 @@
 #pragma once
-// T-013 checks for the ChannelStrip's gain and pan (06 DSP-010, 05 MIX-005, ENG-022) and its
-// 300 ms meter window (MIX-005, DW-048, strip side), run from
+// T-013/T-020 checks for the ChannelStrip's gain, pan, mute and phase (06 DSP-010, 05 MIX-005,
+// ENG-022) and its 300 ms meter window (MIX-005, DW-048, strip side), run from
 // Tests/DAWEngineTests/ChannelStripTests.swift. C++ because they call DAW_RT process() inside an
 // RtScope and drive the Engine; each asserts its scopes counted 0 RT violations (CONV §5.3).
 
@@ -28,5 +28,10 @@ CheckResult channelStripThroughEngine();
 // re-created instances, released and reused when the strip leaves; other kinds get none; past
 // Telemetry::kMaxMeters strips get kNoMeter. The strips' meters reach engine telemetry.
 CheckResult channelStripMetersThroughBuilder();
+
+// MIX-005, MIX-006 (strip side), T-020: the mute slot (2) and phase slot (3). Switches on at
+// ≥ 0.5, NaN off; each change ramps over one block (mute fades, phase passes through 0); phase
+// applies before gain/pan per channel; the meter is post-mute; random switching never clicks.
+CheckResult channelStripMuteAndPhase();
 
 } // namespace daw::testing

@@ -16,10 +16,13 @@ float clampGain(float gain) DAW_RT {
     return gain >= 0.0f ? (gain <= ChannelStrip::kMaxGain ? gain : ChannelStrip::kMaxGain) : 0.0f;
 }
 
+// MIX-005 switches (mute, phase): on at ≥ 0.5, like the master's limiter slot (MIX-009). NaN is off.
+bool switchOn(float value) DAW_RT { return value >= 0.5f; }
+
 } // namespace
 
 ChannelStrip::ChannelStrip(ParamID firstParam, MeterTarget meter)
-    : gainParam_(firstParam + kGain), panParam_(firstParam + kPan), meter_(meter) {}
+    : firstParam_(firstParam), meter_(meter) {}
 
 void ChannelStrip::prepare(const PrepareInfo& info) {
     window_.prepare(info.sampleRate);
@@ -33,20 +36,29 @@ void ChannelStrip::process(ProcessContext& ctx, NodeIO& io) DAW_RT {
     if (n == 0) return;  // ENG-004: a 0-frame block leaves the smoothers as they were
 
     // ENG-021: one read per slot per block.
-    const float gain = clampGain(ctx.params.get(gainParam_));
-    const float pan = ctx.params.get(panParam_);  // constantPowerPan clamps
+    const float gain = clampGain(ctx.params.get(firstParam_ + kGain));
+    const float pan = ctx.params.get(firstParam_ + kPan);  // constantPowerPan clamps
+    const float open = switchOn(ctx.params.get(firstParam_ + kMute)) ? 0.0f : 1.0f;
+    const float polarity = switchOn(ctx.params.get(firstParam_ + kPhase)) ? -1.0f : 1.0f;
     if (!primed_) {
         gain_.reset(gain);
         pan_.reset(pan);
+        mute_.reset(open);
+        polarity_.reset(polarity);
         primed_ = true;
     }
-    // ENG-022: ramp from where the previous block ended.
+    // ENG-022: ramp from where the previous block ended. Phase, mute and gain are one scalar per
+    // block end, combined with the pan law into one linear ramp per channel.
     const ParamRamp g = gain_.next(gain, n);
     const ParamRamp p = pan_.next(pan, n);
+    const ParamRamp m = mute_.next(open, n);
+    const ParamRamp s = polarity_.next(polarity, n);
+    const float startGain = s.start * m.start * g.start;
+    const float targetGain = s.target * m.target * g.target;
     const PanGains from = constantPowerPan(p.start);
     const PanGains to = constantPowerPan(p.target);
-    const ParamRamp left{g.start * from.left, g.target * to.left, n};
-    const ParamRamp right{g.start * from.right, g.target * to.right, n};
+    const ParamRamp left{startGain * from.left, targetGain * to.left, n};
+    const ParamRamp right{startGain * from.right, targetGain * to.right, n};
 
     if (out.numChannels >= 1) left.multiply(out.channels[0]);
     if (out.numChannels >= 2) right.multiply(out.channels[1]);

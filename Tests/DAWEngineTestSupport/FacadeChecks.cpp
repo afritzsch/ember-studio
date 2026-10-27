@@ -527,7 +527,7 @@ CheckResult facadePlaysAssetThroughBuiltinNodes() {
     }));
     DAW_CHECK(loaded.state == JobState::succeeded && loaded.asset.frames == 48000 && loaded.asset.channels == 1);
 
-    const ParamID strip = facade.allocateParams(2);
+    const ParamID strip = facade.allocateParams(4);  // gain, pan, mute, phase (ChannelStrip::kNumParams)
     facade.setParam(strip + 0, 1.0f);  // gain (ChannelStrip::kGain)
     facade.setParam(strip + 1, 0.0f);  // pan, centre
 
@@ -535,7 +535,7 @@ CheckResult facadePlaysAssetThroughBuiltinNodes() {
     GraphDescriptionBuilder b;
     b.addNode(1, NodeKind::master, 1, 0, 0, "");
     b.addNode(2, NodeKind::audioClipPlayer, 1, 0, 0, "");
-    b.addNode(3, NodeKind::channelStrip, 1, strip, 2, "");
+    b.addNode(3, NodeKind::channelStrip, 1, strip, 4, "");
     b.addEdge(10, 2, 3, EdgeKind::audio, 0);
     b.addEdge(11, 3, 1, EdgeKind::audio, 0);
     b.addClip(2, 20, 0, 2 * kPPQ, 7, 0, 1.0f, 0, 0);
@@ -582,6 +582,8 @@ CheckResult facadePlaysAssetThroughBuiltinNodes() {
     const std::string info = facade.paramInfoJSON(NodeKind::channelStrip);
     DAW_CHECK(info.find("\"id\":\"gain\"") != std::string::npos);
     DAW_CHECK(info.find("\"id\":\"pan\"") != std::string::npos);
+    DAW_CHECK(info.find("\"index\":2,\"id\":\"mute\"") != std::string::npos);    // T-020
+    DAW_CHECK(info.find("\"index\":3,\"id\":\"phase\"") != std::string::npos);
     DAW_CHECK(facade.paramInfoJSON(NodeKind::reverb) == "[]");
     return checks;
 }
