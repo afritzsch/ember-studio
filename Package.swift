@@ -1,5 +1,5 @@
 // swift-tools-version: 6.0
-// Root manifest for macDAW (01-build-layout). The Xcode app in App/ links the products declared here.
+// Root manifest for Ember Studio (01-build-layout). The Xcode app in App/ links the products declared here.
 
 import PackageDescription
 

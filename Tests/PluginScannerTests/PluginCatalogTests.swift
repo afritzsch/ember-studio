@@ -48,10 +48,10 @@ struct FailingScanner: PluginScanning {
 /// rescanned; the blocked list is resettable.
 @Suite("PLUG-004: plugin cache")
 struct PluginCatalogTests {
-    @Test("PLUG-004: cache lives at ~/Library/Application Support/macDAW/plugins.json")
+    @Test("PLUG-004: cache lives at ~/Library/Application Support/Ember Studio/plugins.json")
     func defaultLocation() {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
-        #expect(PluginCache.defaultURL.path == "\(home)/Library/Application Support/macDAW/plugins.json")
+        #expect(PluginCache.defaultURL.path == "\(home)/Library/Application Support/Ember Studio/plugins.json")
     }
 
     @Test("PLUG-004: first refresh scans everything and persists the results")
@@ -170,7 +170,7 @@ struct PluginCatalogTests {
         let good = try Fixtures.makeVST3Bundle(named: "Fake Good", in: plugins.url)
         try Fixtures.makeVST3Bundle(named: "Fake Crash", in: plugins.url)
         let discovery = SystemPluginDiscovery(vst3Directories: [plugins.url], includeAudioUnits: false)
-        let cacheURL = support.path("macDAW/plugins.json")
+        let cacheURL = support.path("Ember Studio/plugins.json")
 
         var catalog = PluginCatalog(cacheURL: cacheURL, discovery: discovery, scanner: Fixtures.launcher())
         var summary = try catalog.refresh()

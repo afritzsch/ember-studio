@@ -8,7 +8,7 @@ final class TestDirectory: Sendable {
 
     init() throws {
         let url = FileManager.default.temporaryDirectory
-            .appending(path: "macdaw-plugin-tests-\(UUID().uuidString)", directoryHint: .isDirectory)
+            .appending(path: "emberstudio-plugin-tests-\(UUID().uuidString)", directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         // $TMPDIR is under /var, a symlink to /private/var. Directory enumeration reports the
         // /private form, so expectations use it too (resolvingSymlinksInPath strips /private).
@@ -41,7 +41,7 @@ enum Fixtures {
     static let fakeVST3Binary: Result<URL, FixtureError> = {
         let sdk = repoRoot.appending(path: "Vendor/vst3sdk").path
         let output = FileManager.default.temporaryDirectory
-            .appending(path: "macdaw-fake-vst3-\(ProcessInfo.processInfo.processIdentifier)-\(UUID().uuidString)")
+            .appending(path: "emberstudio-fake-vst3-\(ProcessInfo.processInfo.processIdentifier)-\(UUID().uuidString)")
         let arguments = [
             "clang++", "-std=c++20", "-bundle", "-arch", "arm64", "-w", "-isystem", sdk,
             repoRoot.appending(path: "Tests/PluginScannerTests/Fixtures/FakeVST3.cpp").path,
@@ -71,7 +71,7 @@ enum Fixtures {
         try FileManager.default.createDirectory(at: macOS, withIntermediateDirectories: true)
         let info: [String: Any] = [
             "CFBundleExecutable": name,
-            "CFBundleIdentifier": "dev.macdaw.tests.\(name.filter(\.isLetter))",
+            "CFBundleIdentifier": "dev.emberstudio.tests.\(name.filter(\.isLetter))",
             "CFBundlePackageType": "BNDL",
             "CFBundleShortVersionString": version,
         ]

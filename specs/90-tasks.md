@@ -170,7 +170,7 @@ Conflicts: lanes own separate folders, so merges should be clean. If two branche
 
 ### Worker briefing (prompt for `new_session`)
 ```
-You are a worker on macDAW task T-XXX (<title>), in your own git worktree on branch t-xxx-<slug>.
+You are a worker on Ember Studio task T-XXX (<title>), in your own git worktree on branch t-xxx-<slug>.
 Read: CLAUDE.md, SPEC.md, specs/00-conventions.md, specs/<owning spec>.md, and the "Interfaces" sections of: <dep specs>.
 Requirements to satisfy: <IDs>. You may edit only: <modules>.
 Do not edit specs/90-tasks.md or any spec Status table — the lead does that on merge.

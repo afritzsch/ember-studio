@@ -22,7 +22,7 @@ using namespace Steinberg::Vst;
 class ScannerHostApplication : public HostApplication {
 public:
     tresult PLUGIN_API getName(String128 name) override {
-        static constexpr char16 hostName[] = u"macDAW";
+        static constexpr char16 hostName[] = u"Ember Studio";
         std::memcpy(name, hostName, sizeof(hostName));
         return kResultOk;
     }

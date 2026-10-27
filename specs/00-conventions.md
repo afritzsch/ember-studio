@@ -39,7 +39,7 @@ In Swift, the model is `@MainActor`-isolated in the app. In `dawctl`/`dawmcp` it
 ## 4. Errors & logging
 - C++: return `daw::Result<T>` (expected-like) from non-RT APIs. RT code never fails; it outputs silence and bumps a telemetry counter instead.
 - Swift: typed `throws(DAWError)` at module boundaries.
-- Logging uses `os_log` with subsystem `dev.macdaw` and categories per module. RT code logs only through a lock-free telemetry ring drained by `daw.reclaim`.
+- Logging uses `os_log` with subsystem `dev.emberstudio` and categories per module. RT code logs only through a lock-free telemetry ring drained by `daw.reclaim`.
 
 ## 5. Definition of done (any task)
 1. Code builds with `swift build` and `xcodebuild` (app) without warnings.

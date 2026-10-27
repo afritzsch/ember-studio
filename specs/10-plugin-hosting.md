@@ -10,7 +10,7 @@
 | PLUG-001 | `PluginScanner` is a separate executable. The app launches it per plugin (or per batch) and it prints a JSON descriptor to stdout. A timeout (10 s) or crash → plugin marked `blocked` with a reason. | Test with a deliberately crashing fake bundle |
 | PLUG-002 | AU discovery via `AVAudioUnitComponentManager` (types `aufx`, `aumu`, `aumf`), including AUv3 app extensions. | — |
 | PLUG-003 | VST3 discovery: `/Library/Audio/Plug-Ins/VST3`, `~/Library/Audio/Plug-Ins/VST3`. Load the module, enumerate classes (`kVstAudioEffectClass`), read bus arrangement and sidechain bus presence. | — |
-| PLUG-004 | Cache: `~/Library/Application Support/macDAW/plugins.json` keyed by path + mtime + version. Rescan only changed or new entries; blocked list is user-resettable. | — |
+| PLUG-004 | Cache: `~/Library/Application Support/Ember Studio/plugins.json` keyed by path + mtime + version. Rescan only changed or new entries; blocked list is user-resettable. | — |
 
 ### Hosting node
 | ID | Requirement | Acceptance |

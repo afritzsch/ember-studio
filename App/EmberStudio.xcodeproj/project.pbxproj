@@ -12,15 +12,15 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		DA0000000000000000000004 /* macDAW.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = macDAW.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		DA0000000000000000000004 /* EmberStudio.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = EmberStudio.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		DA0000000000000000000006 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-		DA0000000000000000000007 /* macDAW.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = macDAW.entitlements; sourceTree = "<group>"; };
+		DA0000000000000000000007 /* EmberStudio.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = EmberStudio.entitlements; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		DA0000000000000000000005 /* macDAW */ = {
+		DA0000000000000000000005 /* EmberStudio */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = macDAW;
+			path = EmberStudio;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -41,9 +41,9 @@
 		DA0000000000000000000002 = {
 			isa = PBXGroup;
 			children = (
-				DA0000000000000000000005 /* macDAW */,
+				DA0000000000000000000005 /* EmberStudio */,
 				DA0000000000000000000006 /* Info.plist */,
-				DA0000000000000000000007 /* macDAW.entitlements */,
+				DA0000000000000000000007 /* EmberStudio.entitlements */,
 				DA0000000000000000000003 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -51,7 +51,7 @@
 		DA0000000000000000000003 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				DA0000000000000000000004 /* macDAW.app */,
+				DA0000000000000000000004 /* EmberStudio.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -59,9 +59,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		DA0000000000000000000010 /* macDAW */ = {
+		DA0000000000000000000010 /* EmberStudio */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = DA0000000000000000000033 /* Build configuration list for PBXNativeTarget "macDAW" */;
+			buildConfigurationList = DA0000000000000000000033 /* Build configuration list for PBXNativeTarget "EmberStudio" */;
 			buildPhases = (
 				DA0000000000000000000011 /* Sources */,
 				DA0000000000000000000012 /* Frameworks */,
@@ -72,15 +72,15 @@
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				DA0000000000000000000005 /* macDAW */,
+				DA0000000000000000000005 /* EmberStudio */,
 			);
-			name = macDAW;
+			name = EmberStudio;
 			packageProductDependencies = (
 				DA0000000000000000000021 /* DAWModel */,
 				DA0000000000000000000022 /* DAWControl */,
 			);
-			productName = macDAW;
-			productReference = DA0000000000000000000004 /* macDAW.app */;
+			productName = EmberStudio;
+			productReference = DA0000000000000000000004 /* EmberStudio.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -98,7 +98,7 @@
 					};
 				};
 			};
-			buildConfigurationList = DA0000000000000000000030 /* Build configuration list for PBXProject "macDAW" */;
+			buildConfigurationList = DA0000000000000000000030 /* Build configuration list for PBXProject "EmberStudio" */;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -115,7 +115,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				DA0000000000000000000010 /* macDAW */,
+				DA0000000000000000000010 /* EmberStudio */,
 			);
 		};
 /* End PBXProject section */
@@ -194,7 +194,7 @@
 		DA0000000000000000000034 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CODE_SIGN_ENTITLEMENTS = macDAW.entitlements;
+				CODE_SIGN_ENTITLEMENTS = EmberStudio.entitlements;
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Manual;
 				CURRENT_PROJECT_VERSION = 1;
@@ -206,7 +206,7 @@
 				);
 				MARKETING_VERSION = 0.1;
 				OTHER_CODE_SIGN_FLAGS = "--options=runtime";
-				PRODUCT_BUNDLE_IDENTIFIER = dev.macdaw.macDAW;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.emberstudio.EmberStudio;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_OBJC_INTEROP_MODE = objcxx;
 				SWIFT_VERSION = 6.0;
@@ -216,7 +216,7 @@
 		DA0000000000000000000035 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CODE_SIGN_ENTITLEMENTS = macDAW.entitlements;
+				CODE_SIGN_ENTITLEMENTS = EmberStudio.entitlements;
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Manual;
 				CURRENT_PROJECT_VERSION = 1;
@@ -228,7 +228,7 @@
 				);
 				MARKETING_VERSION = 0.1;
 				OTHER_CODE_SIGN_FLAGS = "--options=runtime";
-				PRODUCT_BUNDLE_IDENTIFIER = dev.macdaw.macDAW;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.emberstudio.EmberStudio;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_OBJC_INTEROP_MODE = objcxx;
 				SWIFT_VERSION = 6.0;
@@ -238,7 +238,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		DA0000000000000000000030 /* Build configuration list for PBXProject "macDAW" */ = {
+		DA0000000000000000000030 /* Build configuration list for PBXProject "EmberStudio" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				DA0000000000000000000031 /* Debug */,
@@ -247,7 +247,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		DA0000000000000000000033 /* Build configuration list for PBXNativeTarget "macDAW" */ = {
+		DA0000000000000000000033 /* Build configuration list for PBXNativeTarget "EmberStudio" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				DA0000000000000000000034 /* Debug */,

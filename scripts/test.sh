@@ -161,7 +161,7 @@ check_arch() {
         bins+=("$dir/dawctl" "$dir/dawmcp" "$dir/PluginScanner")
     done
     if (( run_xcode )); then
-        bins+=("$xcode_derived/Build/Products/Debug/macDAW.app/Contents/MacOS/macDAW")
+        bins+=("$xcode_derived/Build/Products/Debug/EmberStudio.app/Contents/MacOS/EmberStudio")
     fi
     for bin in "${bins[@]}"; do
         archs=$(lipo -archs "$bin" 2>&1)
@@ -175,7 +175,7 @@ check_arch() {
 # audio-input + disable-library-validation entitlements.
 xcode_build() {
     local log="$logs/xcodebuild.raw.log"
-    xcodebuild -project App/macDAW.xcodeproj -scheme macDAW -configuration Debug \
+    xcodebuild -project App/EmberStudio.xcodeproj -scheme EmberStudio -configuration Debug \
         -derivedDataPath "$xcode_derived" build 2>&1 | tee "$log"
     local rc=${PIPESTATUS[0]}
     (( rc == 0 )) || return "$rc"
@@ -183,7 +183,19 @@ xcode_build() {
 }
 
 check_app_bundle() {
-    local app="$xcode_derived/Build/Products/Debug/macDAW.app" ok=0
+    local app="$xcode_derived/Build/Products/Debug/EmberStudio.app" ok=0
+    # T-086: the bundle carries the product identity (bundle ID, menu-bar and Finder name).
+    local key want got
+    for key in CFBundleIdentifier=dev.emberstudio.EmberStudio CFBundleName="Ember Studio" \
+        CFBundleDisplayName="Ember Studio"; do
+        want=${key#*=} key=${key%%=*}
+        got=$(plutil -extract "$key" raw "$app/Contents/Info.plist" 2>&1)
+        if [[ "$got" == "$want" ]]; then
+            echo "app: $key = $got"
+        else
+            echo "app: $key is '$got', expected '$want'"; ok=1
+        fi
+    done
     if plutil -extract NSMicrophoneUsageDescription raw "$app/Contents/Info.plist"; then
         echo "BUILD-004: NSMicrophoneUsageDescription present"
     else

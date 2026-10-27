@@ -71,7 +71,7 @@ public struct ScannerLauncher: PluginScanning {
     func run(arguments: [String]) throws(PluginCatalogError) -> RunResult {
         let fileManager = FileManager.default
         let scratch = fileManager.temporaryDirectory
-            .appending(path: "macdaw-scan-\(UUID().uuidString)", directoryHint: .isDirectory)
+            .appending(path: "emberstudio-scan-\(UUID().uuidString)", directoryHint: .isDirectory)
         let stdoutURL = scratch.appending(path: "stdout")
         let stderrURL = scratch.appending(path: "stderr")
         defer { try? fileManager.removeItem(at: scratch) }
