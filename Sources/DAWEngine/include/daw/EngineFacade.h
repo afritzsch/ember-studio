@@ -34,6 +34,8 @@ namespace daw {
 // MARK: Plain data
 
 using JobID = uint64_t;                          // 0: no job (the request was rejected up front)
+// BRIDGE-006: plugin state blobs. Named so Swift can construct one (it can't spell templates).
+using ByteVector = std::vector<uint8_t>;
 inline constexpr ParamID kInvalidParamID = 0xFFFF'FFFFu;  // allocateParams failed
 
 // BRIDGE-008
@@ -271,7 +273,8 @@ public:
     void setMaster(NodeID master) { desc_.master = master; }
     void clear() { desc_ = GraphDescription{}; }
 
-    const GraphDescription& description() const { return desc_; }
+    // A copy: Swift can't hold a reference into the builder.
+    GraphDescription description() const { return desc_; }
 
 private:
     GraphDescription desc_{};
@@ -280,8 +283,15 @@ private:
 // MARK: The facade
 
 class EngineFacade;
-void retainFacade(EngineFacade* facade);
-void releaseFacade(EngineFacade* facade);
+
+} // namespace daw
+
+// BRIDGE-001: the facade's retain/release. At global scope because that is where Swift looks
+// them up for SWIFT_SHARED_REFERENCE.
+void retainFacade(daw::EngineFacade* facade);
+void releaseFacade(daw::EngineFacade* facade);
+
+namespace daw {
 
 // BRIDGE-001: Swift holds it as a class reference; the last release destroys it, which stops
 // rendering and joins every engine thread.
@@ -296,6 +306,11 @@ public:
     EngineFacade& operator=(const EngineFacade&) = delete;
 
     EngineMode mode() const;
+
+    // BRIDGE-001 diagnostics: a process-unique ID per facade, and whether that facade still
+    // exists (so a test can check that its own instances were destroyed).
+    uint64_t instanceID() const;
+    static bool isLive(uint64_t instanceID);
 
     // MARK: Graph & params
 
@@ -336,8 +351,8 @@ public:
 
     void armInput(NodeID track, uint32_t inputChannelPair, bool armed);
     JobID instantiatePlugin(NodeID slot, const PluginDescriptorPOD& plugin);
-    std::vector<uint8_t> getPluginState(NodeID slot);
-    void setPluginState(NodeID slot, const std::vector<uint8_t>& state);
+    ByteVector getPluginState(NodeID slot);
+    void setPluginState(NodeID slot, const ByteVector& state);
     void* createPluginView(NodeID slot);  // NSView*, owned by the facade
     void destroyPluginView(NodeID slot);
 
@@ -362,8 +377,8 @@ public:
     std::string paramInfoJSON(NodeKind kind) const;
 
 private:
-    friend void retainFacade(EngineFacade*);
-    friend void releaseFacade(EngineFacade*);
+    friend void ::retainFacade(EngineFacade*);
+    friend void ::releaseFacade(EngineFacade*);
     friend class EngineFacadeAccess;  // facade/ internals (C++ only)
 
     struct Impl;

@@ -21,6 +21,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <thread>
 #include <utility>
 
@@ -53,6 +54,11 @@ namespace {
 constexpr std::size_t kMaxEvents = 1024;      // BRIDGE-004: polled at 60 Hz; overflow drops oldest
 constexpr std::size_t kMaxFinishedJobs = 1024;
 constexpr auto kExportGraphWait = std::chrono::seconds(30);
+
+// BRIDGE-001 diagnostics: the facades alive in this process.
+std::mutex liveMutex;
+std::set<uint64_t> liveFacades;
+uint64_t nextInstanceID = 1;
 
 bool isFinished(JobState state) { return state == JobState::succeeded || state == JobState::failed; }
 
@@ -135,6 +141,7 @@ struct EngineFacade::Impl {
     void runExport(JobID job, Tick from, Tick to, const ExportSpecPOD& spec);
 
     std::atomic<uint32_t> refs{1};  // BRIDGE-001
+    uint64_t instanceID = 0;
     const EngineMode mode;
 
     // Declaration order is destruction order in reverse: the loader and compiler threads stop
@@ -442,18 +449,27 @@ void EngineFacade::Impl::runExport(JobID jobID, Tick from, Tick to, const Export
     }
 }
 
-// MARK: Lifetime (BRIDGE-001)
+// MARK: Construction
 
-void retainFacade(EngineFacade* facade) {
-    facade->impl_->refs.fetch_add(1, std::memory_order_relaxed);
+EngineFacade::EngineFacade(Impl* impl) : impl_(impl) {
+    std::lock_guard lock(liveMutex);
+    impl_->instanceID = nextInstanceID++;
+    liveFacades.insert(impl_->instanceID);
 }
 
-void releaseFacade(EngineFacade* facade) {
-    if (facade->impl_->refs.fetch_sub(1, std::memory_order_acq_rel) == 1) delete facade;
+EngineFacade::~EngineFacade() {
+    const uint64_t id = impl_->instanceID;
+    delete impl_;
+    std::lock_guard lock(liveMutex);
+    liveFacades.erase(id);
 }
 
-EngineFacade::EngineFacade(Impl* impl) : impl_(impl) {}
-EngineFacade::~EngineFacade() { delete impl_; }
+uint64_t EngineFacade::instanceID() const { return impl_->instanceID; }
+
+bool EngineFacade::isLive(uint64_t instanceID) {
+    std::lock_guard lock(liveMutex);
+    return liveFacades.count(instanceID) != 0;
+}
 
 EngineFacade* EngineFacade::create(EngineMode mode, const DriverConfig& config) {
     FacadeOptions options;
@@ -636,8 +652,8 @@ JobID EngineFacade::instantiatePlugin(NodeID, const PluginDescriptorPOD&) {
     return job;
 }
 
-std::vector<uint8_t> EngineFacade::getPluginState(NodeID) { return {}; }
-void EngineFacade::setPluginState(NodeID, const std::vector<uint8_t>&) {}
+ByteVector EngineFacade::getPluginState(NodeID) { return {}; }
+void EngineFacade::setPluginState(NodeID, const ByteVector&) {}
 void* EngineFacade::createPluginView(NodeID) { return nullptr; }
 void EngineFacade::destroyPluginView(NodeID) {}
 
@@ -747,3 +763,13 @@ size_t EngineFacade::pollEvents(EngineEventPOD* out, size_t max) {
 std::string EngineFacade::paramInfoJSON(NodeKind) const { return "[]"; }
 
 } // namespace daw
+
+// MARK: Lifetime (BRIDGE-001)
+
+void retainFacade(daw::EngineFacade* facade) {
+    facade->impl_->refs.fetch_add(1, std::memory_order_relaxed);
+}
+
+void releaseFacade(daw::EngineFacade* facade) {
+    if (facade->impl_->refs.fetch_sub(1, std::memory_order_acq_rel) == 1) delete facade;
+}
