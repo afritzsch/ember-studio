@@ -3,6 +3,9 @@
 
 Expected values come from exact rational arithmetic (fractions.Fraction), not from either
 implementation, so the vectors also check that the double-based code is exact (TIME-001).
+"tickToSampleBitExact" is the exception: very large positions where fusing a + b*c into an FMA
+changes the result. They pin the double arithmetic itself, which both sides must share.
+
 Points whose exact sample position lies within HALF_MARGIN of (but not exactly on) a .5 tie are
 skipped: there the correctly rounded answer depends on the last bit, and TIME-001 allows ±1 sample.
 
@@ -82,7 +85,40 @@ class ExactMap:
         return [self.first_bars[j] + bar_index, in_bar // beat_ticks + 1, in_bar % beat_ticks]
 
 
-def make_map(name, sample_rate, tempos, sigs, ticks, samples, rng=None, extra=0, span=0):
+def double_tick_to_sample(sample_rate, tempos, tick, fused):
+    """TempoMap.cpp's tickToSample in IEEE doubles (Python floats never fuse). With fused=True,
+    each a + b*c is rounded once, as an FMA would do it."""
+    def mul_add(a, b, c):
+        return float(Fraction(a) + Fraction(b) * Fraction(c)) if fused else a + b * c
+
+    def spt(bpm):
+        return (float(sample_rate) * 60.0) / (bpm * float(PPQ))
+
+    starts = [0.0]
+    for (t0, b0), (t1, _) in zip(tempos, tempos[1:]):
+        starts.append(mul_add(starts[-1], float(t1) - float(t0), spt(b0)))
+    i = max([k for k, (t, _) in enumerate(tempos) if t <= tick], default=0)
+    x = mul_add(starts[i], float(tick) - float(tempos[i][0]), spt(tempos[i][1]))
+    return round_half_away(Fraction(x))
+
+
+def bit_exact_ticks(sample_rate, tempos, rng, count=16):
+    """TIME-011: ticks where an FMA would change the rounded sample. Expected values are the
+    unfused double results, which both implementations must reproduce bit for bit."""
+    found = []
+    for _ in range(200_000):
+        t = rng.randrange(10**12, 10**14)
+        plain = double_tick_to_sample(sample_rate, tempos, t, fused=False)
+        if plain != double_tick_to_sample(sample_rate, tempos, t, fused=True):
+            found.append([t, plain])
+            if len(found) == count:
+                break
+    assert len(found) == count, "not enough FMA-sensitive ticks"
+    return sorted(found)
+
+
+def make_map(name, sample_rate, tempos, sigs, ticks, samples, rng=None, extra=0, span=0,
+             bit_exact=False):
     m = ExactMap(sample_rate, tempos, sigs)
     ticks = list(ticks)
     samples = list(samples)
@@ -116,6 +152,7 @@ def make_map(name, sample_rate, tempos, sigs, ticks, samples, rng=None, extra=0,
         "tempos": [[t, float(b)] for t, b in tempos],
         "timeSignatures": [list(s) for s in sigs],
         "tickToSample": t2s,
+        "tickToSampleBitExact": bit_exact_ticks(sample_rate, tempos, rng) if bit_exact else [],
         "sampleToTick": s2t,
         "bpmAt": [[t, m.bpm_at(t)] for t in ticks],
         "bbt": [[t, *m.tick_to_bbt(t)] for t in ticks],
@@ -158,7 +195,7 @@ def main():
         [(0, 120.0), (1920, 90.0), (7680, 140.5), (20000, 61.3), (20001, 999.0), (21000, 1.0)],
         [(0, 4, 4)],
         ticks=[0, 1919, 1920, 3000, 7680, 19999, 20000, 20001, 20002, 21000, 30000],
-        samples=[], rng=rng, extra=200, span=40000))
+        samples=[], rng=rng, extra=200, span=40000, bit_exact=True))
 
     # Fewer samples than ticks: sampleToTick has to pick the last of several ticks per sample.
     maps.append(make_map(
@@ -175,7 +212,7 @@ def main():
         t += rng.randrange(1, 1_000_000)
     maps.append(make_map(
         "200 tempo events over ~1e8 ticks @ 192k", 192000, tempos, [(0, 4, 4)],
-        ticks=[t, t + 10**9], samples=[], rng=rng, extra=300, span=t))
+        ticks=[t, t + 10**9], samples=[], rng=rng, extra=300, span=t, bit_exact=True))
 
     invalid = [
         ("sample rate too low", 999.0, [(0, 120.0)], [(0, 4, 4)], "sampleRateOutOfRange"),

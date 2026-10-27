@@ -16,6 +16,10 @@ struct ModelTempoMapTests {
             for p in v.tickToSample {
                 #expect(map.tickToSample(Tick(p.a)) == p.b, "\(v.name): tickToSample(\(p.a))")
             }
+            // The double arithmetic itself: these flip if a + b*c gets fused into an FMA.
+            for p in v.tickToSampleBitExact {
+                #expect(map.tickToSample(Tick(p.a)) == p.b, "\(v.name): bit-exact tickToSample(\(p.a))")
+            }
             for p in v.sampleToTick {
                 #expect(map.sampleToTick(p.a) == Tick(p.b), "\(v.name): sampleToTick(\(p.a))")
             }
@@ -240,16 +244,18 @@ struct TempoVectors: Decodable {
     }
     struct Map: Decodable {
         let events: MapEvents
-        let tickToSample: [IntPair], sampleToTick: [IntPair], bpmAt: [BPMAt], bbt: [BBTRow]
+        let tickToSample: [IntPair], tickToSampleBitExact: [IntPair], sampleToTick: [IntPair]
+        let bpmAt: [BPMAt], bbt: [BBTRow]
         var name: String { events.name }
         var sampleRate: Double { events.sampleRate }
         var tempos: [TempoEvent] { events.tempos }
         var timeSignatures: [TimeSignatureEvent] { events.timeSignatures }
-        enum CodingKeys: CodingKey { case tickToSample, sampleToTick, bpmAt, bbt }
+        enum CodingKeys: CodingKey { case tickToSample, tickToSampleBitExact, sampleToTick, bpmAt, bbt }
         init(from decoder: any Decoder) throws {
             events = try MapEvents(from: decoder)
             let c = try decoder.container(keyedBy: CodingKeys.self)
             tickToSample = try c.decode([IntPair].self, forKey: .tickToSample)
+            tickToSampleBitExact = try c.decode([IntPair].self, forKey: .tickToSampleBitExact)
             sampleToTick = try c.decode([IntPair].self, forKey: .sampleToTick)
             bpmAt = try c.decode([BPMAt].self, forKey: .bpmAt)
             bbt = try c.decode([BBTRow].self, forKey: .bbt)
