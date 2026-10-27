@@ -6,15 +6,18 @@
 //   audioClipPlayer  DSP-001; clips are fixed at creation (DW-051, see AudioClipPlayer.h), assets
 //                    come from `lookup`
 //   channelStrip     DSP-010 / MIX-005 gain and pan; needs numParams >= ChannelStrip::kNumParams
-//                    (invalidArgument otherwise). No meter until GraphBuilder assigns MeterIDs
-//                    (DW-048).
+//                    (invalidArgument otherwise). Meters into `telemetry` (the engine's) with the
+//                    MeterID GraphBuilder assigns (DW-048, GraphBuilder::meterOf); a null
+//                    `telemetry` means no metering.
 
 #include "core/Result.h"
+#include "core/Telemetry.h"
 #include "graph/NodeRegistry.h"
 #include "nodes/AssetLookup.h"
 
 namespace daw {
 
-Result<void> registerBuiltinNodes(NodeRegistry& registry, AssetLookup lookup);
+Result<void> registerBuiltinNodes(NodeRegistry& registry, AssetLookup lookup,
+                                  Telemetry* telemetry = nullptr);
 
 } // namespace daw

@@ -272,3 +272,74 @@ CheckResult channelStripThroughEngine() {
 }
 
 } // namespace daw::testing
+
+namespace daw::testing {
+
+CheckResult channelStripMetersThroughBuilder() {
+    CheckResult checks;
+    Rig rig;
+    rig.addAsset(makeAsset(1, 1, 100000, [](uint32_t, int64_t) { return 0.5f; }));
+    auto params = rig.engine().params().allocate(6, 0.0f);
+    DAW_CHECK(params.ok());
+    const ParamID first = params.value();
+    for (uint32_t i = 0; i < 3; ++i) rig.engine().params().set(first + 2 * i, 1.0f);  // gain 1, pan 0
+
+    // player 10 → strip 20 → master; strip 21 (silent input) → master.
+    auto describe = [&](uint32_t strip20Version, NodeID secondStrip) {
+        GraphDescription d = baseDescription();
+        d.nodes.push_back(NodeDesc{10, NodeKind::audioClipPlayer, 1, 0, 0, {}});
+        d.nodes.push_back(NodeDesc{20, NodeKind::channelStrip, strip20Version, first, 2, {}});
+        d.nodes.push_back(NodeDesc{secondStrip, NodeKind::channelStrip, 1, ParamID(first + 2 * (secondStrip - 20)), 2, {}});
+        d.edges.push_back(EdgeDesc{1, 10, 20, EdgeKind::audio, 0});
+        d.edges.push_back(EdgeDesc{2, 20, 1, EdgeKind::audio, 0});
+        d.edges.push_back(EdgeDesc{3, secondStrip, 1, EdgeKind::audio, 0});
+        d.audioClips.push_back(clip(10, 1, 0, 3000, 1));
+        return d;
+    };
+
+    DAW_CHECK(rig.publish(describe(1, 21)));
+    const MeterID m20 = rig.builder().meterOf(20);
+    const MeterID m21 = rig.builder().meterOf(21);
+    DAW_CHECK(m20 != kNoMeter && m21 != kNoMeter && m20 != m21);
+    DAW_CHECK(rig.builder().meterOf(10) == kNoMeter && rig.builder().meterOf(1) == kNoMeter);
+
+    DAW_CHECK(rig.transport().locate(0) && rig.transport().play());
+    rig.renderFrames(16000, [] { return 256u; });  // > 300 ms
+    const Telemetry& telemetry = rig.engine().telemetry();
+    DAW_CHECK(near(telemetry.meter(m20).peak, 0.5 * kHalfSqrt2, 1e-6));
+    DAW_CHECK(near(telemetry.meter(m20).rms, 0.5 * kHalfSqrt2, 1e-5));  // DC: RMS = level
+    DAW_CHECK(telemetry.meter(m21).peak == 0.0f);
+
+    // A re-created instance (configVersion bump) keeps its MeterID.
+    DAW_CHECK(rig.publish(describe(2, 21)));
+    DAW_CHECK(rig.builder().meterOf(20) == m20 && rig.builder().meterOf(21) == m21);
+    // A strip that leaves releases its ID, and the next new strip gets it.
+    DAW_CHECK(rig.publish(describe(2, 22)));
+    DAW_CHECK(rig.builder().meterOf(21) == kNoMeter);
+    // 21's ID is released only once that build succeeded, so 22 got a fresh one.
+    const MeterID m22 = rig.builder().meterOf(22);
+    DAW_CHECK(m22 != kNoMeter && m22 != m20 && m22 != m21);
+    GraphDescription withNew = describe(2, 22);
+    withNew.nodes.push_back(NodeDesc{30, NodeKind::channelStrip, 1, first, 2, {}});
+    DAW_CHECK(rig.publish(withNew));
+    DAW_CHECK(rig.builder().meterOf(30) == m21);
+    DAW_CHECK(rig.violations() == 0);
+
+    // Past Telemetry::kMaxMeters, strips still build but get no meter.
+    Rig big;
+    auto bigParams = big.engine().params().allocate(2, 1.0f);
+    DAW_CHECK(bigParams.ok());
+    GraphDescription d = baseDescription();
+    for (NodeID id = 100; id < 100 + Telemetry::kMaxMeters + 1; ++id) {
+        d.nodes.push_back(NodeDesc{id, NodeKind::channelStrip, 1, bigParams.value(), 2, {}});
+        d.edges.push_back(EdgeDesc{id, id, 1, EdgeKind::audio, 0});
+    }
+    DAW_CHECK(big.publish(d));
+    uint32_t metered = 0;
+    for (NodeID id = 100; id < 100 + Telemetry::kMaxMeters + 1; ++id)
+        metered += big.builder().meterOf(id) != kNoMeter;
+    DAW_CHECK(metered == Telemetry::kMaxMeters);
+    return checks;
+}
+
+} // namespace daw::testing

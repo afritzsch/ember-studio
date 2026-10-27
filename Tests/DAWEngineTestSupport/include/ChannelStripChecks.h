@@ -24,4 +24,9 @@ CheckResult channelStripMeter();
 // with pan/gain slot changes; a strip with fewer than 2 params is rejected.
 CheckResult channelStripThroughEngine();
 
+// DW-048, MIX-005: GraphBuilder gives each channel strip a MeterID, stable across rebuilds and
+// re-created instances, released and reused when the strip leaves; other kinds get none; past
+// Telemetry::kMaxMeters strips get kNoMeter. The strips' meters reach engine telemetry.
+CheckResult channelStripMetersThroughBuilder();
+
 } // namespace daw::testing

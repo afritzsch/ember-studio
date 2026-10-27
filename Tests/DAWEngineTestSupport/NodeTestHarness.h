@@ -66,6 +66,7 @@ public:
     void dropAssets() { assets_.clear(); }
 
     Engine& engine() { return engine_; }
+    const GraphBuilder& builder() const { return builder_; }
     Transport& transport() { return engine_.transport(); }
 
     // Builds and publishes; false if the builder rejects it.
@@ -125,10 +126,13 @@ public:
 private:
     NodeRegistry makeRegistry() {
         NodeRegistry registry = NodeRegistry::withBuiltins();
-        (void)registerBuiltinNodes(registry, [this](uint64_t id) -> AudioAssetRef {
-            auto it = assets_.find(id);
-            return it == assets_.end() ? AudioAssetRef{} : it->second;
-        });
+        (void)registerBuiltinNodes(
+            registry,
+            [this](uint64_t id) -> AudioAssetRef {
+                auto it = assets_.find(id);
+                return it == assets_.end() ? AudioAssetRef{} : it->second;
+            },
+            &engine_.telemetry());
         return registry;
     }
 

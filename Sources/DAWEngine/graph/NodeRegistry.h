@@ -12,6 +12,7 @@
 
 #include "core/Node.h"
 #include "core/Result.h"
+#include "core/Telemetry.h"
 #include "daw/GraphDescription.h"
 
 namespace daw {
@@ -23,10 +24,17 @@ namespace daw {
 // configVersion, firstParam or numParams changed (DW-036). Clip and note edits that don't bump
 // configVersion reach no factory call, so a clip player that needs them per graph must get them
 // another way (T-013).
+//
+// `meter` is the node's MeterID for Telemetry::writeMeter (DW-048) when its kind has `meters`
+// set, otherwise kNoMeter. It stays the same for a NodeID across builds, re-created instances
+// included, until the node leaves the description.
+inline constexpr MeterID kNoMeter = Telemetry::kMaxMeters;
+
 struct NodeCreateInfo {
     const NodeDesc& desc;
     std::span<const ClipDesc> clips;
     std::span<const NoteDesc> notes;
+    MeterID meter = kNoMeter;
 };
 
 struct NodeKindInfo {
@@ -35,6 +43,9 @@ struct NodeKindInfo {
     // False for nodes that write only MIDI (midiClipPlayer): they get no audio output buffer,
     // and audio or sidechain edges out of them are rejected.
     bool audioOutput = true;
+    // MIX-005: nodes of this kind get a MeterID (channelStrip). When all kMaxMeters are taken,
+    // further nodes get kNoMeter.
+    bool meters = false;
 };
 
 class NodeRegistry {

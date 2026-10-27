@@ -1,7 +1,6 @@
 #pragma once
 // DSP-010, MIX-005: NodeKind::channelStrip, the gain and pan stage at the end of a track or bus.
-// T-013 covers gain and pan; mute, solo, phase invert and the GraphBuilder side of metering
-// arrive with T-020.
+// T-013 covers gain, pan and the meter; mute, solo and phase invert arrive with T-020.
 //
 // Params, relative to NodeDesc::firstParam (numParams >= 2), read once per block (ENG-021) and
 // ramped across it with ParamSmoother (ENG-022):
@@ -15,8 +14,8 @@
 // constant-power at block boundaries and linear in between, which is inaudible at block rate.
 //
 // Metering (MIX-005, DW-048): with a MeterTarget, process() writes the post-fader peak and 300 ms
-// RMS (dsp/MeterWindow.h) to Telemetry every block. Until GraphBuilder hands out MeterIDs the
-// registered factory makes strips without one.
+// RMS (dsp/MeterWindow.h) to Telemetry every block. The registered factory uses the MeterID
+// GraphBuilder assigned (NodeCreateInfo::meter).
 
 #include <array>
 #include <cstdint>

@@ -18,4 +18,7 @@ struct ChannelStripTests {
 
     @Test("DSP-001, DSP-010: clip player → strip → master through the Engine; slot writes, no rebuild")
     func throughEngine() { expectPasses(daw.testing.channelStripThroughEngine()) }
+
+    @Test("DW-048, MIX-005: GraphBuilder assigns stable, reusable MeterIDs; meters reach telemetry")
+    func metersThroughBuilder() { expectPasses(daw.testing.channelStripMetersThroughBuilder()) }
 }
