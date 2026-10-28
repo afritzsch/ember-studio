@@ -236,7 +236,10 @@ let package = Package(
         ),
         .testTarget(
             name: "GoldenTests",
-            dependencies: ["DAWModel", "DAWControl"],
+            // TEST-001/002/004: fixtures run in-process through DAWControl's Dispatcher on an
+            // engine with the test-only nodes (DAWEngineTestSupport's DAWGoldenSupport module).
+            dependencies: ["DAWModel", "DAWControl", "DAWEngine", "DAWEngineTestSupport"],
+            resources: [.copy("fixtures"), .copy("references")],
             swiftSettings: cxxInterop
         ),
     ],
