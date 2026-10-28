@@ -86,13 +86,14 @@ struct UndoStackTests {
         try stack.perform(TestAddTrack(name: "T"), on: &project)
         let id = project.tracks[0].id
         for i in 1...1100 {
-            try stack.perform(TestSetGain(trackID: id, gain: Float(i)), on: &project)
+            // Gains stay in the fader's range (MODEL-032 checks it in Debug).
+            try stack.perform(TestSetGain(trackID: id, gain: Float(i) / 1000), on: &project)
         }
         #expect(stack.undoEntries.count == 1000)
         while try stack.undo(&project) != nil {}
         // The add and the first 100 gain changes fell off the bottom.
         #expect(project.tracks.count == 1)
-        #expect(project.tracks[0].strip.gain == 100)
+        #expect(project.tracks[0].strip.gain == Float(100) / 1000)
     }
 
     @Test("MODEL-002: a command that throws after mutating leaves project and history unchanged")

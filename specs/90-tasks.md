@@ -53,15 +53,15 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 |---|---|---|---|---|---|
 | T-020 | E | Full channel strip: mute (slot; solo resolved by the model, T-016), phase, meters; sends pre/post | MIX-005, MIX-007, DSP-010 | T-013 | done |
 | T-021 | E | PDC: path latency, delay insertion, delay-line carry-over, source pre-roll | MIX-020..025 | T-012 | done |
-| T-022 | M | Routing commands (tracks, buses, sends, outputs) + cycle rejection + validation | MODEL-005 (routing subset), MODEL-030..032 | T-016 | wip(t-022-routing-commands) |
+| T-022 | M | Routing commands (tracks, buses, sends, outputs) + cycle rejection + validation | MODEL-005 (routing subset), MODEL-030..032 | T-016 | done |
 | T-023 | E | Sidechain edges and ports | MIX-008 | T-021 | ready |
 | T-024 | D | Metronome node | TIME-010, DSP-011 | T-008 | ready |
-| T-025 | E | M2 goldens: pan law, bus/send sum, PDC null | TEST (M2 set) | T-020, T-021, T-022 | todo |
+| T-025 | E | M2 goldens: pan law, bus/send sum, PDC null | TEST (M2 set) | T-020, T-021, T-022, T-019 (harness) | todo |
 
 ### M3 — Timeline, persistence, app shell
 | Task | Lane | Title | Requirements | Depends on | Status |
 |---|---|---|---|---|---|
-| T-030 | M | Clip + tempo/signature + loop commands | MODEL-005 (clip/tempo subset) | T-022 | todo |
+| T-030 | M | Clip + tempo/signature + loop commands | MODEL-005 (clip/tempo subset) | T-022 | ready |
 | T-031 | M | Persistence: folder format, atomic save, migrations, autosave, recovery, offline assets | MODEL-040..046 | T-030 | todo |
 | T-032 | U+B | App shell, window, view-model pattern, toasts, ControlSocketServer, attach mode, UI dump/snapshot | UI-001, 003, 004, 050..052, CTL-011, 023, 030, 031 | T-018 | todo |
 | T-033 | U | Arrange canvas: tiles, waveforms (Metal), grid/snap, clip gestures, playhead layer | UI-010..014 | T-032, T-030 | todo |
@@ -223,7 +223,7 @@ Recorded by the lead from worker reports.
 | DW-028 | T-005 | RtTrap data race: `LockHook::real` (RtTrap.cpp ~146-154) is a plain static written by `install()` while hooked locks read it on other threads; TSan flags it and one TSan run hung (malloc_logger/GOT rebinding vs TSan interceptors, unconfirmed). Make it atomic or set once (`std::call_once`). Blocks TEST-007's TSan job | E (T-003 follow-up) | done (T-087; TSan run: no hang, 0 races; see DW-065) |
 | DW-029 | T-005 | Free a node's ParamIDs only after the last graph referencing them is retired (a freed slot is reused at once, so an old graph could read another param for a block) | B / M (T-014, MODEL-022) | done (T-014) |
 | DW-030 | T-005 | `ParamSlot.generation` (counts writes, for PLUG-015) isn't in 02; record its meaning in the spec. Out-of-range ParamIDs are only `DAW_RT_ASSERT`ed (compiled out in Release), so GraphBuilder must validate IDs | spec (lead) + E (T-012) | done (T-012) |
-| DW-031 | T-015 | MODEL-032: run `Project.validate()` after every command in Debug (hook in `UndoStack.perform`); decoding should also move the ID allocator past the largest ID in the file | M (T-022 / T-031) | todo |
+| DW-031 | T-015 | MODEL-032: run `Project.validate()` after every command in Debug (hook in `UndoStack.perform`); decoding should also move the ID allocator past the largest ID in the file | M (T-022 / T-031) | done (T-022; Debug hook throws, project unchanged; validate on open → DW-111) |
 | DW-032 | T-015 | Change detection diffs the whole project after every command and gesture step; may need tuning for large projects / fast drags | M (T-016) | done (T-016: measured; diff ~6.8 ms/step on 144 tracks, 12.8k clips, release; optional speed-up in DW-098) |
 | DW-033 | T-015 | `Project.init` uses a random UUID; headless `project.new` should pass a fixed id so runs are deterministic | B (T-017, CTL-004) | done (T-017: headless project.new n → UUID 00000000-0000-0000-0000-<n hex>) |
 | DW-034 | T-004 | ENG-011/012 wording: as built, `renderEpoch` is odd while a block runs and even when idle (so graphs replaced while idle free at once), with seq_cst on both sides rather than "acquire". Record in the spec | spec (lead) | todo |
@@ -286,7 +286,7 @@ Recorded by the lead from worker reports.
 | DW-091 | lead | Flaky under full-suite load (~1 in 15–35 runs): "TIME-009: a reader thread never sees a torn playhead" (T-008, TransportTests.swift:69) (T-050's scripted-events flake was a test race, fixed in 69ea8bf). A torn playhead would be a real bug, so investigate before calling it a test issue | E | todo |
 | DW-092 | T-020 | Facade `paramInfoJSON(.gain)` should return `GainNode::kParamInfo` (level, mute); then update EngineClientTests.swift (expects "[]" for `.gain`). Same hook as DW-078 | B | todo |
 | DW-093 | T-020 | Goldens: bus_send_sum with pre- and post-fader sends; strip mute ramp; phase-invert null; gain-node level step; muted track with sends goes silent and fades back | E (T-019 / T-025) | todo |
-| DW-094 | T-016 | Real `SetParam` command needs a param-target design (likely shared with 11's `ParamTarget`); MODEL-032 must check model IDs ≤ `GraphNodeID.maxModelID` (2^56−1), since NodeIDs carry a role in the top 8 bits | M (T-022) | todo |
+| DW-094 | T-016 | Real `SetParam` command needs a param-target design (likely shared with 11's `ParamTarget`); MODEL-032 must check model IDs ≤ `GraphNodeID.maxModelID` (2^56−1), since NodeIDs carry a role in the top 8 bits | M (T-022) | done (T-022: `ParamTarget` in `DAWModel/Project/ParamTarget.swift`, strip/sendLevel/device; spec 11 can adopt it) |
 | DW-095 | T-016 | Control layer: `EngineSync.flush()` before offline render/export; `EngineSync.pollEvents()` as the single engine-event drain (so `assetLoaded` reaches DW-072 bumps); map engine NodeIDs back with `GraphNodeID.owner(of:)`; master limiter is `runtime.masterLimiterParam(master.id)` | B/M (T-017/T-018) | done (T-017; master limiter unused until a control method sets it) |
 | DW-096 | T-016 | eq, compressor, reverb, delay, sampler, midiClipPlayer have no engine factories yet, so projects using them (fixture `routing`) are rejected by the real engine. Run `routing` through EngineClient once registered | D/E (T-040, T-041, T-070..073) | midiClipPlayer registered (T-040); `routing` also needs eq/compressor/reverb/delay, `midi_tempo` needs the sampler (T-041) |
 | DW-097 | T-016 | Nothing in the model calls `loadAsset` for a project's assets on open/import yet | M (T-031 / ImportAsset) | todo |
@@ -301,3 +301,9 @@ Recorded by the lead from worker reports.
 | DW-106 | T-017 | `SetLoop` command so `Project.loop` follows `transport.setLoop` (today it only drives the engine) | M (T-030) | todo |
 | DW-107 | T-017 | `project.open/save` are wired to `ProjectStore.open/save` (`notImplemented`). The dispatcher creates an engine at the project's rate, loads assets relative to the folder and reports `loadReport.offlineAssets`; T-031's `ProjectLoadReport` should replace that shape | M (T-031) | todo |
 | DW-108 | T-017 | For T-018/T-019: `ControlMethod.paramsType` is ready for CTL-021 schemas; `Dispatcher.call(_:_:)` is the in-process headless entry; `ControlUIProvider` is the attach hook (T-032). GoldenTests can run fixtures in-process with `ControlScript(contentsOf:)` + `Dispatcher.handle(_:)` | B/E (T-018, T-019) | todo |
+| DW-109 | T-022 | C++ interop batch-compile trap: an unapplied `String.init` in any DAWModel file sharing a batch job with `EngineClient.swift` hides CxxStdlib's `String(std.string)`, so clean builds fail ("no exact matches in call to initializer"). Fixed once in `DAWError.swift` (d9eb9d5); can recur when files are added. Wrap EngineClient's std::string → String conversions in one helper that avoids overloaded `String(_:)`; CI clean builds (DW-005) | B (lead) | todo |
+| DW-110 | T-022 | `Track.clips` is documented "sorted by start" but `validate()` doesn't enforce it (test stand-in clip commands don't keep order). Decide with the real clip commands | M (T-030) | todo |
+| DW-111 | T-022 | `ProjectStore.open` should run `validate()` on the decoded project and report/repair failures (decoding only reserves IDs and rejects IDs > maxModelID) | M (T-031) | todo |
+| DW-112 | T-022 | `SetParam` on a device param index ≥ the kind's published ParamInfo count (or a kind without ParamInfo, e.g. FakeEngine) grows the slot range → structural rebuild instead of a slot write. Goes away once every kind publishes ParamInfo; otherwise cap indices | M/B (with DW-092) | todo |
+| DW-113 | T-022 | No `RenameBus`/`MoveBus` (RenameTrack/MoveTrack take tracks only); the mixer UI (UI-030) will likely want them | M (before T-076) | todo |
+| DW-114 | T-022 | Once dawmcp exists: run a routing scenario (AddBus/AddTrack/AddSend/SetTrackOutput, cycle rejection → CTL-003 `routingCycle` data, render + analyze) | B (T-018) | todo |
