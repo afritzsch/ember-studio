@@ -118,6 +118,7 @@ public:
     std::span<const Zone> zones() const { return zones_; }
     uint32_t soundingVoices() const DAW_RT;  // not stolen, not idle
     uint32_t fadingVoices() const DAW_RT;    // stolen, fading out
+    uint32_t soundingVoices(uint8_t channel, uint8_t key) const DAW_RT;
 
 private:
     static constexpr uint32_t kVoiceSlots = 2 * kMaxVoices;

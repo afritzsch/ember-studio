@@ -272,6 +272,12 @@ uint32_t Sampler::soundingVoices() const DAW_RT {
     return n;
 }
 
+uint32_t Sampler::soundingVoices(uint8_t channel, uint8_t key) const DAW_RT {
+    uint32_t n = 0;
+    for (const Voice& v : voices_) n += v.env.active() && !v.stolen && v.channel == channel && v.key == key;
+    return n;
+}
+
 uint32_t Sampler::fadingVoices() const DAW_RT {
     uint32_t n = 0;
     for (const Voice& v : voices_) n += v.env.active() && v.stolen;
