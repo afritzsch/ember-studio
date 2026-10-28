@@ -48,6 +48,20 @@ Agents use this to **drive and verify the DAW themselves** (D-20, D-21, D-22). T
 | CTL-004 | Headless mode is **deterministic**: same request sequence → identical project JSON and bit-identical renders (IO-011). | Test runs twice |
 | CTL-005 | Attach-only methods return `methodNotAvailableInHeadless` in headless mode. | — |
 
+**Protocol details (clarified in T-017).** The code is the reference: `Sources/DAWControl/ControlParams.swift` (params/results), `ControlError.swift` (codes).
+- *Wire:* named params only (an object; missing = `{}`); a request without `id` is a notification; a JSON array is a JSON-RPC batch. Relative paths resolve against the dispatcher's working directory (dawctl: its cwd).
+- *Errors (CTL-003):* `data = {dawError, detail, …}`. Codes: -32700 `parseError`, -32600 `invalidRequest`, -32601 `methodNotFound`, -32602 `invalidParams`, -32603 `internalError`, -32000 any `DAWError` (`data.dawError` is its case, `data.error` its JSON, a cycle adds `data.path` in model IDs; engine NodeIDs are mapped back with `GraphNodeID.owner(of:)`), -32001 `methodNotAvailableInHeadless`, -32002 `noProject`, -32003 `timeout`. Batch and fixture failures add `index`/`results` or `line`.
+- *Determinism (CTL-004, DW-033):* headless `project.new` number *n* gets project ID `00000000-0000-0000-0000-<n in hex>`; headless engine sync applies structural changes synchronously (debounce 0).
+- *`command.apply`* returns `createdIDs`: the entity IDs present after and not before. *`command.batch`* `atomic: true` is one `CompositeCommand` (all or nothing); `atomic: false` (default) performs each as its own undo entry and stops at the first failure.
+- *`transport.*`* act on the engine only (the project's `loop` follows once a `SetLoop` command exists). `transport.wait` needs a realtime engine; headless is offline, so it returns `invalidArgument` there.
+- *`asset.import`* loads the file into the engine under the next model ID, waits for the job, then performs `{"type": "ImportAsset", "asset": AssetRef}` (MODEL-005); until that command exists it returns `notImplemented`.
+- *`render.offline`* `{from, to, path, format? (wav|caf|aiff), sampleFormat? (float32|int24|int16), tail? = true, blockSize? = 512}` flushes pending engine sync and waits for the graph build first (DW-095); a rejected build is an error. The result adds `sampleRate`, `frames`, `rtViolations`, `clippedSamples`.
+- *`audio.analyze`* `range` is file frames `{start, end}`; silence reads -240 dB (JSON has no -∞); LUFS is BS.1770-4 with every channel weighted 1; true peak is 4× oversampled; `spectrum` is `bands` (default 32) log bands of `{lowHz, highHz, db}` from 20 Hz, a full-scale sine reading 0 dB, plus `spectrumPeakHz`; `dcOffset` is the largest channel mean; `firstNonSilentSample` is -1 when silent (threshold `silenceThresholdDb`, default -120).
+- *`audio.compare`* `nullResidualDb` is the peak |a − b| in dBFS (shorter file zero-padded), `pass = nullResidualDb ≤ toleranceDb` (default -100, TEST-002); `offsetSamples > 0` means b is later than a (search ±`maxOffset`, default 1 s, first 2^20 frames).
+- *`engine.telemetry`* `rtViolations` = engine render scope + every offline render's own scope (also reported apart); `nodeLatencies` carry `owner` and `role`; `graph` is the build status. *`engine.events`* `{since}` → `{events: [{seq, event}], next}`; events are drained once, before every request.
+- *`test.fixture`* runs `<name>.jsonl` from the fixture folders (dawctl: `--fixtures`, `$DAWCTL_FIXTURES`, then `Tests/GoldenTests/fixtures` of its checkout), skipping `render.offline`, `audio.*` and nested `test.fixture` lines.
+- *Scripts (CTL-010):* one request per line, as JSON (`jsonrpc` optional, `id` defaults to the line number) or shorthand `method {params}`; `#` and `//` lines are comments. `dawctl script` stops at the first error unless `--keep-going`. Exit status (CTL-012): 0 ok, 1 a request failed, 2 bad usage.
+
 ### `dawctl`
 | ID | Requirement |
 |---|---|
