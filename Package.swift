@@ -110,6 +110,10 @@ let package = Package(
         .executable(name: "dawmcp", targets: ["dawmcp"]),
         .executable(name: "PluginScanner", targets: ["PluginScanner"]),
     ],
+    dependencies: [
+        // CTL-020: the official MCP Swift SDK, pinned to an exact version (dawmcp only).
+        .package(url: "https://github.com/modelcontextprotocol/swift-sdk.git", exact: "0.12.1"),
+    ],
     targets: [
         // MARK: Vendor
 
@@ -161,7 +165,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "dawmcp",
-            dependencies: ["DAWModel", "DAWControl"],
+            dependencies: ["DAWModel", "DAWControl", .product(name: "MCP", package: "swift-sdk")],
             swiftSettings: cxxInterop
         ),
 
@@ -225,6 +229,12 @@ let package = Package(
             name: "DAWControlTests",
             // dawctl is listed so `swift test` builds the binary the CLI tests launch (CTL-010/012).
             dependencies: ["DAWControl", "dawctl"],
+            swiftSettings: cxxInterop
+        ),
+        .testTarget(
+            name: "DawmcpTests",
+            // dawmcp is imported (@testable) for its tool layer and launched as a binary (CTL-020).
+            dependencies: ["dawmcp", "DAWControl", "DAWModel", .product(name: "MCP", package: "swift-sdk")],
             swiftSettings: cxxInterop
         ),
         .testTarget(

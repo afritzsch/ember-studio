@@ -193,6 +193,7 @@ public final class Dispatcher {
             let p: CommandApplyParams = try decode(params)
             return try encode(perform(decodeCommand(p.command)))
         case .commandBatch: return try encode(commandBatch(decode(params)))
+        case .commandSchema: return try encode(CommandCatalog.schemas(decode(params)))
         case .undo, .redo:
             let _: NoParams = try decode(params)
             let store = try requireStore()

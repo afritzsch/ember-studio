@@ -84,6 +84,26 @@ public struct CommandBatchResult: Codable, Hashable, Sendable {
     public var results: [CommandResult]
 }
 
+/// CTL-024.
+public struct CommandSchemaParams: Codable, Hashable, Sendable {
+    /// Just this command type. Default: every registered one.
+    public var type: String?
+
+    public init(type: String? = nil) { self.type = type }
+}
+
+public struct CommandSchemaResult: Codable, Hashable, Sendable {
+    public struct Entry: Codable, Hashable, Sendable {
+        /// The `type` string `command.apply` takes.
+        public var type: String
+        /// JSON Schema of the command's wire form, `type` included.
+        public var schema: JSONValue
+    }
+
+    /// Sorted by `type`.
+    public var commands: [Entry]
+}
+
 public struct HistoryResult: Codable, Hashable, Sendable {
     /// What was undone or redone; null if there was nothing.
     public var label: String?

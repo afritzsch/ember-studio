@@ -27,6 +27,7 @@ Agents use this to **drive and verify the DAW themselves** (D-20, D-21, D-22). T
 | `project.get` | `{path?: JSONPointer}` | project JSON (or subtree) |
 | `command.apply` | `{command: {type, …}}` (MODEL-006) | `{ok, createdIDs[]}` or error |
 | `command.batch` | `{commands[], atomic: bool}` | results |
+| `command.schema` | `{type?}` | `{commands: [{type, schema}]}` (CTL-024) |
 | `undo` / `redo` | — | `{label}` |
 | `transport.play/stop/locate/setLoop/record` | … | `TransportPOD` |
 | `transport.wait` | `{untilTick? , timeoutMs}` | position (live mode) |
@@ -61,6 +62,12 @@ Agents use this to **drive and verify the DAW themselves** (D-20, D-21, D-22). T
 - *`engine.telemetry`* `rtViolations` = engine render scope + every offline render's own scope (also reported apart); `nodeLatencies` carry `owner` and `role`; `graph` is the build status. *`engine.events`* `{since}` → `{events: [{seq, event}], next}`; events are drained once, before every request.
 - *`test.fixture`* runs `<name>.jsonl` from the fixture folders (dawctl: `--fixtures`, `$DAWCTL_FIXTURES`, then `Tests/GoldenTests/fixtures` of its checkout), skipping `render.offline`, `audio.*` and nested `test.fixture` lines.
 - *Scripts (CTL-010):* one request per line, as JSON (`jsonrpc` optional, `id` defaults to the line number) or shorthand `method {params}`; `#` and `//` lines are comments. `dawctl script` stops at the first error unless `--keep-going`. Exit status (CTL-012): 0 ok, 1 a request failed, 2 bad usage.
+
+**dawmcp details (clarified in T-018).** The code is the reference: `Sources/dawmcp/DawTools.swift`, `Sources/DAWControl/Schema/`.
+- *Tools (CTL-021):* one per `ControlMethod`, named `daw_` + the method with `.` → `_` and camelCase → snake_case (`transport.setLoop` → `daw_transport_set_loop`). `inputSchema` is generated from the method's `paramsType` by `JSONSchema.of` (a probing decoder; types it can't see through, i.e. tagged unions and non-`CaseIterable` string enums, conform to `JSONSchemaDescribing` in `Schema/ModelSchemas.swift`). A result is one text item with the result JSON; a failure sets `isError` and its text is the JSON-RPC error object (`{code, message, data}`, CTL-003). `daw_ui_snapshot` puts the PNG first as image content, then the `{pngPath}` text (CTL-022).
+- *Command catalogue (CTL-024):* the control method `command.schema` (so `dawctl` has it too) lists `CommandRegistry.registered` with each command's wire-form schema (`type` as a `const`).
+- *Process (CTL-020):* SDK `modelcontextprotocol/swift-sdk` pinned `exact:` in `Package.swift` (+ `Package.resolved`). stdout carries only MCP frames (fd 1 is redirected to stderr at start). The server exits when stdin closes. Headless config as `dawctl` (fixtures: `--fixtures`, `$DAWCTL_FIXTURES`, the checkout's `Tests/GoldenTests/fixtures`).
+- *Launcher (CTL-025):* `.mcp.json` runs `sh -c 'exec "$(git rev-parse --show-toplevel)/scripts/dawmcp.sh"'`. The script builds `--product dawmcp` (output to stderr) when `.build/debug/dawmcp` is missing or older than `Package.swift`, `Package.resolved` or anything under `Sources/`, then execs it with the checkout root as its working directory, so relative render paths land in that worktree. `scripts/dawmcp.sh --build-only` pre-builds (a fresh worktree's first build takes minutes, longer than an MCP client waits).
 
 ### `dawctl`
 | ID | Requirement |

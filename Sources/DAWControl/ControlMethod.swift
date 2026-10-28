@@ -7,6 +7,7 @@ public enum ControlMethod: String, CaseIterable, Hashable, Sendable {
     case projectGet = "project.get"
     case commandApply = "command.apply"
     case commandBatch = "command.batch"
+    case commandSchema = "command.schema"
     case undo
     case redo
     case transportPlay = "transport.play"
@@ -44,6 +45,7 @@ public enum ControlMethod: String, CaseIterable, Hashable, Sendable {
         case .projectGet: ProjectGetParams.self
         case .commandApply: CommandApplyParams.self
         case .commandBatch: CommandBatchParams.self
+        case .commandSchema: CommandSchemaParams.self
         case .undo, .redo, .transportPlay, .transportStop, .engineTelemetry, .uiState: NoParams.self
         case .transportLocate: TransportLocateParams.self
         case .transportSetLoop: TransportSetLoopParams.self
@@ -70,6 +72,7 @@ public enum ControlMethod: String, CaseIterable, Hashable, Sendable {
         case .projectGet: "The project JSON, or the subtree at a JSON Pointer {path?}"
         case .commandApply: "Apply one Command {command: {type, …}} → {ok, createdIDs, label}"
         case .commandBatch: "Apply Commands in order {commands, atomic} → {ok, results}"
+        case .commandSchema: "Command types and their JSON Schemas {type?} → {commands: [{type, schema}]}"
         case .undo: "Undo the last edit → {label}"
         case .redo: "Redo the last undone edit → {label}"
         case .transportPlay: "Start playback → transport"
