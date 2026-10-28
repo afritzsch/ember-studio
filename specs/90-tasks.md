@@ -81,8 +81,8 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 ### M5 — Recording & devices
 | Task | Lane | Title | Requirements | Depends on | Status |
 |---|---|---|---|---|---|
-| T-050 | E | FakeDeviceDriver (loopback, scripted events) | TEST-005 | T-011 | wip(t-050-fake-device) |
-| T-051 | E | DeviceMonitor, hot-swap sequence, xrun detection, EngineEvents | IO-020..023 | T-050 | todo |
+| T-050 | E | FakeDeviceDriver (loopback, scripted events) | TEST-005 | T-011 | done |
+| T-051 | E | DeviceMonitor, hot-swap sequence, xrun detection, EngineEvents | IO-020..023 | T-050 | ready |
 | T-052 | E | Audio recording: FIFOs, disk writer, latency comp, finalize, punch | REC-001..005 | T-050, T-009 | todo |
 | T-053 | E | CoreMIDI input + MIDI recording | REC-010..012 | T-040 | todo |
 | T-054 | E | Input monitoring modes | REC-020..022 | T-052 | todo |
@@ -262,7 +262,7 @@ Recorded by the lead from worker reports.
 | DW-067 | T-011 | Facade: publish graphs prepared for at least `driver.current().bufferFrames` (shorter → silence, counted in oversizeBlocks); stop the driver before an offline render (DW-057); enabling input (record/monitor armed) means restarting the driver with `inputEnabled` — no live input switch | B (T-014) | done (T-014) |
 | DW-068 | T-011 | IO-023 rest: overruns from render time vs block duration, `EngineEvent.overload`; one processor-overload notification often arrives right at start, so ignore a short window after start | E (T-051) | todo |
 | DW-069 | T-011 | 04 Interfaces names `DriverConfig` and `DeviceLatency` without defining them; T-011 defined them in `io/DriverConfig.h` / `io/DeviceLatency.h` (like `ExportSpec`). Add them to the Interfaces block | spec (lead) | todo |
-| DW-070 | T-011 | FakeDeviceDriver can reuse `DeviceRenderer` (device-independent IO cycle) and `publishDeviceLatency()`. Device start/stop/config/latency not reachable via dawctl/dawmcp until the facade + control exist | E (T-050), B (T-017/T-018) | todo |
+| DW-070 | T-011 | FakeDeviceDriver can reuse `DeviceRenderer` (device-independent IO cycle) and `publishDeviceLatency()`. Device start/stop/config/latency not reachable via dawctl/dawmcp until the facade + control exist | E (T-050), B (T-017/T-018) | FakeDeviceDriver part done (T-050); dawctl/dawmcp device control todo (T-017/T-018) |
 | DW-071 | T-013 | Facade/telemetry need the NodeID → MeterID map (today only `GraphBuilder::meterOf`, compile thread): publish it with each graph or through GraphCompiler | B (T-014 / T-020) | done (T-014) |
 | DW-072 | T-013 | DW-051 decision: the model must bump a clip player's `configVersion` whenever its track's clips change and when an asset they use finishes loading (facade emits `assetLoaded`) | M (T-016) | todo |
 | DW-073 | T-013 | Goldens: two adjacent clips with fades (DSP-001), loop wrap mid-block through the clip player (TIME-005/006), locate reset (TIME-008), pan hard-left/centre/right (MIX-005, T-025) | E (T-019 / T-025 / T-036) | todo |
