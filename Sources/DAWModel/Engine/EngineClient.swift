@@ -13,8 +13,9 @@ public final class EngineClient: EngineProtocol {
     public let mode: EngineMode
 
     /// BRIDGE-008. Offline mode needs a session rate in 1 kHz…768 kHz. Realtime mode starts the
-    /// CoreAudio driver; if the device can't start, the engine exists without rendering and a
-    /// `deviceChanged` event says why.
+    /// driver `DriverConfig.driver` names (CoreAudio, or the fake devices, DW-089); if the device
+    /// can't start, the engine exists without rendering and a `deviceChanged` event
+    /// (`startFailed`) says why.
     public init(_ mode: EngineMode) throws(DAWError) {
         var config = daw.DriverConfigPOD()
         let cxxMode: daw.EngineMode
@@ -162,6 +163,19 @@ public final class EngineClient: EngineProtocol {
         if let error = Self.error(facade.setDevice(Self.cxx(config))) { throw error }
     }
 
+    public func simulateDeviceEvent(_ event: DeviceEvent) throws(DAWError) {
+        var pod = daw.DeviceEventPOD()
+        pod.kind = switch event.kind {
+        case .deviceLost: .deviceLost
+        case .deviceRestored: .deviceRestored
+        case .sampleRateChanged: .sampleRateChanged
+        case .processorOverload: .processorOverload
+        }
+        pod.deviceID = event.deviceID
+        pod.sampleRate = event.sampleRate
+        if let error = Self.error(facade.simulateDeviceEvent(pod)) { throw error }
+    }
+
     // MARK: Observability
 
     public func telemetry() -> EngineTelemetry {
@@ -187,6 +201,9 @@ public final class EngineClient: EngineProtocol {
         out.eventsDropped = t.eventsDropped
         out.sampleRate = t.sampleRate
         out.deviceRunning = t.deviceRunning
+        out.outputDeviceID = t.outputDeviceID
+        out.processorOverloads = t.processorOverloads
+        out.renderOverruns = t.renderOverruns
         return out
     }
 
@@ -310,7 +327,22 @@ public final class EngineClient: EngineProtocol {
         case .jobFinished: .jobFinished
         default: .deviceChanged
         }
-        return EngineEvent(kind: kind, subject: e.subject, job: e.job, count: e.count, error: error(e.error))
+        var device: DeviceChange?
+        if kind == .deviceChanged {
+            let reason: DeviceChange.Reason = switch e.device.reason {
+            case .deviceLost: .deviceLost
+            case .sampleRateChanged: .sampleRateChanged
+            case .defaultOutputChanged: .defaultOutputChanged
+            case .deviceAvailable: .deviceAvailable
+            case .startFailed: .startFailed
+            default: .startFailed
+            }
+            device = DeviceChange(reason: reason, previousDeviceID: e.device.previousDeviceID,
+                                  deviceID: e.device.deviceID, previousSampleRate: e.device.previousSampleRate,
+                                  sampleRate: e.device.sampleRate)
+        }
+        return EngineEvent(kind: kind, subject: e.subject, job: e.job, count: e.count, error: error(e.error),
+                           device: device)
     }
 
     private static func cxx(_ kind: NodeKind) -> daw.NodeKind {
@@ -340,6 +372,7 @@ public final class EngineClient: EngineProtocol {
         out.bufferFrames = config.bufferFrames
         out.outputChannels = config.outputChannels
         out.inputChannels = config.inputChannels
+        out.driver = config.driver == .fake ? .fake : .coreAudio
         return out
     }
 
