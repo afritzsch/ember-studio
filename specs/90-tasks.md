@@ -72,8 +72,8 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 ### M4 — MIDI & Sampler
 | Task | Lane | Title | Requirements | Depends on | Status |
 |---|---|---|---|---|---|
-| T-040 | D | MidiClipPlayer, hanging-note handling | DSP-003 | T-008, T-012 | wip(t-040-midi-clip-player) |
-| T-041 | D | Sampler (zones, Hermite, voices, ADSR, CC64, bend) | DSP-020..023 | T-040, T-010 | todo |
+| T-040 | D | MidiClipPlayer, hanging-note handling | DSP-003 | T-008, T-012 | done |
+| T-041 | D | Sampler (zones, Hermite, voices, ADSR, CC64, bend) | DSP-020..023 | T-040, T-010 | ready |
 | T-042 | M | Note commands, instrument slot on MIDI tracks | MODEL-005 (note subset) | T-030 | todo |
 | T-043 | U | Piano roll + velocity lane + audition (`previewNote` facade addition) | UI-020, 021 | T-033, T-042 | todo |
 | T-044 | D | M4 goldens | TEST (M4 set) | T-041, T-042 | todo |
@@ -288,6 +288,12 @@ Recorded by the lead from worker reports.
 | DW-093 | T-020 | Goldens: bus_send_sum with pre- and post-fader sends; strip mute ramp; phase-invert null; gain-node level step; muted track with sends goes silent and fades back | E (T-019 / T-025) | todo |
 | DW-094 | T-016 | Real `SetParam` command needs a param-target design (likely shared with 11's `ParamTarget`); MODEL-032 must check model IDs ≤ `GraphNodeID.maxModelID` (2^56−1), since NodeIDs carry a role in the top 8 bits | M (T-022) | todo |
 | DW-095 | T-016 | Control layer: `EngineSync.flush()` before offline render/export; `EngineSync.pollEvents()` as the single engine-event drain (so `assetLoaded` reaches DW-072 bumps); map engine NodeIDs back with `GraphNodeID.owner(of:)`; master limiter is `runtime.masterLimiterParam(master.id)` | B/M (T-017/T-018) | todo |
-| DW-096 | T-016 | eq, compressor, reverb, delay, sampler, midiClipPlayer have no engine factories yet, so projects using them (fixture `routing`) are rejected by the real engine. Run `routing` through EngineClient once registered | D/E (T-040, T-041, T-070..073) | todo |
+| DW-096 | T-016 | eq, compressor, reverb, delay, sampler, midiClipPlayer have no engine factories yet, so projects using them (fixture `routing`) are rejected by the real engine. Run `routing` through EngineClient once registered | D/E (T-040, T-041, T-070..073) | midiClipPlayer registered (T-040); `routing` also needs eq/compressor/reverb/delay, `midi_tempo` needs the sampler (T-041) |
 | DW-097 | T-016 | Nothing in the model calls `loadAsset` for a project's assets on open/import yet | M (T-031 / ImportAsset) | todo |
 | DW-098 | T-016 | Bypassed devices are left out of the graph until host bypass (PLUG-018): bypass is a rebuild and the device loses state. Optional: `ProjectChange` diff could skip entities with unchanged storage (main per-step cost on huge projects) | P (T-064), M (optional) | todo |
+| DW-099 | T-040 | MIDI routing in RenderGraph/GraphBuilder: MIDI edges carry no data (player `midiOut` capacity 0, instrument `midiIn` empty). Needs per-step MIDI storage of fixed capacity that never shrinks between blocks (no-hanging-notes guarantee) and MIDI edge delay for PDC (05 "PDC semantics") | E | todo |
+| DW-100 | T-040 | Sampler should handle CC 123 (All Notes Off): a re-created MidiClipPlayer (DW-051 note edit while playing) sends it on all 16 channels. DSP-023 lists only CC64 and pitch bend | D (T-041) | todo |
+| DW-101 | T-040 | DSP-003 golden (`midi_loop_wrap`) once the golden harness, MIDI routing and a sampler exist | D/E (T-019, T-041) | todo |
+| DW-102 | T-040 | Flaky "ENG-014: RT-retired objects are freed on daw.reclaim" (EngineChecks.cpp:743, `rtRetireQueue`): waits for `destroyed`, then reads `rtObjectsFreed()`, which the reclaimer bumps only after the destructor returns. Wait on `rtObjectsFreed() == 1` instead | E | todo |
+| DW-103 | T-040 | MidiClipPlayer doesn't chase notes (playback starting inside a note doesn't sound it), written into the 06 clarification. Many DAWs chase by default; confirm with the user | user | todo |
+| DW-104 | T-040 | `BuiltinNodes.h` doc comment doesn't list midiClipPlayer | D (small) | todo |

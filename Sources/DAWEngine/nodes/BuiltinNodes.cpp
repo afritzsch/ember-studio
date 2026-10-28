@@ -7,6 +7,7 @@
 #include "nodes/AudioClipPlayer.h"
 #include "nodes/ChannelStrip.h"
 #include "nodes/GainNode.h"
+#include "nodes/MidiClipPlayer.h"
 
 namespace daw {
 
@@ -15,6 +16,7 @@ Result<void> registerBuiltinNodes(NodeRegistry& registry, AssetLookup lookup, Te
         return std::unique_ptr<Node>(AudioClipPlayer::create(info.clips, lookup));
     };
     if (auto r = registry.set(NodeKind::audioClipPlayer, {std::move(clipPlayer)}); !r) return r;
+    if (auto r = registry.set(NodeKind::midiClipPlayer, MidiClipPlayer::kindInfo()); !r) return r;  // DSP-003
 
     auto strip = [telemetry](const NodeCreateInfo& info) -> Result<std::unique_ptr<Node>> {
         if (info.desc.numParams < ChannelStrip::kNumParams)
