@@ -15,13 +15,13 @@ struct MidiClipPlayerTests {
     @Test("DSP-003, ENG-004: random notes over a tempo map in random block sizes match an oracle")
     func matchesOracle() { expectPasses(daw.testing.midiClipPlayerMatchesOracle()) }
 
-    @Test("DSP-003, TIME-006: a note hanging over the loop end ends at the wrap frame, before the new pass")
+    @Test("DSP-003, TIME-006, DW-103: a note hanging over the loop end ends at the wrap frame; one under the loop start is chased")
     func loopWrap() { expectPasses(daw.testing.midiClipPlayerLoopWrap()) }
 
-    @Test("DSP-003, TIME-008: locate while playing and stop release held notes; no chasing")
+    @Test("DSP-003, TIME-008, DW-103: locate while playing and stop release held notes; playback inside a note chases it")
     func locateAndStop() { expectPasses(daw.testing.midiClipPlayerLocateAndStop()) }
 
-    @Test("DSP-003: no stuck notes after random locates, stops, loop changes and block sizes")
+    @Test("DSP-003, DW-103: no stuck notes (and every sounding note chased) after random locates, stops, loops, block sizes")
     func noStuckNotesFuzz() { expectPasses(daw.testing.midiClipPlayerNoStuckNotesFuzz()) }
 
     @Test("DSP-003, DW-051: a new instance starts with All Notes Off on all 16 channels, once")
