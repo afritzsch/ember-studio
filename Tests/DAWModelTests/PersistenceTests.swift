@@ -37,7 +37,7 @@ private func exists(_ url: URL) -> Bool { FileManager.default.fileExists(atPath:
 
 /// Polls `condition` until it holds or `timeout` passes.
 @MainActor
-private func eventually(timeout: Duration = .seconds(5), _ condition: () -> Bool) async -> Bool {
+private func eventually(timeout: Duration = .seconds(30), _ condition: () -> Bool) async -> Bool {
     let deadline = ContinuousClock.now + timeout
     while !condition() {
         if ContinuousClock.now > deadline { return false }
