@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <random>
@@ -917,17 +918,33 @@ CheckResult playheadIsConsistentAcrossThreads() {
 
     std::atomic<bool> running{true};
     std::atomic<uint64_t> rtViolations{0};
+    std::atomic<uint64_t> blocks{0};
     std::thread audio([&] {
         RtScope scope;
-        while (running.load(std::memory_order_acquire)) t.advance(map, 128);
+        while (running.load(std::memory_order_acquire)) {
+            t.advance(map, 128);
+            blocks.fetch_add(1, std::memory_order_release);
+        }
         rtViolations = scope.violations();
     });
+
+    // DW-091: reads only test something while the audio thread publishes. Under load it can start
+    // late enough that all the reads used to finish before its first block, which then never
+    // came (running was already false) and the final `playing` check failed. So wait for the
+    // first block, and keep reading until the writer has published plenty of blocks meanwhile.
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
+    while (blocks.load(std::memory_order_acquire) == 0 && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::yield();
+    const uint64_t blocksBefore = blocks.load(std::memory_order_acquire);
+    constexpr uint64_t kMinBlocks = 1000;
 
     // The writer publishes loops with end = start + 960 and the matching tick for each sample;
     // a torn read would mix fields from two blocks.
     int torn = 0, reads = 0;
     std::mt19937 rng(9009);
-    for (int i = 0; i < 20000; ++i) {
+    for (int i = 0; i < 20000 || (blocks.load(std::memory_order_acquire) - blocksBefore < kMinBlocks &&
+                                  std::chrono::steady_clock::now() < deadline);
+         ++i) {
         if (i % 50 == 0) {
             const Tick start = static_cast<Tick>(rng() % 20000);
             (void)t.setLoop(i % 100 == 0, start, start + 960);
@@ -938,9 +955,11 @@ CheckResult playheadIsConsistentAcrossThreads() {
         if (p.tick != map.sampleToTick(p.sample)) ++torn;
         if (p.loopEnd != p.loopStart + 960 && !(p.loopStart == 0 && p.loopEnd == 0)) ++torn;
     }
+    const uint64_t blocksDuringReads = blocks.load(std::memory_order_acquire) - blocksBefore;
     running = false;
     audio.join();
-    DAW_CHECK(reads == 20000 && torn == 0);
+    DAW_CHECK(blocksBefore > 0 && blocksDuringReads >= kMinBlocks);
+    DAW_CHECK(reads >= 20000 && torn == 0);
     DAW_CHECK(t.playhead().playing);
     DAW_CHECK(rtViolations.load() == 0);
     return checks;
