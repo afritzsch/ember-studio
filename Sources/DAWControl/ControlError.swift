@@ -15,7 +15,9 @@ import Foundation
 /// | -32001 | `methodNotAvailableInHeadless`    | an attach-only method in headless mode (CTL-005) |
 /// | -32002 | `noProject`                       | the method needs a project; call `project.new` first |
 /// | -32003 | `timeout`                         | a job, graph build or `transport.wait` ran out of time |
+/// | -32004 | `attachFailed`                    | attach mode (CTL-011/023): the app couldn't be launched or reached, or closed the connection |
 ///
+/// `remote` is an error the app returned over the socket (attach mode), passed on unchanged.
 /// `withData` adds context fields to `data` (a batch's failed `index`, a fixture's `line`).
 public enum ControlError: Error, Hashable, Sendable {
     case parseError(String)
@@ -27,6 +29,8 @@ public enum ControlError: Error, Hashable, Sendable {
     case methodNotAvailableInHeadless(String)
     case noProject
     case timeout(String)
+    case attachFailed(String)
+    case remote(RPCError)
     indirect case withData(ControlError, [String: JSONValue])
 
     public var code: Int {
@@ -41,6 +45,8 @@ public enum ControlError: Error, Hashable, Sendable {
         case .methodNotAvailableInHeadless: -32001
         case .noProject: -32002
         case .timeout: -32003
+        case .attachFailed: -32004
+        case .remote(let error): error.code
         }
     }
 
@@ -57,6 +63,8 @@ public enum ControlError: Error, Hashable, Sendable {
         case .methodNotAvailableInHeadless: "methodNotAvailableInHeadless"
         case .noProject: "noProject"
         case .timeout: "timeout"
+        case .attachFailed: "attachFailed"
+        case .remote(let error): error.dawError ?? "remote"
         }
     }
 
@@ -64,9 +72,11 @@ public enum ControlError: Error, Hashable, Sendable {
     public var detail: String {
         switch self {
         case .withData(let error, _): error.detail
-        case .parseError(let s), .invalidRequest(let s), .invalidParams(let s), .internalError(let s), .timeout(let s):
+        case .parseError(let s), .invalidRequest(let s), .invalidParams(let s), .internalError(let s), .timeout(let s),
+             .attachFailed(let s):
             s
         case .methodNotFound(let method): "no method \"\(method)\""
+        case .remote(let error): error.data?["detail"]?.stringValue ?? error.message
         case .model(let error): error.description
         case .methodNotAvailableInHeadless(let method): "\(method) is only available in attach mode"
         case .noProject: "no project; call project.new first"
@@ -74,6 +84,7 @@ public enum ControlError: Error, Hashable, Sendable {
     }
 
     public var rpcError: RPCError {
+        if case .remote(let error) = self { return error }
         if case .withData(let error, let extra) = self {
             var rpc = error.rpcError
             rpc.data = .object((rpc.data?.objectValue ?? [:]).merging(extra) { base, _ in base })
@@ -90,7 +101,7 @@ public enum ControlError: Error, Hashable, Sendable {
     }
 
     /// Any error a handler threw.
-    init(_ error: any Error) {
+    public init(_ error: any Error) {
         switch error {
         case let error as ControlError: self = error
         case let error as DAWError: self = .model(error)
