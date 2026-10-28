@@ -6,6 +6,7 @@
 #include "core/Denormals.h"
 #include "core/ProcessContext.h"
 #include "core/RtTrap.h"
+#include "time/TransportSegments.h"
 
 namespace daw {
 
@@ -14,6 +15,77 @@ namespace {
 void silence(const AudioBufferView& out, uint32_t numFrames) DAW_RT {
     for (uint32_t c = 0; c < out.numChannels; ++c)
         std::memset(out.channels[c], 0, std::size_t{numFrames} * sizeof(float));
+}
+
+// MARK: MIX-023 look-ahead (see Engine.h)
+
+// The transport's loop for this block, in samples of the graph's map, as Transport::layOut
+// resolves it: an empty loop is off.
+struct Loop {
+    bool on = false;
+    SamplePos start = 0, end = 0;
+    Tick startTick = 0;
+};
+
+Loop loopOf(const Transport& transport, const TempoMap& tempo) DAW_RT {
+    Loop loop;
+    if (!transport.loopEnabled()) return loop;
+    loop.start = tempo.tickToSample(transport.loopStart());
+    loop.end = tempo.tickToSample(transport.loopEnd());
+    loop.startTick = transport.loopStart();
+    loop.on = loop.end > loop.start;
+    return loop;
+}
+
+// Where playback from `pos` is `frames` later, with the transport's loop rule; `wrapped` when it
+// lands exactly on the loop start by wrapping (the next segment is the first after a wrap).
+struct Ahead {
+    SamplePos pos;
+    bool wrapped;
+};
+
+Ahead advance(SamplePos pos, uint32_t frames, const Loop& loop) DAW_RT {
+    const SamplePos to = pos + frames;
+    if (!loop.on || pos >= loop.end || to < loop.end) return {to, false};
+    const SamplePos offset = (to - loop.end) % (loop.end - loop.start);
+    return {loop.start + offset, offset == 0};
+}
+
+// Transport.cpp's makeSegment: the tick rule of TransportSegments.h, and a tick that rounds onto
+// the loop start's sample from before it belongs before the loop.
+TransportSegment makeSegment(const TempoMap& tempo, SamplePos start, uint32_t frameOffset,
+                             uint32_t numFrames, bool afterWrap, Tick wrapTick) DAW_RT {
+    TransportSegment seg{start, firstTickAtOrAfter(tempo, start),
+                         firstTickAtOrAfter(tempo, start + numFrames), frameOffset, numFrames,
+                         afterWrap};
+    if (afterWrap && seg.startTick < wrapTick) {
+        seg.startTick = wrapTick;
+        if (seg.endTick < wrapTick) seg.endTick = wrapTick;
+    }
+    return seg;
+}
+
+// `numFrames` frames of playback from `from`, laid out like Transport::layOut: one segment, or
+// two when the loop wraps inside (a loop shorter than the rest leaves a gap, TIME-005).
+TransportBlock layOut(const TransportBlock& like, const TempoMap& tempo, Ahead from,
+                      uint32_t numFrames, const Loop& loop) DAW_RT {
+    TransportBlock block = like;
+    block.tempo = &tempo;
+    const SamplePos end = from.pos + numFrames;
+    if (!loop.on || from.pos >= loop.end || end <= loop.end) {
+        block.seg[0] = makeSegment(tempo, from.pos, 0, numFrames, from.wrapped, loop.startTick);
+        block.seg[1] = block.seg[0];
+        block.numSegments = 1;
+        return block;
+    }
+    const auto first = static_cast<uint32_t>(loop.end - from.pos);
+    block.seg[0] = makeSegment(tempo, from.pos, 0, first, from.wrapped, loop.startTick);
+    const SamplePos length = loop.end - loop.start;
+    const uint32_t rest = numFrames - first;
+    const uint32_t second = rest < length ? rest : static_cast<uint32_t>(length);
+    block.seg[1] = makeSegment(tempo, loop.start, first, second, true, loop.startTick);
+    block.numSegments = 2;
+    return block;
 }
 
 } // namespace
@@ -64,8 +136,23 @@ void Engine::render(RenderTarget& target, uint32_t numFrames) DAW_RT {
         // they drop voices and tails from the old position; effects keep their tails. Loop wraps
         // don't reset: they can fall mid-block, and nodes handle them per segment (TIME-006).
         if (transport_.locatedWhilePlaying()) graph->resetTimelineNodes();
+
+        // MIX-023: timeline nodes run graph->latency() samples ahead, and a new run of playback
+        // is pre-rolled first (Engine.h).
+        const uint32_t latency = graph->latency();
+        if (!block.playing || transport_.locatedWhilePlaying()) runPrerolled_ = false;
+        if (block.numSegments > 0 && !runPrerolled_) {
+            if (latency > 0) preRoll(*graph, block);
+            runPrerolled_ = true;
+        }
+        TransportBlock ahead = block;
+        if (latency > 0 && block.numSegments > 0) {
+            const Loop loop = loopOf(transport_, graph->tempoMap());
+            ahead = layOut(block, graph->tempoMap(), advance(blockStartSample(block), latency, loop), n, loop);
+        }
         ProcessContext ctx{n, graph->sampleRate(), block, params_};
-        graph->process(ctx);
+        ProcessContext timeline{n, graph->sampleRate(), ahead, params_};
+        graph->process(ctx, timeline);
 
         // ENG-041: write master to the target.
         const AudioBufferView master = graph->master(n);
@@ -75,6 +162,20 @@ void Engine::render(RenderTarget& target, uint32_t numFrames) DAW_RT {
             else
                 std::memset(out.channels[c], 0, std::size_t{n} * sizeof(float));
         }
+    }
+
+    // ENG-050, MIX-020/023: per-node latencies and the graph latency of the graph being heard,
+    // copied whenever it changes.
+    const uint64_t serial = graph != nullptr ? graph->serial() : 0;
+    if (serial != latencySerial_) {
+        if (graph != nullptr) {
+            const auto table = graph->nodeLatencies();
+            telemetry_.publishNodeLatencies(table.data(), static_cast<uint32_t>(table.size()),
+                                            graph->latency());
+        } else {
+            telemetry_.publishNodeLatencies(nullptr, 0, 0);
+        }
+        latencySerial_ = serial;
     }
 
     // ENG-041 "publish telemetry", ENG-050/051. DW-037: an oversize block rendered silence
@@ -91,6 +192,28 @@ void Engine::render(RenderTarget& target, uint32_t numFrames) DAW_RT {
 
     // ENG-012: the block is done with `graph`.
     renderEpoch_.store(epoch + 2, std::memory_order_seq_cst);
+}
+
+void Engine::preRoll(const RenderGraph& graph, const TransportBlock& block) DAW_RT {
+    // MIX-023: L frames before the block, chunked to the graph's maxBlock (CONV-RT-04: bounded
+    // by latency / maxBlock). Timeline nodes play [p, p + L) on the transport's loop; the others
+    // see a straight run of the L frames before p. The master output is dropped.
+    const TempoMap& tempo = graph.tempoMap();
+    const Loop loop = loopOf(transport_, tempo);
+    const Loop straight;
+    const uint32_t latency = graph.latency();
+    const SamplePos start = blockStartSample(block);
+    for (uint32_t done = 0; done < latency;) {
+        const uint32_t remaining = latency - done;
+        const uint32_t n = remaining < graph.maxBlock() ? remaining : graph.maxBlock();
+        const TransportBlock before =
+            layOut(block, tempo, {start - static_cast<SamplePos>(latency - done), false}, n, straight);
+        const TransportBlock ahead = layOut(block, tempo, advance(start, done, loop), n, loop);
+        ProcessContext ctx{n, graph.sampleRate(), before, params_};
+        ProcessContext timeline{n, graph.sampleRate(), ahead, params_};
+        graph.process(ctx, timeline);
+        done += n;
+    }
 }
 
 } // namespace daw

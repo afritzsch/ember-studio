@@ -99,14 +99,16 @@ uint64_t renderCounted(Engine& engine, RenderTarget& target, uint32_t numFrames)
     return scope.violations();
 }
 
-RenderStepDesc step(std::shared_ptr<Node> node, uint32_t output, std::vector<uint32_t> inputs = {},
-                    uint32_t gather = kNoBuffer, std::vector<uint32_t> sidechain = {},
-                    uint32_t sidechainGather = kNoBuffer) {
+// Push ports (DW-052): `input`/`sidechain` name the buffer the node reads, which earlier steps
+// fill through their `feeds` (the first feed into a buffer copies, later ones add; MIX-004).
+RenderStepDesc step(std::shared_ptr<Node> node, uint32_t output, uint32_t input = kNoBuffer,
+                    std::vector<RenderFeedDesc> feeds = {}, uint32_t sidechain = kNoBuffer) {
     RenderStepDesc s;
     s.node = std::move(node);
     s.output = output;
-    s.input = {std::move(inputs), gather};
-    s.sidechain = {std::move(sidechain), sidechainGather};
+    s.input = {input};
+    s.sidechain = {sidechain};
+    s.feeds = std::move(feeds);
     return s;
 }
 
@@ -482,14 +484,14 @@ CheckResult nodeIOViews() {
     auto source = std::make_unique<IOProbe>();
     IOProbe* withoutInputs = source.get();
 
-    // Buffers: 0 = A, 1 = B, 2 = probe input (A + B), 3 = probe sidechain (B), 4 = probe out,
-    // 5 = output of the input-less probe.
+    // Buffers: 0 = A, 1 = B, 2 = probe input (A + B, fed), 3 = probe sidechain (B, fed),
+    // 4 = probe out, 5 = output of the input-less probe.
     engine.publish(makeGraph(
         {
-            step(put(engine, 1, std::make_unique<ConstSource>(0.25f)), 0),
-            step(put(engine, 2, std::make_unique<ConstSource>(0.5f)), 1),
+            step(put(engine, 1, std::make_unique<ConstSource>(0.25f)), 0, kNoBuffer, {{2, false}}),
+            step(put(engine, 2, std::make_unique<ConstSource>(0.5f)), 1, kNoBuffer, {{2, true}, {3, false}}),
             step(put(engine, 3, std::move(source)), 5),
-            step(put(engine, 4, std::move(probe)), 4, {0, 1}, 2, {1}, 3),
+            step(put(engine, 4, std::move(probe)), 4, 2, {}, 3),
         },
         6, 4));
 
@@ -541,7 +543,7 @@ CheckResult randomBlockSizes() {
     engine.publish(makeGraph(
         {
             step(put(engine, 1, std::make_unique<CounterSource>(life)), 0),
-            step(put(engine, 2, std::make_unique<Gain>(1.0f)), 2, {0}, 1),
+            step(put(engine, 2, std::make_unique<Gain>(1.0f)), 2, 0),
         },
         3, 2));
 
@@ -602,7 +604,7 @@ CheckResult publishWhileRendering() {
         auto source = put(engine, 1, std::make_unique<ConstSource>(0.25f, sourceLife));
         auto graphWithGain = [&](int i) {
             auto gain = put(engine, 2, std::make_unique<Gain>(float(1 + i % 4), gains));
-            return makeGraph({step(source, 0), step(std::move(gain), 2, {0}, 1)}, 3, 2, kFrames);
+            return makeGraph({step(source, 0), step(std::move(gain), 2, 0)}, 3, 2, kFrames);
         };
         engine.publish(graphWithGain(0));
 
@@ -787,12 +789,12 @@ CheckResult renderOrderAndSumming() {
     auto gainNode = std::make_unique<Gain>(2.0f, c, &clock);
     Gain* gain = gainNode.get();
 
-    // A → 0, B → 1, (0 + 1) → gather 2 → C (×2) → 3 = master.
+    // A → 0, B → 1, both fed (copy, add) into 2 → C (×2) → 3 = master.
     engine.publish(makeGraph(
         {
-            step(put(engine, 1, std::make_unique<ConstSource>(0.25f, a, &clock)), 0),
-            step(put(engine, 2, std::make_unique<ConstSource>(0.5f, b, &clock)), 1),
-            step(put(engine, 3, std::move(gainNode)), 3, {0, 1}, 2),
+            step(put(engine, 1, std::make_unique<ConstSource>(0.25f, a, &clock)), 0, kNoBuffer, {{2, false}}),
+            step(put(engine, 2, std::make_unique<ConstSource>(0.5f, b, &clock)), 1, kNoBuffer, {{2, true}}),
+            step(put(engine, 3, std::move(gainNode)), 3, 2),
         },
         4, 3));
 
@@ -866,7 +868,7 @@ CheckResult renderGraphValidation() {
         return RenderGraph::create(std::move(desc));
     };
 
-    auto ok = create({step(node, 0), step(node, 2, {0}, 1, {0}, 3)}, 4, 2);
+    auto ok = create({step(node, 0, kNoBuffer, {{1, false}, {3, false}}), step(node, 2, 1, {}, 3)}, 4, 2);
     DAW_CHECK(ok.ok());
     if (ok) {
         const RenderGraph& graph = *ok.value();
@@ -880,12 +882,10 @@ CheckResult renderGraphValidation() {
     DAW_CHECK(!create({step(nullptr, 0)}, 1, 0).ok());                   // null node
     DAW_CHECK(!create({step(node, 1)}, 1, 0).ok());                      // output out of range
     DAW_CHECK(!create({step(node, 0)}, 1, 1).ok());                      // master out of range
-    DAW_CHECK(!create({step(node, 0, {5}, 1)}, 2, 0).ok());              // source out of range
-    DAW_CHECK(!create({step(node, 0, {1})}, 2, 0).ok());                 // sources but no gather buffer
-    DAW_CHECK(!create({step(node, 0, {1}, 0)}, 2, 0).ok());              // gather buffer is the output
-    DAW_CHECK(!create({step(node, 0, {1}, 1)}, 2, 0).ok());              // source is the gather buffer
-    DAW_CHECK(!create({step(node, 0, {1}, 2, {1}, 2)}, 3, 0).ok());      // input and sidechain share
-    DAW_CHECK(!create({step(node, 0, {}, 5)}, 1, 0).ok());               // unused gather out of range
+    DAW_CHECK(!create({step(node, 0, 5)}, 2, 0).ok());                   // input out of range
+    DAW_CHECK(!create({step(node, 0, 0)}, 2, 0).ok());                   // input is the output
+    DAW_CHECK(!create({step(node, 0, kNoBuffer, {}, 0)}, 2, 0).ok());    // sidechain is the output
+    DAW_CHECK(!create({step(node, 0, kNoBuffer, {{5, false}})}, 2, 0).ok());  // feed out of range
     DAW_CHECK(!create({step(node, 0)}, 1, 0, 0).ok());                   // maxBlock 0
     DAW_CHECK(!create({step(node, 0)}, 1, 0, kMaxBlock + 1, kMaxBlock + 1).ok());  // ENG-004
     DAW_CHECK(!create({step(node, 0)}, 1, 0, 1024, 512).ok());           // buffers too short

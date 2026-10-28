@@ -1,5 +1,7 @@
 #include "core/RenderGraph.h"
 
+#include <algorithm>
+#include <atomic>
 #include <cstring>
 #include <string>
 #include <utility>
@@ -21,34 +23,61 @@ Result<void> checkBuffer(uint32_t buffer, uint32_t numBuffers, bool optional, co
 
 Result<void> checkPort(const RenderPortDesc& port, uint32_t numBuffers, uint32_t output,
                        const char* what, std::size_t step) {
-    if (port.fed) {
-        // Push: the buffer already holds the input; the node reads it while writing its output.
-        if (!port.sources.empty())
-            return makeError(ErrorCode::invalidArgument,
-                             std::string(what) + " is fed but has sources in step " + std::to_string(step));
-        if (auto r = checkBuffer(port.buffer, numBuffers, false, what, step); !r) return r;
-        if (port.buffer == output)
-            return makeError(ErrorCode::invalidArgument,
-                             std::string(what) + " buffer is the output in step " + std::to_string(step));
-        return {};
-    }
-    if (port.sources.empty()) return checkBuffer(port.buffer, numBuffers, true, what, step);
-    if (auto r = checkBuffer(port.buffer, numBuffers, false, what, step); !r) return r;
-    // The gather buffer is cleared before summing, and the node reads it while writing its
-    // output, so it can alias neither.
-    if (port.buffer == output)
+    if (auto r = checkBuffer(port.buffer, numBuffers, true, what, step); !r) return r;
+    // The node reads its input while it writes its output.
+    if (port.buffer != kNoBuffer && port.buffer == output)
         return makeError(ErrorCode::invalidArgument,
                          std::string(what) + " buffer is the output in step " + std::to_string(step));
-    for (uint32_t source : port.sources) {
-        if (auto r = checkBuffer(source, numBuffers, false, what, step); !r) return r;
-        if (source == port.buffer)
-            return makeError(ErrorCode::invalidArgument, std::string(what) +
-                                 " source is its own gather buffer in step " + std::to_string(step));
-    }
     return {};
 }
 
+uint32_t nextPowerOfTwo(uint64_t n) {
+    uint64_t p = 1;
+    while (p < n) p <<= 1;
+    return static_cast<uint32_t>(p);
+}
+
+std::atomic<uint64_t> nextSerial{1};
+
 } // namespace
+
+DelayLine::DelayLine(uint32_t numChannels, uint32_t maxDelay, uint32_t maxBlock)
+    : numChannels_(numChannels), maxBlock_(maxBlock) {
+    const uint32_t capacity = nextPowerOfTwo(uint64_t{maxDelay} + maxBlock);
+    mask_ = capacity - 1;
+    samples_.reset(new float[std::size_t{numChannels} * capacity]());
+}
+
+void DelayLine::process(const AudioBufferView& in, const AudioBufferView& out, uint32_t delay,
+                        bool add, uint32_t numFrames) DAW_RT {
+    DAW_RT_ASSERT(delay <= maxDelay() && numFrames <= maxBlock_);
+    const uint32_t capacity = mask_ + 1;
+    // Write first, then read: capacity >= delay + numFrames, so the frames read are never the
+    // ones just overwritten unless they are the input itself (delay < numFrames).
+    const uint32_t read = write_ - delay;
+    for (uint32_t c = 0; c < out.numChannels; ++c) {
+        float* dst = out.channels[c];
+        if (c >= numChannels_) {
+            if (!add) std::memset(dst, 0, std::size_t{numFrames} * sizeof(float));
+            continue;
+        }
+        float* ring = samples_.get() + std::size_t{c} * capacity;
+        const float* src = c < in.numChannels ? in.channels[c] : nullptr;
+        for (uint32_t f = 0; f < numFrames; ++f) ring[(write_ + f) & mask_] = src ? src[f] : 0.0f;
+        if (add) {
+            for (uint32_t f = 0; f < numFrames; ++f) dst[f] += ring[(read + f) & mask_];
+        } else {
+            for (uint32_t f = 0; f < numFrames; ++f) dst[f] = ring[(read + f) & mask_];
+        }
+    }
+    // Channels `out` lacks still keep their history going.
+    for (uint32_t c = out.numChannels; c < numChannels_; ++c) {
+        float* ring = samples_.get() + std::size_t{c} * capacity;
+        const float* src = c < in.numChannels ? in.channels[c] : nullptr;
+        for (uint32_t f = 0; f < numFrames; ++f) ring[(write_ + f) & mask_] = src ? src[f] : 0.0f;
+    }
+    write_ += numFrames;
+}
 
 Result<std::unique_ptr<RenderGraph>> RenderGraph::create(RenderGraphDesc desc) {
     if (!(desc.sampleRate > 0))
@@ -79,16 +108,6 @@ Result<std::unique_ptr<RenderGraph>> RenderGraph::create(RenderGraphDesc desc) {
         if (auto r = checkPort(s.input, numBuffers, s.output, "input", i); !r) return r.error();
         if (auto r = checkPort(s.sidechain, numBuffers, s.output, "sidechain", i); !r)
             return r.error();
-        // A pull port's buffer is cleared before it sums its sources, so it can't share with the
-        // other port, nor be one of the sidechain's sources (the main input is gathered first).
-        if (!s.sidechain.sources.empty() && s.sidechain.buffer == s.input.buffer)
-            return makeError(ErrorCode::invalidArgument,
-                             "input and sidechain share a buffer in step " + std::to_string(i));
-        if (!s.input.sources.empty())
-            for (uint32_t source : s.sidechain.sources)
-                if (source == s.input.buffer)
-                    return makeError(ErrorCode::invalidArgument,
-                                     "input buffer is a sidechain source in step " + std::to_string(i));
         if (!s.feeds.empty() && s.output == kNoBuffer)
             return makeError(ErrorCode::invalidArgument, "feeds without an output in step " + std::to_string(i));
         for (const RenderFeedDesc& f : s.feeds) {
@@ -97,19 +116,28 @@ Result<std::unique_ptr<RenderGraph>> RenderGraph::create(RenderGraphDesc desc) {
             if (f.buffer == s.output)
                 return makeError(ErrorCode::invalidArgument,
                                  "feed into the step's own output in step " + std::to_string(i));
+            // MIX-021/022: a delayed feed needs a line long enough, for this graph's blocks, that
+            // no other feed of this graph writes.
+            if (f.delay > 0) {
+                if (!f.delayLine)
+                    return makeError(ErrorCode::invalidArgument,
+                                     "delayed feed without a delay line in step " + std::to_string(i));
+                if (f.delay > f.delayLine->maxDelay() || f.delayLine->maxBlock() < desc.maxBlock)
+                    return makeError(ErrorCode::invalidArgument,
+                                     "delay line too short in step " + std::to_string(i));
+                if (std::find(graph->lines_.begin(), graph->lines_.end(), f.delayLine) != graph->lines_.end())
+                    return makeError(ErrorCode::invalidArgument,
+                                     "delay line used by two feeds in step " + std::to_string(i));
+                graph->lines_.push_back(f.delayLine);
+            }
         }
 
-        auto port = [&](const RenderPortDesc& p) {
-            Port out{p.buffer, static_cast<uint32_t>(graph->sources_.size()),
-                     static_cast<uint32_t>(p.sources.size()), p.fed};
-            graph->sources_.insert(graph->sources_.end(), p.sources.begin(), p.sources.end());
-            return out;
-        };
         const auto firstFeed = static_cast<uint32_t>(graph->feeds_.size());
-        graph->feeds_.insert(graph->feeds_.end(), s.feeds.begin(), s.feeds.end());
-        graph->steps_.push_back(Step{s.node.get(), port(s.input), port(s.sidechain), s.output,
+        for (const RenderFeedDesc& f : s.feeds)
+            graph->feeds_.push_back(Feed{f.buffer, f.add, f.delay, f.delay > 0 ? f.delayLine.get() : nullptr});
+        graph->steps_.push_back(Step{s.node.get(), s.input.buffer, s.sidechain.buffer, s.output,
                                      firstFeed, static_cast<uint32_t>(s.feeds.size()),
-                                     s.resetOnLocate});
+                                     s.resetOnLocate, s.timeline});
         graph->owned_.push_back(std::move(s.node));
     }
 
@@ -117,6 +145,9 @@ Result<std::unique_ptr<RenderGraph>> RenderGraph::create(RenderGraphDesc desc) {
     graph->maxBlock_ = desc.maxBlock;
     graph->master_ = desc.master;
     graph->version_ = desc.version;
+    graph->serial_ = nextSerial.fetch_add(1, std::memory_order_relaxed);
+    graph->latency_ = desc.latency;
+    graph->nodeLatencies_ = std::move(desc.nodeLatencies);
     graph->buffers_ = std::move(desc.buffers);
     graph->tempo_ = std::move(*tempo);
     return graph;
@@ -124,31 +155,22 @@ Result<std::unique_ptr<RenderGraph>> RenderGraph::create(RenderGraphDesc desc) {
 
 RenderGraph::~RenderGraph() = default;
 
-AudioBufferView RenderGraph::gather(const Port& port, uint32_t numFrames) const DAW_RT {
-    if (port.buffer == kNoBuffer) return {};
-    if (port.fed) return buffers_.view(port.buffer, numFrames);  // earlier steps filled it
-    buffers_.clear(port.buffer, numFrames);
-    const AudioBufferView sum = buffers_.view(port.buffer, numFrames);
-    // MIX-004: edges into one port are summed. T-021 (MIX-021) delays shorter paths here.
-    for (uint32_t i = 0; i < port.numSources; ++i) {
-        const AudioBufferView src = buffers_.view(sources_[port.firstSource + i], numFrames);
-        const uint32_t channels = src.numChannels < sum.numChannels ? src.numChannels
-                                                                    : sum.numChannels;
-        for (uint32_t c = 0; c < channels; ++c) {
-            float* out = sum.channels[c];
-            const float* in = src.channels[c];
-            for (uint32_t f = 0; f < numFrames; ++f) out[f] += in[f];
-        }
-    }
-    return sum;
+AudioBufferView RenderGraph::input(uint32_t buffer, uint32_t numFrames) const DAW_RT {
+    if (buffer == kNoBuffer) return {};
+    return buffers_.view(buffer, numFrames);  // earlier steps' feeds filled it (MIX-004)
 }
 
 void RenderGraph::feed(const Step& step, uint32_t numFrames) const DAW_RT {
     const AudioBufferView src = buffers_.view(step.output, numFrames);
-    // MIX-004: the first feed into a buffer copies, the rest add. T-021 (MIX-021) delays here.
+    // MIX-004: the first feed into a buffer copies, the rest add. MIX-021: shorter paths into a
+    // merge go through their edge's delay line.
     for (uint32_t i = 0; i < step.numFeeds; ++i) {
-        const RenderFeedDesc& f = feeds_[step.firstFeed + i];
+        const Feed& f = feeds_[step.firstFeed + i];
         const AudioBufferView dst = buffers_.view(f.buffer, numFrames);
+        if (f.delayLine != nullptr) {
+            f.delayLine->process(src, dst, f.delay, f.add, numFrames);
+            continue;
+        }
         for (uint32_t c = 0; c < dst.numChannels; ++c) {
             float* out = dst.channels[c];
             if (c >= src.numChannels) {
@@ -165,15 +187,15 @@ void RenderGraph::feed(const Step& step, uint32_t numFrames) const DAW_RT {
     }
 }
 
-void RenderGraph::process(ProcessContext& ctx) const DAW_RT {
+void RenderGraph::process(ProcessContext& ctx, ProcessContext& timeline) const DAW_RT {
     const uint32_t numFrames = ctx.numFrames;
-    DAW_RT_ASSERT(numFrames <= maxBlock_);
+    DAW_RT_ASSERT(numFrames <= maxBlock_ && timeline.numFrames == numFrames);
     for (const Step& step : steps_) {
         NodeIO io;
-        io.audioIn = gather(step.input, numFrames);
-        io.sidechain = gather(step.sidechain, numFrames);
+        io.audioIn = input(step.input, numFrames);
+        io.sidechain = input(step.sidechain, numFrames);
         if (step.output != kNoBuffer) io.audioOut = buffers_.view(step.output, numFrames);
-        step.node->process(ctx, io);
+        step.node->process(step.timeline ? timeline : ctx, io);
         if (step.numFeeds > 0) feed(step, numFrames);
     }
 }

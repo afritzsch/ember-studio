@@ -262,7 +262,6 @@ bool publish(Engine& engine, std::vector<std::unique_ptr<Node>> sources, const G
     const uint32_t numBuffers = n == 1 ? 1 : n + 2;
     desc.buffers = std::move(AudioBufferPool::create(numBuffers, 2, options.maxBlock)).value();
     NodeID id = 1;
-    std::vector<uint32_t> inputs;
     for (uint32_t i = 0; i < n; ++i) {
         auto node = engine.nodes().put(id++, std::move(sources[i]), info);
         if (!node) return false;
@@ -270,8 +269,9 @@ bool publish(Engine& engine, std::vector<std::unique_ptr<Node>> sources, const G
         step.node = std::move(node).value();
         step.output = i;
         step.resetOnLocate = options.timelineSources;
+        // MIX-004 push: each source feeds the Mix input (buffer n), the first one copying.
+        if (n > 1) step.feeds.push_back({n, i > 0});
         desc.steps.push_back(std::move(step));
-        inputs.push_back(i);
     }
     desc.master = 0;
     if (n > 1) {
@@ -279,7 +279,7 @@ bool publish(Engine& engine, std::vector<std::unique_ptr<Node>> sources, const G
         if (!mix) return false;
         RenderStepDesc step;
         step.node = std::move(mix).value();
-        step.input = {inputs, n};
+        step.input = {n};
         step.output = n + 1;
         desc.steps.push_back(std::move(step));
         desc.master = n + 1;
