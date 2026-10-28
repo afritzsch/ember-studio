@@ -1082,7 +1082,7 @@ CheckResult renderGraphFeedValidation() {
 
     // 0.25 copied, 0.5 added into buffer 1, which the last step reads; buffer 0 is reused.
     auto ok = create({step(a, 0, {}, {{1, false}}), step(b, 2, {}, {{1, true}}),
-                      step(pass, 0, {{}, 1, true})},
+                      step(pass, 0, {1})},
                      3, 0);
     DAW_CHECK(ok.ok());
     if (ok) {
@@ -1095,16 +1095,13 @@ CheckResult renderGraphFeedValidation() {
         }
     }
 
-    DAW_CHECK(!create({step(pass, 0, {{1}, 2, true})}, 3, 0).ok());               // fed with sources
-    DAW_CHECK(!create({step(pass, 0, {{}, kNoBuffer, true})}, 3, 0).ok());        // fed, no buffer
-    DAW_CHECK(!create({step(pass, 0, {{}, 0, true})}, 3, 0).ok());                // fed buffer is the output
-    DAW_CHECK(!create({step(pass, 0, {{}, 1, true}, {}, {{}, 0, true})}, 3, 0).ok());  // sidechain too
+    DAW_CHECK(!create({step(pass, 0, {7})}, 3, 0).ok());                          // input out of range
+    DAW_CHECK(!create({step(pass, 0, {0})}, 3, 0).ok());                          // input is the output
+    DAW_CHECK(!create({step(pass, 0, {1}, {}, {0})}, 3, 0).ok());                 // sidechain too
     DAW_CHECK(!create({step(a, kNoBuffer, {}, {{1, false}})}, 3, 0).ok());        // feed without output
     DAW_CHECK(!create({step(a, 0, {}, {{7, false}})}, 3, 0).ok());                // feed out of range
     DAW_CHECK(!create({step(a, 0, {}, {{0, false}})}, 3, 0).ok());                // feed into own output
-    DAW_CHECK(create({step(pass, 0, {{}, 1, true}, {{1, false}})}, 3, 0).ok());   // into its read input: fine
-    // Pull ports: the main gather buffer can't be a sidechain source (gathered first).
-    DAW_CHECK(!create({step(a, 1), step(pass, 0, {{1}, 2}, {}, {{2}, 3})}, 4, 0).ok());
+    DAW_CHECK(create({step(pass, 0, {1}, {{1, false}})}, 3, 0).ok());             // into its read input: fine
     return checks;
 }
 

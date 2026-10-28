@@ -14,6 +14,7 @@
 #include "core/Result.h"
 #include "core/Telemetry.h"
 #include "daw/GraphDescription.h"
+#include "graph/LatencyReporter.h"
 
 namespace daw {
 
@@ -35,6 +36,7 @@ struct NodeCreateInfo {
     std::span<const ClipDesc> clips;
     std::span<const NoteDesc> notes;
     MeterID meter = kNoMeter;
+    LatencyReporter latency;
 };
 
 struct NodeKindInfo {

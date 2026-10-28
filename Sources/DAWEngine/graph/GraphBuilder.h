@@ -9,8 +9,20 @@
 //     nodes with audio output (MIX-004);
 //   - one master node, of kind master, with no outgoing edges; it runs last (MIX-009);
 //   - acyclic (MIX-002), and a valid tempo map (TIME-003).
-// Then it reuses or creates node instances (DW-036, ENG-013), plans buffers (MIX-003) and
-// assembles the graph. MIDI edges order nodes but carry no data yet (T-040).
+// Then it reuses or creates node instances (DW-036, ENG-013), works out PDC (below), plans
+// buffers (MIX-003) and assembles the graph. MIDI edges order nodes but carry no data yet (T-040).
+//
+// PDC (MIX-020..023, T-021). In topological order, a node's arrival is the latest path latency
+// over all its incoming edges (audio, sidechain and MIDI), and its path latency is its arrival
+// plus its own latencySamples() (read after prepare). Each audio or sidechain edge is delayed by
+// arrival(to) − pathLatency(from), so everything reaching a node's main and sidechain inputs
+// lines up; MIDI edges can't be delayed, so a MIDI path shorter than an audio one into the same
+// node stays early (T-040). The graph's latency is the master's path latency; every path from a
+// node without inputs to the master then adds up to exactly that, which is what lets Engine run
+// timeline nodes that far ahead. Delay lines are kept per edge ID across builds: an edge with the
+// same endpoints whose delay still fits its line keeps the line and its contents (MIX-022); a
+// line too short for a grown delay is replaced by a silent one (the latency change glitches
+// anyway, MIX-024).
 //
 // Not thread-safe: one builder per NodePool, used from one thread at a time.
 
@@ -25,6 +37,7 @@
 #include "core/RenderGraph.h"
 #include "core/Result.h"
 #include "daw/GraphDescription.h"
+#include "graph/LatencyReporter.h"
 #include "graph/NodeRegistry.h"
 
 namespace daw {
@@ -48,6 +61,14 @@ public:
 
     // DW-048: the MeterID handed to `node`'s factory (see NodeCreateInfo), or kNoMeter.
     MeterID meterOf(NodeID node) const;
+
+    // MIX-024: what the reporters this builder hands to factories report into. GraphCompiler
+    // attaches itself as the listener.
+    const std::shared_ptr<LatencyRelay>& latencyRelay() const { return relay_; }
+
+    // MIX-020: path latencies above this fail the build (invalidArgument), which bounds delay
+    // line memory and the pre-roll (about 22 s at 48 kHz).
+    static constexpr uint64_t kMaxGraphLatency = uint64_t{1} << 20;
 
     double sampleRate() const { return sampleRate_; }
     uint32_t maxBlock() const { return maxBlock_; }
@@ -75,6 +96,16 @@ private:
     std::unordered_map<NodeID, MeterID> meters_;
     std::vector<MeterID> freeMeters_;
     MeterID nextMeter_ = 0;
+
+    // MIX-022: the delay lines of the last graph built, per edge ID, with the edge's endpoints.
+    struct EdgeDelay {
+        NodeID from;
+        NodeID to;
+        std::shared_ptr<DelayLine> line;
+    };
+    std::unordered_map<uint64_t, EdgeDelay> delayLines_;
+
+    std::shared_ptr<LatencyRelay> relay_ = std::make_shared<LatencyRelay>();
 };
 
 } // namespace daw

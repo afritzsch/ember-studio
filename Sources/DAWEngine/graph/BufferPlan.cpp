@@ -40,7 +40,7 @@ BufferPlan planBuffers(const std::vector<bool>& producesAudio, std::span<const P
     // The port reads its single producer's output directly (see BufferPlan.h).
     auto direct = [&](const PlanEdge& e) {
         const uint32_t count = e.sidechain ? sidechainCount[e.to] : inCount[e.to];
-        return count == 1 && outEdges[e.from].size() == 1 && e.from != master;
+        return count == 1 && outEdges[e.from].size() == 1 && e.from != master && e.delay == 0;
     };
 
     BufferAllocator buffers;
@@ -54,16 +54,15 @@ BufferPlan planBuffers(const std::vector<bool>& producesAudio, std::span<const P
         for (uint32_t i : outEdges[s]) {
             const PlanEdge& e = edges[i];
             RenderPortDesc& port = e.sidechain ? plan.steps[e.to].sidechain : plan.steps[e.to].input;
-            port.fed = true;
             if (direct(e)) {
                 port.buffer = step.output;
                 readDirectly = true;
-            } else if (port.buffer == kNoBuffer) {
-                port.buffer = buffers.allocate();
-                step.feeds.push_back({port.buffer, false});
-            } else {
-                step.feeds.push_back({port.buffer, true});
+                continue;
             }
+            const bool add = port.buffer != kNoBuffer;
+            if (!add) port.buffer = buffers.allocate();
+            step.feeds.push_back({port.buffer, add, e.delay, nullptr});
+            step.feedEdges.push_back(i);
         }
         if (step.output != kNoBuffer && !readDirectly && s != master) buffers.release(step.output);
     }

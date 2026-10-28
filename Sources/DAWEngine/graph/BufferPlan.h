@@ -11,7 +11,8 @@
 //   4. the output is freed, unless a consumer reads it directly or it is the master.
 // A port with exactly one incoming edge, from a producer with no other outgoing audio edge,
 // reads the producer's output directly instead (no buffer, no copy). The producer has no other
-// reader, so the consumer may even treat that input as scratch.
+// reader, so the consumer may even treat that input as scratch. An edge with a PDC delay
+// (MIX-021) is always a feed, since the delay is applied while feeding.
 
 #include <cstdint>
 #include <span>
@@ -26,13 +27,15 @@ struct PlanEdge {
     uint32_t from;
     uint32_t to;
     bool sidechain;
+    uint32_t delay = 0;  // MIX-021: samples this edge is delayed by
 };
 
 struct StepBuffers {
     uint32_t output = kNoBuffer;
-    RenderPortDesc input;      // fed, or empty
+    RenderPortDesc input;      // fed, or empty (kNoBuffer)
     RenderPortDesc sidechain;  // fed, or empty
-    std::vector<RenderFeedDesc> feeds;
+    std::vector<RenderFeedDesc> feeds;  // `delay` set from the edge; no delay line yet
+    std::vector<uint32_t> feedEdges;    // the edge (index into `edges`) each feed serves
 };
 
 struct BufferPlan {

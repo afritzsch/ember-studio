@@ -20,6 +20,7 @@ module DAWEngineTestSupport {
   header "GraphChecks.h"
   header "OfflineChecks.h"
   header "ParamChecks.h"
+  header "PdcChecks.h"
   header "RtTrapTestSupport.h"
   header "TelemetryChecks.h"
   header "TempoMapTestSupport.h"

@@ -4,6 +4,30 @@
 //
 // Threads: publish() from any non-RT thread; render() from one thread at a time (the device or
 // offline driver, D-15). Destroy the engine only after rendering has stopped.
+//
+// Latency compensation at the source (MIX-023, T-021). The transport position is what the graph
+// outputs in this block: OfflineDriver writes block i as timeline position from + i, and the
+// TIME-009 playhead subtracts only the device's output latency. So a graph with total latency L
+// (RenderGraph::latency, the master's path latency) runs its timeline nodes L samples ahead:
+//   - Timeline steps (RenderStepDesc::timeline: clip/MIDI players, metronome) get a TransportBlock
+//     laid out from where the transport will be L samples later, following the loop the way the
+//     transport does (a playhead before the loop end wraps; one at or past it plays on). Every
+//     other node gets the transport's own block. PDC aligns every path to the master at L, so
+//     what a timeline node renders at position p leaves the master when the transport is at p.
+//     The look-ahead is a pure function of the transport position, so it stays continuous
+//     across the transport's own loop wraps.
+//   - Pre-roll: a run of playback (play from stopped, or a locate while playing) starts with L
+//     frames rendered and discarded before the block, in chunks of at most maxBlock, timeline
+//     nodes playing [p, p + L) and the rest seeing the L frames before p. That fills the PDC
+//     delay lines and the latent nodes, so the first block out is exactly position p (an export
+//     from tick 0 has the click on beat 1 at sample 0). The first block of a run costs L extra
+//     frames of rendering, which can overrun a live callback when L is large.
+//   - Pre-roll lives here rather than in each player so every timeline node gets it the same way
+//     and players need no latency state or loop knowledge. A graph whose latency changes while
+//     playing (MIX-024) jumps the timeline nodes by the difference, without a new pre-roll; the
+//     players' wrap crossfade softens it.
+//   - Automation and param changes aren't compensated (MIX-025): they apply when the block
+//     renders, so a param on a node behind L samples of latency is heard L samples early.
 
 #include <atomic>
 #include <cstdint>
@@ -77,6 +101,12 @@ private:
     std::atomic<RenderGraph*> current_{nullptr};
     // ENG-050: written by render() once per block (the "publish telemetry" step).
     Telemetry telemetry_;
+
+    // Audio thread only. MIX-020/023: the serial of the graph whose latency table telemetry has
+    // (0: none, or no graph); and whether the current run of playback has been pre-rolled.
+    uint64_t latencySerial_ = 0;
+    bool runPrerolled_ = false;
+    void preRoll(const RenderGraph& graph, const TransportBlock& block) DAW_RT;
 };
 
 } // namespace daw
