@@ -174,7 +174,21 @@ final class GoldenEngine: EngineProtocol {
         out.bufferFrames = config.bufferFrames
         out.outputChannels = config.outputChannels
         out.inputChannels = config.inputChannels
+        out.driver = config.driver == .fake ? .fake : .coreAudio
         if let error = EngineClient.error(facade.setDevice(out)) { throw error }
+    }
+
+    func simulateDeviceEvent(_ event: DeviceEvent) throws(DAWError) {
+        var pod = daw.DeviceEventPOD()
+        pod.kind = switch event.kind {
+        case .deviceLost: .deviceLost
+        case .deviceRestored: .deviceRestored
+        case .sampleRateChanged: .sampleRateChanged
+        case .processorOverload: .processorOverload
+        }
+        pod.deviceID = event.deviceID
+        pod.sampleRate = event.sampleRate
+        if let error = EngineClient.error(facade.simulateDeviceEvent(pod)) { throw error }
     }
 
     // MARK: Observability
@@ -201,6 +215,9 @@ final class GoldenEngine: EngineProtocol {
         out.eventsDropped = t.eventsDropped
         out.sampleRate = t.sampleRate
         out.deviceRunning = t.deviceRunning
+        out.outputDeviceID = t.outputDeviceID
+        out.processorOverloads = t.processorOverloads
+        out.renderOverruns = t.renderOverruns
         return out
     }
 
@@ -230,7 +247,22 @@ final class GoldenEngine: EngineProtocol {
             case .jobFinished: .jobFinished
             default: .deviceChanged
             }
-            return EngineEvent(kind: kind, subject: e.subject, job: e.job, count: e.count, error: EngineClient.error(e.error))
+            var device: DeviceChange?
+            if kind == .deviceChanged {
+                let reason: DeviceChange.Reason = switch e.device.reason {
+                case .deviceLost: .deviceLost
+                case .sampleRateChanged: .sampleRateChanged
+                case .defaultOutputChanged: .defaultOutputChanged
+                case .deviceAvailable: .deviceAvailable
+                case .startFailed: .startFailed
+                default: .startFailed
+                }
+                device = DeviceChange(reason: reason, previousDeviceID: e.device.previousDeviceID,
+                                      deviceID: e.device.deviceID, previousSampleRate: e.device.previousSampleRate,
+                                      sampleRate: e.device.sampleRate)
+            }
+            return EngineEvent(kind: kind, subject: e.subject, job: e.job, count: e.count,
+                               error: EngineClient.error(e.error), device: device)
         }
     }
 
