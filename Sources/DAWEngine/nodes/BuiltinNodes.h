@@ -5,10 +5,12 @@
 //
 //   audioClipPlayer  DSP-001; clips are fixed at creation (DW-051, see AudioClipPlayer.h), assets
 //                    come from `lookup`
-//   channelStrip     DSP-010 / MIX-005 gain and pan; needs numParams >= ChannelStrip::kNumParams
-//                    (invalidArgument otherwise). Meters into `telemetry` (the engine's) with the
-//                    MeterID GraphBuilder assigns (DW-048, GraphBuilder::meterOf); a null
-//                    `telemetry` means no metering.
+//   channelStrip     DSP-010 / MIX-005 gain, pan, mute, phase; needs numParams >=
+//                    ChannelStrip::kNumParams (invalidArgument otherwise). Meters into
+//                    `telemetry` (the engine's) with the MeterID GraphBuilder assigns (DW-048,
+//                    GraphBuilder::meterOf); a null `telemetry` means no metering.
+//   gain             MIX-007 send (GainNode): level and mute, numParams GainNode::kNumParams; a
+//                    plain gain with numParams 1 has no mute; 0 is invalidArgument.
 
 #include "core/Result.h"
 #include "core/Telemetry.h"

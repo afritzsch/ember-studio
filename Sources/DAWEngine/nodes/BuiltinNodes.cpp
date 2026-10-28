@@ -6,6 +6,7 @@
 
 #include "nodes/AudioClipPlayer.h"
 #include "nodes/ChannelStrip.h"
+#include "nodes/GainNode.h"
 
 namespace daw {
 
@@ -26,7 +27,16 @@ Result<void> registerBuiltinNodes(NodeRegistry& registry, AssetLookup lookup, Te
     };
     NodeKindInfo stripInfo{std::move(strip)};
     stripInfo.meters = true;  // MIX-005, DW-048
-    return registry.set(NodeKind::channelStrip, std::move(stripInfo));
+    if (auto r = registry.set(NodeKind::channelStrip, std::move(stripInfo)); !r) return r;
+
+    auto gain = [](const NodeCreateInfo& info) -> Result<std::unique_ptr<Node>> {
+        if (info.desc.numParams < GainNode::kMinNumParams)
+            return makeError(ErrorCode::invalidArgument,
+                             "gain " + std::to_string(info.desc.id) + ": needs " +
+                                 std::to_string(GainNode::kMinNumParams) + " param");
+        return std::unique_ptr<Node>(std::make_unique<GainNode>(info.desc.firstParam, info.desc.numParams));
+    };
+    return registry.set(NodeKind::gain, {std::move(gain)});
 }
 
 } // namespace daw

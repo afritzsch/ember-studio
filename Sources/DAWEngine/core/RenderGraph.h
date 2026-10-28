@@ -9,15 +9,22 @@
 //   - the master buffer is copied to the RenderTarget after the last step (MIX-009);
 //   - the TempoMap the graph was built with (TIME-003); Engine points TransportBlock.tempo at it.
 //
-// An input port gets its samples one of two ways (MIX-004, edges into one port are summed):
-//   - pull (T-004): `sources` are summed into the port's own buffer right before the node runs.
-//     Every source must stay live until then, so a merge holds all of its inputs at once.
-//   - push (T-012, what GraphBuilder emits): the port is `fed`. Earlier steps write into its
-//     buffer right after they process (RenderFeedDesc: the first feed copies, later ones add), so
-//     a producer's output buffer is free again as soon as it has fed its consumers, and live buffers stay near
-//     the graph's depth instead of its fan-in (MIX-003). A fed port whose only producer feeds
-//     nothing else simply names that producer's output buffer, with no copy at all.
-//   PDC delay lines (MIX-021, T-021) plug in where a feed or a pull source is summed.
+// Inputs are pushed (T-012; DW-052 removed T-004's pull path, where a port summed its sources
+// right before its node ran). Earlier steps write into a port's buffer right after they process
+// (RenderFeedDesc: the first feed into a buffer copies, later ones add, MIX-004), so a producer's
+// output buffer is free again as soon as it has fed its consumers, and live buffers stay near the
+// graph's depth instead of its fan-in (MIX-003). A port whose only producer feeds nothing else
+// simply names that producer's output buffer, with no copy at all.
+//
+// PDC (MIX-021/022, T-021): a feed may go through a DelayLine, so every arrival at a merge point
+// lines up with the latest one. Delay lines are preallocated on daw.compile and co-owned like
+// nodes: GraphBuilder hands the same DelayLine to the next graph for an unchanged edge (keyed by
+// edge ID), so its contents carry over a rebuild without any copy. Only one graph renders per
+// block, so the line's state is touched by one thread at a time.
+//
+// Latency compensation at the source (MIX-023): the graph knows its total latency (the master's
+// path latency); Engine::render gives the steps flagged `timeline` a TransportBlock that many
+// samples ahead of the one the other steps get. See Engine.h.
 // MIDI routing isn't modelled yet: nodes get an empty midiIn and a writer that accepts nothing.
 //
 // Lifetime: the graph co-owns its nodes (shared_ptr, see NodePool) so a node outlives every
@@ -28,6 +35,7 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <span>
 #include <vector>
 
 #include "core/AudioBufferPool.h"
@@ -35,6 +43,7 @@
 #include "core/Node.h"
 #include "core/Realtime.h"
 #include "core/Result.h"
+#include "core/Telemetry.h"
 #include "time/TempoMap.h"
 
 namespace daw {
@@ -43,21 +52,52 @@ struct ProcessContext;
 
 inline constexpr uint32_t kNoBuffer = std::numeric_limits<uint32_t>::max();
 
-// One input port. Pull: `buffer` is where `sources` are summed; it must be set (and differ from
-// every source) whenever `sources` is non-empty. Push (`fed`): `buffer` already holds the input,
-// written by earlier steps' feeds, and `sources` must be empty. Either way `buffer` must differ
-// from the step's output.
+// One input port: `buffer` already holds the input when the step runs, written by earlier steps'
+// feeds or as a producer's own output (kNoBuffer: no input). It must differ from the step's
+// output.
 struct RenderPortDesc {
-    std::vector<uint32_t> sources;
     uint32_t buffer = kNoBuffer;
-    bool fed = false;
+};
+
+// MIX-021/022: a fixed delay for one edge's audio, stereo (or `numChannels`), preallocated. It
+// holds up to maxDelay() frames of history plus one block, so a feed of n <= maxBlock frames
+// writes its input and then reads n frames `delay` behind it. Non-RT to create; process() is RT
+// and called by one graph at a time. Contents survive from graph to graph (see above).
+class DelayLine {
+public:
+    // Capacity is the next power of two >= maxDelay + maxBlock, so maxDelay() may exceed
+    // `maxDelay` and a later, slightly longer delay can keep the same line.
+    DelayLine(uint32_t numChannels, uint32_t maxDelay, uint32_t maxBlock);
+    DelayLine(const DelayLine&) = delete;
+    DelayLine& operator=(const DelayLine&) = delete;
+
+    uint32_t numChannels() const DAW_RT { return numChannels_; }
+    uint32_t maxDelay() const DAW_RT { return mask_ + 1 - maxBlock_; }
+    uint32_t maxBlock() const DAW_RT { return maxBlock_; }
+
+    // Pushes `in` (silence for channels it lacks) and copies (`add` false) or adds the input from
+    // `delay` frames ago into `out`; channels of `out` beyond numChannels() are zeroed on a copy.
+    // Requires delay <= maxDelay(), numFrames <= maxBlock(), and `in` not aliasing `out`.
+    void process(const AudioBufferView& in, const AudioBufferView& out, uint32_t delay,
+                 bool add, uint32_t numFrames) DAW_RT;
+
+private:
+    uint32_t numChannels_;
+    uint32_t maxBlock_;
+    uint32_t mask_ = 0;      // capacity − 1
+    uint32_t write_ = 0;     // next frame to write; audio thread only
+    std::unique_ptr<float[]> samples_;  // numChannels × capacity
 };
 
 // After its node processes, a step copies (`add` false) or adds its output into `buffer`. The
 // builder makes the first feed into a buffer in each block a copy, so nothing needs clearing.
+// MIX-021: with `delay` > 0 the output goes through `delayLine` (required then, with
+// delay <= its maxDelay()); a line serves one feed per graph.
 struct RenderFeedDesc {
     uint32_t buffer = kNoBuffer;
     bool add = false;
+    uint32_t delay = 0;
+    std::shared_ptr<DelayLine> delayLine = nullptr;
 };
 
 struct RenderStepDesc {
@@ -71,6 +111,10 @@ struct RenderStepDesc {
     // and the node handles them per segment (TIME-006, DW-062). GraphBuilder sets it from NodeKind
     // (audioClipPlayer, midiClipPlayer); see RenderGraph::resetTimelineNodes().
     bool resetOnLocate = false;
+    // MIX-023 (T-021): the node reads the timeline, so it is scheduled `latency` samples early:
+    // process() hands it the latency-compensated TransportBlock. GraphBuilder sets it for
+    // audioClipPlayer, midiClipPlayer and metronome.
+    bool timeline = false;
 };
 
 struct RenderGraphDesc {
@@ -82,6 +126,10 @@ struct RenderGraphDesc {
     // TIME-003: must be at `sampleRate`. Unset: 120 bpm, 4/4 at `sampleRate`.
     std::optional<TempoMap> tempo;
     uint64_t version = 0;           // GraphDescription::version it was built from
+    // MIX-020/023: the master's path latency, i.e. how far timeline steps run ahead, and the
+    // nodes with a nonzero latencySamples() (for Telemetry::publishNodeLatencies).
+    uint32_t latency = 0;
+    std::vector<NodeLatency> nodeLatencies;
 };
 
 class RenderGraph {
@@ -100,6 +148,15 @@ public:
     Node* node(uint32_t step) const DAW_RT { return steps_[step].node; }
     const AudioBufferPool& buffers() const DAW_RT { return buffers_; }
     uint64_t version() const DAW_RT { return version_; }
+    // Unique per RenderGraph created in this process (1, 2, …), unlike version(), which a rebuild
+    // of the same description repeats. Engine uses it to notice a new graph.
+    uint64_t serial() const DAW_RT { return serial_; }
+
+    // MIX-023: total graph latency in samples (the master's path latency, MIX-020).
+    uint32_t latency() const DAW_RT { return latency_; }
+    // MIX-020: nodes with nonzero latency, in step order. Absent nodes have latency 0.
+    std::span<const NodeLatency> nodeLatencies() const DAW_RT { return nodeLatencies_; }
+    bool readsTimeline(uint32_t step) const DAW_RT { return steps_[step].timeline; }
 
     // TIME-003: the graph's tempo map, immutable for its lifetime. Engine::render points
     // TransportBlock.tempo at it (T-008), so a tempo edit takes effect with the next snapshot.
@@ -112,44 +169,51 @@ public:
     // loop wrap (DW-062).
     void resetTimelineNodes() const DAW_RT;
 
-    // ENG-041, the per-node part of a block: for each step in order, gather its inputs, then
-    // process. Requires ctx.numFrames <= maxBlock().
-    void process(ProcessContext& ctx) const DAW_RT;
+    // ENG-041, the per-node part of a block: for each step in order, process, then feed its
+    // output (through any PDC delay, MIX-021) to its consumers. Steps flagged `timeline` get
+    // `timeline` (MIX-023), the others `ctx`; both must have the same numFrames <= maxBlock().
+    void process(ProcessContext& ctx, ProcessContext& timeline) const DAW_RT;
+    // Same, with no latency compensation (every step gets `ctx`).
+    void process(ProcessContext& ctx) const DAW_RT { process(ctx, ctx); }
 
     // The master bus for the block just processed; empty when the graph has none.
     AudioBufferView master(uint32_t numFrames) const DAW_RT;
 
 private:
-    struct Port {
-        uint32_t buffer = kNoBuffer;
-        uint32_t firstSource = 0;  // into sources_
-        uint32_t numSources = 0;
-        bool fed = false;
-    };
     struct Step {
         Node* node;
-        Port input;
-        Port sidechain;
+        uint32_t input;      // buffer or kNoBuffer
+        uint32_t sidechain;  // buffer or kNoBuffer
         uint32_t output;
         uint32_t firstFeed;  // into feeds_
         uint32_t numFeeds;
         bool resetOnLocate;
+        bool timeline;
+    };
+    struct Feed {
+        uint32_t buffer;
+        bool add;
+        uint32_t delay;
+        DelayLine* delayLine;  // co-owned through lines_
     };
 
     RenderGraph() = default;
-    AudioBufferView gather(const Port& port, uint32_t numFrames) const DAW_RT;
+    AudioBufferView input(uint32_t buffer, uint32_t numFrames) const DAW_RT;
     void feed(const Step& step, uint32_t numFrames) const DAW_RT;
 
     double sampleRate_ = 0;
     uint32_t maxBlock_ = 0;
     uint32_t master_ = kNoBuffer;
     uint64_t version_ = 0;
+    uint64_t serial_ = 0;
+    uint32_t latency_ = 0;
     AudioBufferPool buffers_;
     TempoMap tempo_;
     std::vector<Step> steps_;
-    std::vector<uint32_t> sources_;
-    std::vector<RenderFeedDesc> feeds_;
+    std::vector<Feed> feeds_;
+    std::vector<NodeLatency> nodeLatencies_;
     std::vector<std::shared_ptr<Node>> owned_;
+    std::vector<std::shared_ptr<DelayLine>> lines_;
 };
 
 } // namespace daw

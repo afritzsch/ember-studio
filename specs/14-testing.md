@@ -76,4 +76,5 @@ Engine tests are Swift Testing suites in `Tests/DAWEngineTests` that call engine
 ## Status
 | ID | status | test |
 |---|---|---|
-| TEST-* | todo | |
+| TEST-005 | done (T-050) | `FakeDeviceDriverTests` (exact cycle counts in buffer-size blocks, latency published, stop/restart; real-time pacing vs as-fast-as-possible; loopback N frames; scripted rate change / overload / device loss on exact frames via the `io/DeviceNotification.h` seam for T-051; a realtime EngineFacade on `FakeDeviceDriverAdapter`; 0 RT violations) |
+| TEST-* (rest) | todo | |

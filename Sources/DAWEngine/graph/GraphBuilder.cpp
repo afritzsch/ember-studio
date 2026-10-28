@@ -24,6 +24,12 @@ bool resetsOnLocate(NodeKind kind) {
     return kind == NodeKind::audioClipPlayer || kind == NodeKind::midiClipPlayer;
 }
 
+// MIX-023: kinds scheduled `latency` samples early (RenderStepDesc::timeline). The metronome
+// (TIME-010, T-024) places its clicks from the timeline too.
+bool readsTimeline(NodeKind kind) {
+    return resetsOnLocate(kind) || kind == NodeKind::metronome;
+}
+
 // DW-030: the audio thread only DAW_RT_ASSERTs ParamIDs (compiled out in Release), so every range
 // is checked here: inside the table, and allocated (a freed slot may already belong to another
 // node).
@@ -119,21 +125,6 @@ Result<std::unique_ptr<RenderGraph>> GraphBuilder::build(const GraphDescription&
     auto tempo = makeTempoMap(desc.tempo, sampleRate_);
     if (!tempo) return invalid("tempo map: " + tempo.error().message);
 
-    // MARK: Plan buffers (MIX-003)
-
-    std::vector<uint32_t> stepOf(numNodes);
-    for (uint32_t s = 0; s < numNodes; ++s) stepOf[sorted.order[s]] = s;
-    std::vector<bool> producesAudio(numNodes);
-    for (uint32_t s = 0; s < numNodes; ++s) producesAudio[s] = kinds[sorted.order[s]]->audioOutput;
-    std::vector<PlanEdge> planEdges;
-    planEdges.reserve(desc.edges.size());
-    for (size_t i = 0; i < desc.edges.size(); ++i) {
-        const EdgeDesc& e = desc.edges[i];
-        if (e.kind == EdgeKind::midi) continue;  // T-040 routes MIDI
-        planEdges.push_back({stepOf[topoEdges[i].from], stepOf[topoEdges[i].to], e.kind == EdgeKind::sidechain});
-    }
-    BufferPlan plan = planBuffers(producesAudio, planEdges, master == kNoNode ? kNoBuffer : stepOf[master]);
-
     // MARK: Node instances (ENG-013, DW-036)
 
     // Clips and notes per player, for factories.
@@ -161,7 +152,8 @@ Result<std::unique_ptr<RenderGraph>> GraphBuilder::build(const GraphDescription&
         // New, changed, or replaced in the pool behind our back: a fresh instance, prepared
         // before any graph can render it.
         const MeterID meter = kinds[i]->meters ? assignMeter(d.id) : kNoMeter;
-        auto created = kinds[i]->create(NodeCreateInfo{d, clips[i], notes[i], meter});
+        auto created = kinds[i]->create(
+            NodeCreateInfo{d, clips[i], notes[i], meter, LatencyReporter(relay_, d.id)});
         if (!created) return created.error();
         if (!created.value()) return makeError(ErrorCode::internal, nodeName(d.id) + ": factory returned null");
         const PrepareInfo info{sampleRate_, maxBlock_, 2, kinds[i]->audioOutput ? 2u : 0u};
@@ -170,6 +162,59 @@ Result<std::unique_ptr<RenderGraph>> GraphBuilder::build(const GraphDescription&
         nodes[i] = std::move(put).value();
         instances_[d.id] = Instance{d.kind, d.configVersion, d.firstParam, d.numParams, nodes[i]};
     }
+
+    // MARK: PDC (MIX-020, MIX-021)
+
+    // Path latencies in topological order. A sum over a path of uint32 latencies fits easily in
+    // 64 bits; anything above kMaxGraphLatency is rejected.
+    std::vector<uint64_t> arrival(numNodes, 0), path(numNodes, 0);
+    std::vector<std::vector<uint32_t>> inEdges(numNodes);
+    for (uint32_t i = 0; i < topoEdges.size(); ++i) inEdges[topoEdges[i].to].push_back(i);
+    for (uint32_t s = 0; s < numNodes; ++s) {
+        const uint32_t n = sorted.order[s];
+        for (uint32_t e : inEdges[n]) arrival[n] = std::max(arrival[n], path[topoEdges[e].from]);
+        path[n] = arrival[n] + nodes[n]->latencySamples();
+        if (path[n] > kMaxGraphLatency)
+            return invalid(nodeName(desc.nodes[n].id) + ": path latency " + std::to_string(path[n]) +
+                           " exceeds " + std::to_string(kMaxGraphLatency) + " samples");
+    }
+
+    // MARK: Plan buffers (MIX-003)
+
+    std::vector<uint32_t> stepOf(numNodes);
+    for (uint32_t s = 0; s < numNodes; ++s) stepOf[sorted.order[s]] = s;
+    std::vector<bool> producesAudio(numNodes);
+    for (uint32_t s = 0; s < numNodes; ++s) producesAudio[s] = kinds[sorted.order[s]]->audioOutput;
+    std::vector<PlanEdge> planEdges;
+    std::vector<uint32_t> planEdgeDesc;  // planEdges[i] is desc.edges[planEdgeDesc[i]]
+    planEdges.reserve(desc.edges.size());
+    for (uint32_t i = 0; i < desc.edges.size(); ++i) {
+        const EdgeDesc& e = desc.edges[i];
+        if (e.kind == EdgeKind::midi) continue;  // T-040 routes MIDI
+        const TopoEdge& t = topoEdges[i];
+        const auto delay = static_cast<uint32_t>(arrival[t.to] - path[t.from]);  // MIX-021
+        planEdges.push_back({stepOf[t.from], stepOf[t.to], e.kind == EdgeKind::sidechain, delay});
+        planEdgeDesc.push_back(i);
+    }
+    BufferPlan plan = planBuffers(producesAudio, planEdges, master == kNoNode ? kNoBuffer : stepOf[master]);
+
+    // MIX-022: one delay line per delayed edge, kept from the last build when it still fits.
+    std::unordered_map<uint64_t, EdgeDelay> lines;
+    for (StepBuffers& step : plan.steps)
+        for (size_t f = 0; f < step.feeds.size(); ++f) {
+            RenderFeedDesc& feed = step.feeds[f];
+            if (feed.delay == 0) continue;
+            const EdgeDesc& e = desc.edges[planEdgeDesc[step.feedEdges[f]]];
+            std::shared_ptr<DelayLine> line;
+            if (auto old = delayLines_.find(e.edgeID); old != delayLines_.end() &&
+                old->second.from == e.from && old->second.to == e.to &&
+                old->second.line->maxDelay() >= feed.delay)
+                line = old->second.line;
+            else
+                line = std::make_shared<DelayLine>(2, feed.delay, maxBlock_);
+            feed.delayLine = line;
+            lines[e.edgeID] = EdgeDelay{e.from, e.to, std::move(line)};
+        }
 
     // MARK: Assemble
 
@@ -190,13 +235,21 @@ Result<std::unique_ptr<RenderGraph>> GraphBuilder::build(const GraphDescription&
         step.output = b.output;
         step.feeds = std::move(b.feeds);
         step.resetOnLocate = resetsOnLocate(desc.nodes[n].kind);
+        step.timeline = readsTimeline(desc.nodes[n].kind);
         graph.steps.push_back(std::move(step));
+        // MIX-020: telemetry's per-node table lists the latent nodes.
+        if (const uint32_t latency = nodes[n]->latencySamples(); latency > 0)
+            graph.nodeLatencies.push_back(NodeLatency{desc.nodes[n].id, latency});
     }
+    graph.latency = master == kNoNode ? 0 : static_cast<uint32_t>(path[master]);  // MIX-023
     graph.master = master == kNoNode ? kNoBuffer : plan.steps[stepOf[master]].output;
     graph.tempo = std::move(tempo).value();
     graph.version = desc.version;
     auto result = RenderGraph::create(std::move(graph));
     if (!result) return result.error();
+    // MIX-022: lines this graph doesn't use are dropped here; graphs still rendering them hold
+    // their own references.
+    delayLines_ = std::move(lines);
 
     // Forget nodes the description dropped. Graphs that still render them hold their own
     // references, so they're released on daw.reclaim once those graphs are gone (ENG-013).

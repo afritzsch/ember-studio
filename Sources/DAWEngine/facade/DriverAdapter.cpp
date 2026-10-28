@@ -55,4 +55,56 @@ private:
 
 std::unique_ptr<DriverAdapter> makeDefaultDriverAdapter() { return std::make_unique<CoreAudioDriverAdapter>(); }
 
+FakeDeviceDriverAdapter::FakeDeviceDriverAdapter(FakeDeviceSpec spec) : spec_(std::move(spec)) {}
+
+FakeDeviceDriverAdapter::~FakeDeviceDriverAdapter() = default;  // the driver stops itself
+
+Result<void> FakeDeviceDriverAdapter::start(Engine& engine, const DriverConfig& config) {
+    if (!owned_ || engine_ != &engine) {
+        if (owned_ && owned_->running()) return makeError(ErrorCode::invalidArgument, "the driver is already running");
+        driver_.store(nullptr, std::memory_order_release);
+        owned_ = std::make_unique<FakeDeviceDriver>(engine, spec_);
+        engine_ = &engine;
+        driver_.store(owned_.get(), std::memory_order_release);
+    }
+    return owned_->start(config);
+}
+
+void FakeDeviceDriverAdapter::stop() {
+    if (owned_) owned_->stop();
+}
+
+bool FakeDeviceDriverAdapter::running() const { return owned_ && owned_->running(); }
+double FakeDeviceDriverAdapter::sampleRate() const { return owned_ ? owned_->current().sampleRate : 0; }
+uint32_t FakeDeviceDriverAdapter::bufferFrames() const { return owned_ ? owned_->current().bufferFrames : 0; }
+
+std::vector<DeviceInfoPOD> FakeDeviceDriverAdapter::devices() const {
+    std::vector<FakeDeviceState> states;
+    AudioDeviceRef defaultOutput = 0;
+    if (owned_) {
+        states = owned_->devices();
+        defaultOutput = owned_->defaultOutput();
+    } else {
+        // Not started yet: the devices as the spec makes them.
+        for (const FakeDevice& device : spec_.devices)
+            states.push_back({device.id, device.name, device.input.channels, device.output.channels,
+                              device.output.nominalRate, true});
+        defaultOutput = spec_.defaultOutput != 0 ? spec_.defaultOutput
+                                                 : (spec_.devices.empty() ? 0 : spec_.devices[0].id);
+    }
+    std::vector<DeviceInfoPOD> out;
+    for (const FakeDeviceState& state : states) {
+        if (!state.alive) continue;  // a lost device is gone from the list
+        DeviceInfoPOD info;
+        info.deviceID = state.id;
+        info.name = state.name;
+        info.inputChannels = state.inputChannels;
+        info.outputChannels = state.outputChannels;
+        info.nominalSampleRate = state.nominalRate;
+        info.isDefaultOutput = state.id == defaultOutput;
+        out.push_back(std::move(info));
+    }
+    return out;
+}
+
 } // namespace daw

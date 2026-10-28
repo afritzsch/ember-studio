@@ -51,10 +51,10 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 ### M2 — Mixer & routing
 | Task | Lane | Title | Requirements | Depends on | Status |
 |---|---|---|---|---|---|
-| T-020 | E | Full channel strip: mute (slot; solo resolved by the model, T-016), phase, meters; sends pre/post | MIX-005, MIX-007, DSP-010 | T-013 | wip(t-020-channel-strip) |
-| T-021 | E | PDC: path latency, delay insertion, delay-line carry-over, source pre-roll | MIX-020..025 | T-012 | wip(t-021-pdc) |
+| T-020 | E | Full channel strip: mute (slot; solo resolved by the model, T-016), phase, meters; sends pre/post | MIX-005, MIX-007, DSP-010 | T-013 | done |
+| T-021 | E | PDC: path latency, delay insertion, delay-line carry-over, source pre-roll | MIX-020..025 | T-012 | done |
 | T-022 | M | Routing commands (tracks, buses, sends, outputs) + cycle rejection + validation | MODEL-005 (routing subset), MODEL-030..032 | T-016 | todo |
-| T-023 | E | Sidechain edges and ports | MIX-008 | T-021 | todo |
+| T-023 | E | Sidechain edges and ports | MIX-008 | T-021 | ready |
 | T-024 | D | Metronome node | TIME-010, DSP-011 | T-008 | ready |
 | T-025 | E | M2 goldens: pan law, bus/send sum, PDC null | TEST (M2 set) | T-020, T-021, T-022 | todo |
 
@@ -81,8 +81,8 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 ### M5 — Recording & devices
 | Task | Lane | Title | Requirements | Depends on | Status |
 |---|---|---|---|---|---|
-| T-050 | E | FakeDeviceDriver (loopback, scripted events) | TEST-005 | T-011 | wip(t-050-fake-device) |
-| T-051 | E | DeviceMonitor, hot-swap sequence, xrun detection, EngineEvents | IO-020..023 | T-050 | todo |
+| T-050 | E | FakeDeviceDriver (loopback, scripted events) | TEST-005 | T-011 | done |
+| T-051 | E | DeviceMonitor, hot-swap sequence, xrun detection, EngineEvents | IO-020..023 | T-050 | ready |
 | T-052 | E | Audio recording: FIFOs, disk writer, latency comp, finalize, punch | REC-001..005 | T-050, T-009 | todo |
 | T-053 | E | CoreMIDI input + MIDI recording | REC-010..012 | T-040 | todo |
 | T-054 | E | Input monitoring modes | REC-020..022 | T-052 | todo |
@@ -244,7 +244,7 @@ Recorded by the lead from worker reports.
 | DW-049 | T-006 | Driver calls `Telemetry::countXrun()` (IO-023) and `setDeviceOutputLatency()` (IO-005); overruns are detectable from `lastBlockLoadPercent > 100`. Facade copies `TelemetrySnapshot` field by field into `TelemetryPOD`; `firstViolation()` is non-RT and allocates | E (T-011/T-051), B (T-014) | done (T-011 driver, T-014 TelemetryPOD + `overload` event on xrun growth) |
 | DW-050 | T-012 | No `ErrorCode::cycle` in `core/Result.h` though MIX-002 names `Error::cycle`; builder returns `invalidArgument` "cycle: <NodeIDs>". Add the code (ideally with a structured ID list) and map it to `DAWError.routingCycle` | E (core) + B (T-014) | done (T-014) |
 | DW-051 | T-012 | Clip/note delivery: node factories get a node's clips and notes only when an instance is created (new node or kind/configVersion/param range change). Either clip edits bump `configVersion`, or clip players get per-graph clip data | D (T-013) / M (T-016) | decided (T-013): clips/assets fixed per instance; model bumps configVersion on clip edits and asset load (DW-072) |
-| DW-052 | T-012 | PDC (MIX-021) belongs in `RenderGraph::feed()`; migrate T-004's EngineChecks off the old summing path, then remove it. `MasterNode::clippedSamples()` should reach telemetry | E (T-021), E (T-006 follow-up) | todo |
+| DW-052 | T-012 | PDC (MIX-021) belongs in `RenderGraph::feed()`; migrate T-004's EngineChecks off the old summing path, then remove it. `MasterNode::clippedSamples()` should reach telemetry | E (T-021), E (T-006 follow-up) | PDC/feed part done (T-021); `clippedSamples` → telemetry in DW-083 |
 | DW-053 | T-012 | Facade: `applyGraph` submits to `GraphCompiler`; `EngineFacade.h` includes `daw/GraphDescription.h` | B (T-014) | done (T-014) |
 | DW-054 | T-012, lead | Under ASan the RT trap sees no allocations (DW-012), so the RtTrap suite and the Telemetry rtViolations tests (DW-011/024) fail with `--sanitize=address`. The TEST-007 sanitizer job must exclude or skip them | E (T-019 / T-084) | todo |
 | DW-055 | T-009 | Fill the marked seam in `OfflineDriver::render`: `transport.locate(from)` + `play()` before the loop, `stop()` after. Rendering twice on one engine is bit-identical only for stateless nodes, so the pre-render locate must reset timeline nodes even when stopped (TIME-008 covers locate while playing), or IO-011 needs an engine-level reset | E (T-009 follow-up after T-008) | done (T-009) |
@@ -262,7 +262,7 @@ Recorded by the lead from worker reports.
 | DW-067 | T-011 | Facade: publish graphs prepared for at least `driver.current().bufferFrames` (shorter → silence, counted in oversizeBlocks); stop the driver before an offline render (DW-057); enabling input (record/monitor armed) means restarting the driver with `inputEnabled` — no live input switch | B (T-014) | done (T-014) |
 | DW-068 | T-011 | IO-023 rest: overruns from render time vs block duration, `EngineEvent.overload`; one processor-overload notification often arrives right at start, so ignore a short window after start | E (T-051) | todo |
 | DW-069 | T-011 | 04 Interfaces names `DriverConfig` and `DeviceLatency` without defining them; T-011 defined them in `io/DriverConfig.h` / `io/DeviceLatency.h` (like `ExportSpec`). Add them to the Interfaces block | spec (lead) | todo |
-| DW-070 | T-011 | FakeDeviceDriver can reuse `DeviceRenderer` (device-independent IO cycle) and `publishDeviceLatency()`. Device start/stop/config/latency not reachable via dawctl/dawmcp until the facade + control exist | E (T-050), B (T-017/T-018) | todo |
+| DW-070 | T-011 | FakeDeviceDriver can reuse `DeviceRenderer` (device-independent IO cycle) and `publishDeviceLatency()`. Device start/stop/config/latency not reachable via dawctl/dawmcp until the facade + control exist | E (T-050), B (T-017/T-018) | FakeDeviceDriver part done (T-050); dawctl/dawmcp device control todo (T-017/T-018) |
 | DW-071 | T-013 | Facade/telemetry need the NodeID → MeterID map (today only `GraphBuilder::meterOf`, compile thread): publish it with each graph or through GraphCompiler | B (T-014 / T-020) | done (T-014) |
 | DW-072 | T-013 | DW-051 decision: the model must bump a clip player's `configVersion` whenever its track's clips change and when an asset they use finishes loading (facade emits `assetLoaded`) | M (T-016) | todo |
 | DW-073 | T-013 | Goldens: two adjacent clips with fades (DSP-001), loop wrap mid-block through the clip player (TIME-005/006), locate reset (TIME-008), pan hard-left/centre/right (MIX-005, T-025) | E (T-019 / T-025 / T-036) | todo |
@@ -274,3 +274,15 @@ Recorded by the lead from worker reports.
 | DW-079 | T-014 | `setDevice` with a different session rate returns `unsupported` until IO-021/IO-033 | E (T-051 / T-056) | todo |
 | DW-080 | T-014 | Facade adds a `daw.export` thread for offline jobs; not in the CONV §3 thread table | spec (lead) | todo |
 | DW-081 | T-014 | `GraphCompiler::Status` keeps only the latest error: two builds finishing between polls can lose the earlier `graphRejected` event (`waitForGraph` is still right) | E | todo |
+| DW-082 | T-021 | Expose `GraphCompiler::takeEvents()` (latency change, MIX-024) as `EngineEventType::latencyChanged`; needs a PROPOSED delta to 08 events (`include/daw/`) | B | todo |
+| DW-083 | T-021 | `MasterNode::clippedSamples()` → telemetry: new Telemetry counter + `TelemetryPOD` field | E (core) + B | todo |
+| DW-084 | T-021 | Goldens `pdc_alignment_null` (MIX-021) and click-on-beat-1 behind a latent master insert (MIX-023); need T-019's harness + a test-only FakeLatencyNode in golden builds | E (T-019 / T-025) | todo |
+| DW-085 | T-021 | Metronome is already a timeline node (scheduled `latency` ahead); T-024 should confirm and decide whether it resets on locate | D (T-024) | todo |
+| DW-086 | T-021 | Pre-roll renders `latency` frames inside the first block of a run: a CPU spike that can overrun a live callback when latency is large; a mid-run latency change jumps timeline nodes with no new pre-roll. Consider spreading pre-roll over blocks (output silent) | E | todo |
+| DW-087 | T-021 | `Engine.cpp` duplicates the `makeSegment` helper (from `time/TransportSegments.h`); dawmcp check on `graphLatency` once a latent node is reachable over the protocol | E (small), B (T-018+) | todo |
+| DW-088 | T-050 | Move `RunningConfig` from `io/CoreAudioDriver.h` to `io/DriverConfig.h` (FakeDeviceDriver includes CoreAudioDriver.h only for it) | E (small, T-051) | todo |
+| DW-089 | T-050 | dawctl/dawmcp can't pick the fake device: `EngineFacade::create` realtime always uses CoreAudio. Needs a facade option/mode (`include/daw/`) | B (T-017/T-018) | todo |
+| DW-090 | T-050 | CoreAudio property listeners (T-051, IO-020) should emit the same `io/DeviceNotification.h` notifications so DeviceMonitor reads either source; render-time overruns stay with T-051 (DW-068) | E (T-051) | todo |
+| DW-091 | lead | Flaky under full-suite load (~1 in 15–35 runs): "TIME-009: a reader thread never sees a torn playhead" (T-008, TransportTests.swift:69) and T-050's scripted-events test (being fixed). A torn playhead would be a real bug, so investigate before calling it a test issue | E | todo |
+| DW-092 | T-020 | Facade `paramInfoJSON(.gain)` should return `GainNode::kParamInfo` (level, mute); then update EngineClientTests.swift (expects "[]" for `.gain`). Same hook as DW-078 | B | todo |
+| DW-093 | T-020 | Goldens: bus_send_sum with pre- and post-fader sends; strip mute ramp; phase-invert null; gain-node level step; muted track with sends goes silent and fades back | E (T-019 / T-025) | todo |
