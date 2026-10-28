@@ -28,11 +28,13 @@ struct ProjectTests {
             kind: .au(AUDescriptor(identifier: "aufx:dely:appl", name: "AUDelay")), pluginState: Data([1, 2, 3]))
         let vst = DeviceSlot(
             id: project.ids.allocate(), kind: .vst3(VST3Descriptor(identifier: "/x.vst3#ABC", name: "X")), bypass: true)
+        // Allocated like every ID, so decoding leaves the allocator as it was (DW-031).
+        let asset = project.ids.allocate()
         project.buses = [bus]
         project.tracks = [
             Track(
                 id: project.ids.allocate(), name: "Gtr", kind: .audio,
-                clips: [.audio(AudioClip(id: project.ids.allocate(), assetID: 50, start: 960, length: 1920,
+                clips: [.audio(AudioClip(id: project.ids.allocate(), assetID: asset, start: 960, length: 1920,
                                          sourceOffsetSamples: 100, gain: 0.5, fadeIn: 10, fadeOut: 20))],
                 takeFolders: [TakeFolder(id: project.ids.allocate())], inserts: [comp, au],
                 sends: [Send(id: project.ids.allocate(), target: bus.id, level: 0.7, tap: .preFader)],
@@ -44,7 +46,7 @@ struct ProjectTests {
                                        notes: [Note(id: project.ids.allocate(), start: 0, length: 480, pitch: 60)]))],
                 instrument: DeviceSlot(id: project.ids.allocate(), kind: .builtin(.sampler)), inserts: [vst]),
         ]
-        project.assets = [AssetRef(id: 50, path: "Audio/gtr.wav", channels: 2, originalSampleRate: 48_000, frames: 1000)]
+        project.assets = [AssetRef(id: asset, path: "Audio/gtr.wav", channels: 2, originalSampleRate: 48_000, frames: 1000)]
         project.loop = LoopRange(start: 0, end: 7680, isEnabled: false)
         project.master.strip.gain = 0.9
 

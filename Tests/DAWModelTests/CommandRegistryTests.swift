@@ -10,12 +10,36 @@ struct CommandRegistryTests {
     static let builtInSamples: [any Command] = [
         CompositeCommand("Two", [RenameTrack(trackID: 3, name: "A"), RenameTrack(trackID: 4, name: "B")]),
         RenameTrack(trackID: 7, name: "Lead Vox"),
+        // T-022: routing
+        AddTrack(name: "Bass", kind: .midi, index: 2, output: .bus(4), color: TrackColor(red: 1, green: 0, blue: 0)),
+        AddTrack(name: "Bare", kind: .audio),
+        RemoveTrack(trackID: 3),
+        RestoreTrack(track: RoutingProject.make().tracks[0], index: 0),
+        MoveTrack(trackID: 3, index: 1),
+        SetTrackOutput(channelID: 3, output: .master),
+        AddBus(name: "FX", index: 0, output: .bus(2)),
+        RemoveBus(busID: 2),
+        RestoreBus(bus: Bus(id: 2, name: "A", sends: [Send(id: 9, target: 4)]), index: 1),
+        AddSend(channelID: 3, busID: 2, level: 0.5, tap: .preFader),
+        RemoveSend(sendID: 9),
+        RestoreSend(channelID: 3, send: Send(id: 9, target: 2, level: 0.25), index: 0),
+        SetSendLevel(sendID: 9, level: 0.75),
+        SetSendTap(sendID: 9, tap: .postFader),
+        SetSidechain(slotID: 11, source: SidechainRef(source: 3, tap: .preFader)),
+        SetSidechain(slotID: 11, source: nil),
+        SetParam(target: .strip(channel: 3, param: .pan), value: -0.5),
+        SetParam(target: .sendLevel(send: 9), value: 1),
+        SetParam(target: .device(slot: 11, index: 2), value: nil),
     ]
 
     @Test("MODEL-006: built-in type strings are stable and unique")
     func stableTypeStrings() {
         // Renaming one breaks saved scripts and the wire format; add a migration instead.
-        #expect(CommandRegistry.builtIn.map { $0.type } == ["Composite", "RenameTrack"])
+        #expect(CommandRegistry.builtIn.map { $0.type } == [
+            "Composite", "RenameTrack",
+            "AddTrack", "RemoveTrack", "RestoreTrack", "MoveTrack", "SetTrackOutput", "AddBus", "RemoveBus", "RestoreBus",
+            "AddSend", "RemoveSend", "RestoreSend", "SetSendLevel", "SetSendTap", "SetSidechain", "SetParam",
+        ])
         let all = CommandRegistry.registered.map { $0.type }
         #expect(Set(all).count == all.count)
     }

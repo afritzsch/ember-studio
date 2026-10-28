@@ -1,4 +1,4 @@
-/// MODEL-005 (catalogue entry). The rest of the catalogue comes with T-022/T-030/T-042.
+/// MODEL-005 (catalogue entry). Routing commands are T-022; clips, notes and the rest come with T-030/T-042.
 public struct RenameTrack: Command {
     public static let type = "RenameTrack"
 

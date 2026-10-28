@@ -39,9 +39,9 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 | T-014 | B | EngineFacade v0, EngineClient, EngineProtocol, FakeEngine | BRIDGE-001..008 (transport, graph, params, assets, offline, telemetry, events) | T-006, T-009, T-012 | done |
 | T-015 | M | Project types, IDAllocator, Command protocol, UndoStack, gestures, ProjectStore, CommandRegistry | MODEL-001..004, 006, 007 | T-007 | done |
 | T-016 | M | GraphDescriptionBuilder + engine sync (structural vs param); solo-in-place truth table | MODEL-020..022, MIX-006 | T-014, T-015 | done |
-| T-017 | B | DAWControl protocol + Dispatcher + `dawctl` (headless) | CTL-001..005, CTL-010, 012 | T-016 | wip(t-017-dawctl) |
-| T-018 | B | `dawmcp` headless + `.mcp.json` + command schema tool | CTL-020..022, 024, 025 | T-017 | todo |
-| T-019 | E | Golden harness, test-only nodes, M1 goldens, `scripts/test.sh` | TEST-001..004, BUILD-007 | T-017 | todo |
+| T-017 | B | DAWControl protocol + Dispatcher + `dawctl` (headless) | CTL-001..005, CTL-010, 012 | T-016 | done |
+| T-018 | B | `dawmcp` headless + `.mcp.json` + command schema tool | CTL-020..022, 024, 025 | T-017 | ready |
+| T-019 | E | Golden harness, test-only nodes, M1 goldens, `scripts/test.sh` | TEST-001..004, BUILD-007 | T-017 | ready |
 | T-085 | E | Engine test-support cleanup: one C++ test pattern (test-only module map), no test code in libDAWEngine, `core/`-rooted includes, isolated RT-trap counters | DW-006, 007, 014, 019 | T-003, T-007 | done |
 | T-086 | E | Rename the app to **Ember Studio**: Xcode project/target/scheme/folder `EmberStudio`, bundle ID `dev.emberstudio.EmberStudio`, log subsystem `dev.emberstudio`, all text mentions (specs, CLAUDE.md, SPEC.md text outside the decision log, scripts). Module names unchanged | — | T-004, T-010 (avoid conflicts) | done |
 | T-087 | E | Engine cleanup: RtTrap `LockHook::real` data race + TSan run (DW-028); leftover "macDAW" mentions (DW-045); `ErrorCode::cycle` with NodeIDs in `core/Result.h`, used by GraphBuilder (DW-050); `resetOnLocate` comment says locate only (DW-062) | DW-028, 045, 050, 062 | T-085, T-086 | done |
@@ -53,15 +53,15 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 |---|---|---|---|---|---|
 | T-020 | E | Full channel strip: mute (slot; solo resolved by the model, T-016), phase, meters; sends pre/post | MIX-005, MIX-007, DSP-010 | T-013 | done |
 | T-021 | E | PDC: path latency, delay insertion, delay-line carry-over, source pre-roll | MIX-020..025 | T-012 | done |
-| T-022 | M | Routing commands (tracks, buses, sends, outputs) + cycle rejection + validation | MODEL-005 (routing subset), MODEL-030..032 | T-016 | wip(t-022-routing-commands) |
+| T-022 | M | Routing commands (tracks, buses, sends, outputs) + cycle rejection + validation | MODEL-005 (routing subset), MODEL-030..032 | T-016 | done |
 | T-023 | E | Sidechain edges and ports | MIX-008 | T-021 | ready |
 | T-024 | D | Metronome node | TIME-010, DSP-011 | T-008 | ready |
-| T-025 | E | M2 goldens: pan law, bus/send sum, PDC null | TEST (M2 set) | T-020, T-021, T-022 | todo |
+| T-025 | E | M2 goldens: pan law, bus/send sum, PDC null | TEST (M2 set) | T-020, T-021, T-022, T-019 (harness) | todo |
 
 ### M3 — Timeline, persistence, app shell
 | Task | Lane | Title | Requirements | Depends on | Status |
 |---|---|---|---|---|---|
-| T-030 | M | Clip + tempo/signature + loop commands | MODEL-005 (clip/tempo subset) | T-022 | todo |
+| T-030 | M | Clip + tempo/signature + loop commands | MODEL-005 (clip/tempo subset) | T-022 | ready |
 | T-031 | M | Persistence: folder format, atomic save, migrations, autosave, recovery, offline assets | MODEL-040..046 | T-030 | todo |
 | T-032 | U+B | App shell, window, view-model pattern, toasts, ControlSocketServer, attach mode, UI dump/snapshot | UI-001, 003, 004, 050..052, CTL-011, 023, 030, 031 | T-018 | todo |
 | T-033 | U | Arrange canvas: tiles, waveforms (Metal), grid/snap, clip gestures, playhead layer | UI-010..014 | T-032, T-030 | todo |
@@ -72,8 +72,8 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 ### M4 — MIDI & Sampler
 | Task | Lane | Title | Requirements | Depends on | Status |
 |---|---|---|---|---|---|
-| T-040 | D | MidiClipPlayer, hanging-note handling | DSP-003 | T-008, T-012 | wip(t-040-midi-clip-player) |
-| T-041 | D | Sampler (zones, Hermite, voices, ADSR, CC64, bend) | DSP-020..023 | T-040, T-010 | todo |
+| T-040 | D | MidiClipPlayer, hanging-note handling | DSP-003 | T-008, T-012 | done |
+| T-041 | D | Sampler (zones, Hermite, voices, ADSR, CC64, bend) | DSP-020..023 | T-040, T-010 | ready |
 | T-042 | M | Note commands, instrument slot on MIDI tracks | MODEL-005 (note subset) | T-030 | todo |
 | T-043 | U | Piano roll + velocity lane + audition (`previewNote` facade addition) | UI-020, 021 | T-033, T-042 | todo |
 | T-044 | D | M4 goldens | TEST (M4 set) | T-041, T-042 | todo |
@@ -223,9 +223,9 @@ Recorded by the lead from worker reports.
 | DW-028 | T-005 | RtTrap data race: `LockHook::real` (RtTrap.cpp ~146-154) is a plain static written by `install()` while hooked locks read it on other threads; TSan flags it and one TSan run hung (malloc_logger/GOT rebinding vs TSan interceptors, unconfirmed). Make it atomic or set once (`std::call_once`). Blocks TEST-007's TSan job | E (T-003 follow-up) | done (T-087; TSan run: no hang, 0 races; see DW-065) |
 | DW-029 | T-005 | Free a node's ParamIDs only after the last graph referencing them is retired (a freed slot is reused at once, so an old graph could read another param for a block) | B / M (T-014, MODEL-022) | done (T-014) |
 | DW-030 | T-005 | `ParamSlot.generation` (counts writes, for PLUG-015) isn't in 02; record its meaning in the spec. Out-of-range ParamIDs are only `DAW_RT_ASSERT`ed (compiled out in Release), so GraphBuilder must validate IDs | spec (lead) + E (T-012) | done (T-012) |
-| DW-031 | T-015 | MODEL-032: run `Project.validate()` after every command in Debug (hook in `UndoStack.perform`); decoding should also move the ID allocator past the largest ID in the file | M (T-022 / T-031) | todo |
+| DW-031 | T-015 | MODEL-032: run `Project.validate()` after every command in Debug (hook in `UndoStack.perform`); decoding should also move the ID allocator past the largest ID in the file | M (T-022 / T-031) | done (T-022; Debug hook throws, project unchanged; validate on open → DW-111) |
 | DW-032 | T-015 | Change detection diffs the whole project after every command and gesture step; may need tuning for large projects / fast drags | M (T-016) | done (T-016: measured; diff ~6.8 ms/step on 144 tracks, 12.8k clips, release; optional speed-up in DW-098) |
-| DW-033 | T-015 | `Project.init` uses a random UUID; headless `project.new` should pass a fixed id so runs are deterministic | B (T-017, CTL-004) | todo |
+| DW-033 | T-015 | `Project.init` uses a random UUID; headless `project.new` should pass a fixed id so runs are deterministic | B (T-017, CTL-004) | done (T-017: headless project.new n → UUID 00000000-0000-0000-0000-<n hex>) |
 | DW-034 | T-004 | ENG-011/012 wording: as built, `renderEpoch` is odd while a block runs and even when idle (so graphs replaced while idle free at once), with seq_cst on both sides rather than "acquire". Record in the spec | spec (lead) | todo |
 | DW-035 | T-004 | 00-conventions §3 gives no QoS for `daw.reclaim`; T-004 used `QOS_CLASS_UTILITY`. Record in the spec | spec (lead) | todo |
 | DW-036 | T-004 | GraphBuilder: a `NodeDesc.configVersion` bump must `NodePool::put` a new prepared instance (a node a live graph may render can't be re-prepared in place). RenderGraph doesn't route MIDI yet (`midiIn` empty, `midiOut` capacity 0) | E (T-012), D (T-040) | done (T-012) |
@@ -281,13 +281,29 @@ Recorded by the lead from worker reports.
 | DW-086 | T-021 | Pre-roll renders `latency` frames inside the first block of a run: a CPU spike that can overrun a live callback when latency is large; a mid-run latency change jumps timeline nodes with no new pre-roll. Consider spreading pre-roll over blocks (output silent) | E | todo |
 | DW-087 | T-021 | `Engine.cpp` duplicates the `makeSegment` helper (from `time/TransportSegments.h`); dawmcp check on `graphLatency` once a latent node is reachable over the protocol | E (small), B (T-018+) | todo |
 | DW-088 | T-050 | Move `RunningConfig` from `io/CoreAudioDriver.h` to `io/DriverConfig.h` (FakeDeviceDriver includes CoreAudioDriver.h only for it) | E (small, T-051) | todo |
-| DW-089 | T-050 | dawctl/dawmcp can't pick the fake device: `EngineFacade::create` realtime always uses CoreAudio. Needs a facade option/mode (`include/daw/`) | B (T-017/T-018) | todo |
+| DW-089 | T-050 | dawctl/dawmcp can't pick the fake device: `EngineFacade::create` realtime always uses CoreAudio. Needs a facade option/mode (`include/daw/`) | B (T-017/T-018) | todo: needs a facade driver option (`DriverConfigPOD.driver = coreAudio | fake` + fake options), then `device.list/set/start/stop`, device latency in telemetry, `project.new {engine: offline|realtime}` (T-017 notes) |
 | DW-090 | T-050 | CoreAudio property listeners (T-051, IO-020) should emit the same `io/DeviceNotification.h` notifications so DeviceMonitor reads either source; render-time overruns stay with T-051 (DW-068) | E (T-051) | todo |
 | DW-091 | lead | Flaky under full-suite load (~1 in 15–35 runs): "TIME-009: a reader thread never sees a torn playhead" (T-008, TransportTests.swift:69) (T-050's scripted-events flake was a test race, fixed in 69ea8bf). A torn playhead would be a real bug, so investigate before calling it a test issue | E | todo |
 | DW-092 | T-020 | Facade `paramInfoJSON(.gain)` should return `GainNode::kParamInfo` (level, mute); then update EngineClientTests.swift (expects "[]" for `.gain`). Same hook as DW-078 | B | todo |
 | DW-093 | T-020 | Goldens: bus_send_sum with pre- and post-fader sends; strip mute ramp; phase-invert null; gain-node level step; muted track with sends goes silent and fades back | E (T-019 / T-025) | todo |
-| DW-094 | T-016 | Real `SetParam` command needs a param-target design (likely shared with 11's `ParamTarget`); MODEL-032 must check model IDs ≤ `GraphNodeID.maxModelID` (2^56−1), since NodeIDs carry a role in the top 8 bits | M (T-022) | todo |
-| DW-095 | T-016 | Control layer: `EngineSync.flush()` before offline render/export; `EngineSync.pollEvents()` as the single engine-event drain (so `assetLoaded` reaches DW-072 bumps); map engine NodeIDs back with `GraphNodeID.owner(of:)`; master limiter is `runtime.masterLimiterParam(master.id)` | B/M (T-017/T-018) | todo |
-| DW-096 | T-016 | eq, compressor, reverb, delay, sampler, midiClipPlayer have no engine factories yet, so projects using them (fixture `routing`) are rejected by the real engine. Run `routing` through EngineClient once registered | D/E (T-040, T-041, T-070..073) | todo |
+| DW-094 | T-016 | Real `SetParam` command needs a param-target design (likely shared with 11's `ParamTarget`); MODEL-032 must check model IDs ≤ `GraphNodeID.maxModelID` (2^56−1), since NodeIDs carry a role in the top 8 bits | M (T-022) | done (T-022: `ParamTarget` in `DAWModel/Project/ParamTarget.swift`, strip/sendLevel/device; spec 11 can adopt it) |
+| DW-095 | T-016 | Control layer: `EngineSync.flush()` before offline render/export; `EngineSync.pollEvents()` as the single engine-event drain (so `assetLoaded` reaches DW-072 bumps); map engine NodeIDs back with `GraphNodeID.owner(of:)`; master limiter is `runtime.masterLimiterParam(master.id)` | B/M (T-017/T-018) | done (T-017; master limiter unused until a control method sets it) |
+| DW-096 | T-016 | eq, compressor, reverb, delay, sampler, midiClipPlayer have no engine factories yet, so projects using them (fixture `routing`) are rejected by the real engine. Run `routing` through EngineClient once registered | D/E (T-040, T-041, T-070..073) | midiClipPlayer registered (T-040); `routing` also needs eq/compressor/reverb/delay, `midi_tempo` needs the sampler (T-041) |
 | DW-097 | T-016 | Nothing in the model calls `loadAsset` for a project's assets on open/import yet | M (T-031 / ImportAsset) | todo |
 | DW-098 | T-016 | Bypassed devices are left out of the graph until host bypass (PLUG-018): bypass is a rebuild and the device loses state. Optional: `ProjectChange` diff could skip entities with unchanged storage (main per-step cost on huge projects) | P (T-064), M (optional) | todo |
+| DW-099 | T-040 | MIDI routing in RenderGraph/GraphBuilder: MIDI edges carry no data (player `midiOut` capacity 0, instrument `midiIn` empty). Needs per-step MIDI storage of fixed capacity that never shrinks between blocks (no-hanging-notes guarantee) and MIDI edge delay for PDC (05 "PDC semantics") | E | todo |
+| DW-100 | T-040 | Sampler should handle CC 123 (All Notes Off): a re-created MidiClipPlayer (DW-051 note edit while playing) sends it on all 16 channels. DSP-023 lists only CC64 and pitch bend | D (T-041) | todo |
+| DW-101 | T-040 | DSP-003 golden (`midi_loop_wrap`) once the golden harness, MIDI routing and a sampler exist | D/E (T-019, T-041) | todo |
+| DW-102 | T-040 | Flaky "ENG-014: RT-retired objects are freed on daw.reclaim" (EngineChecks.cpp:743, `rtRetireQueue`): waits for `destroyed`, then reads `rtObjectsFreed()`, which the reclaimer bumps only after the destructor returns. Wait on `rtObjectsFreed() == 1` instead | E | todo |
+| DW-103 | T-040 | MidiClipPlayer doesn't chase notes (playback starting inside a note doesn't sound it), written into the 06 clarification. Many DAWs chase by default; confirm with the user | user | todo |
+| DW-104 | T-040 | `BuiltinNodes.h` doc comment doesn't list midiClipPlayer | D (small) | todo |
+| DW-105 | T-017 | `ImportAsset` command `{"type": "ImportAsset", "asset": AssetRef}` (reserve `asset.id`, append; inverse removes). `asset.import` loads into the engine under `project.ids.next`, then performs it; returns `notImplemented` until registered | M (T-030) | todo |
+| DW-106 | T-017 | `SetLoop` command so `Project.loop` follows `transport.setLoop` (today it only drives the engine) | M (T-030) | todo |
+| DW-107 | T-017 | `project.open/save` are wired to `ProjectStore.open/save` (`notImplemented`). The dispatcher creates an engine at the project's rate, loads assets relative to the folder and reports `loadReport.offlineAssets`; T-031's `ProjectLoadReport` should replace that shape | M (T-031) | todo |
+| DW-108 | T-017 | For T-018/T-019: `ControlMethod.paramsType` is ready for CTL-021 schemas; `Dispatcher.call(_:_:)` is the in-process headless entry; `ControlUIProvider` is the attach hook (T-032). GoldenTests can run fixtures in-process with `ControlScript(contentsOf:)` + `Dispatcher.handle(_:)` | B/E (T-018, T-019) | todo |
+| DW-109 | T-022 | C++ interop batch-compile trap: an unapplied `String.init` in any DAWModel file sharing a batch job with `EngineClient.swift` hides CxxStdlib's `String(std.string)`, so clean builds fail ("no exact matches in call to initializer"). Fixed once in `DAWError.swift` (d9eb9d5); can recur when files are added. Wrap EngineClient's std::string → String conversions in one helper that avoids overloaded `String(_:)`; CI clean builds (DW-005) | B (lead) | todo |
+| DW-110 | T-022 | `Track.clips` is documented "sorted by start" but `validate()` doesn't enforce it (test stand-in clip commands don't keep order). Decide with the real clip commands | M (T-030) | todo |
+| DW-111 | T-022 | `ProjectStore.open` should run `validate()` on the decoded project and report/repair failures (decoding only reserves IDs and rejects IDs > maxModelID) | M (T-031) | todo |
+| DW-112 | T-022 | `SetParam` on a device param index ≥ the kind's published ParamInfo count (or a kind without ParamInfo, e.g. FakeEngine) grows the slot range → structural rebuild instead of a slot write. Goes away once every kind publishes ParamInfo; otherwise cap indices | M/B (with DW-092) | todo |
+| DW-113 | T-022 | No `RenameBus`/`MoveBus` (RenameTrack/MoveTrack take tracks only); the mixer UI (UI-030) will likely want them | M (before T-076) | todo |
+| DW-114 | T-022 | Once dawmcp exists: run a routing scenario (AddBus/AddTrack/AddSend/SetTrackOutput, cycle rejection → CTL-003 `routingCycle` data, render + analyze) | B (T-018) | todo |

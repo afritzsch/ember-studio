@@ -152,6 +152,19 @@ extension Project: Codable {
         master = try c.decode(MasterChannel.self, forKey: .master)
         assets = try c.decode([AssetRef].self, forKey: .assets)
         loop = try c.decodeIfPresent(LoopRange.self, forKey: .loop)
+
+        // DW-031: a hand-edited or older file may hold IDs at or past its allocator's `next`.
+        // Move the allocator past all of them so a new entity never takes an ID in use. An ID in
+        // the NodeID role bits would overflow the allocator and can't become a NodeID, so it is
+        // rejected here; the remaining invariants are `validate()`'s (MODEL-032).
+        var largest: ModelID = 0
+        forEachID { id, _ in largest = max(largest, id) }
+        guard largest <= GraphNodeID.maxModelID else {
+            throw DecodingError.dataCorrupted(
+                .init(codingPath: c.codingPath,
+                      debugDescription: "id \(largest) is above the largest model id \(GraphNodeID.maxModelID)"))
+        }
+        ids.reserve(largest)
     }
 
     public func encode(to encoder: any Encoder) throws {

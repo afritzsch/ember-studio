@@ -64,6 +64,13 @@ IDs are `UInt64`, allocated by `IDAllocator` stored in the project (never reused
 | MODEL-031 | Commands validate references (IDs exist, ranges valid) and throw rather than corrupt state. | Fuzz: random invalid commands never break invariants |
 | MODEL-032 | `Project.validate()` checks all invariants (unique IDs, acyclic, clips non-negative, sorted notes). It runs after every command in Debug. | — |
 
+**Routing commands and validation (clarified in T-022).**
+- *Inverses keep IDs*: undo of a remove and redo of an add re-insert the entity with its own IDs through `RestoreTrack`, `RestoreBus` and `RestoreSend` (registered like any command and checked like any input). So later history entries still find the IDs they name.
+- *Cascades* (MODEL-004): `RemoveBus` removes sends into the bus, routes outputs into it to the master and clears sidechains listening to it. `RemoveTrack` clears sidechains listening to the track. Each is one undo entry. `SetTrackOutput` takes a track or a bus (`channelID`).
+- *Cycles* (MODEL-030) are checked on a channel graph (tracks, buses, master; edges for outputs, sends and sidechains, bypassed devices included, so toggling bypass never closes a cycle). The error path is the shortest cycle through the new route, `[from, to, …, from]`. A channel sidechaining its own device is a cycle.
+- *SetParam* takes a `ParamTarget`: `strip(channel, gain|pan|mute|solo|phase)`, `sendLevel(send)` or `device(slot, index)`. Gain and send level are linear 0…+12 dB, pan −1…1, switches are on at ≥ 0.5, and the master has no solo. A nil value removes a stored device param (back to the kind's default).
+- *validate()* (MODEL-032) also checks that IDs are in 1…`GraphNodeID.maxModelID` and below the allocator's `next`, that references exist, that clips match their track's kind, and the strip, send and param ranges. In Debug, a command (or undo/redo) that leaves the project invalid is rejected like an invalid one. Decoding moves the allocator past the largest ID and rejects IDs above `maxModelID` (DW-031). Clip order on a track isn't checked yet (T-030).
+
 ### Persistence
 | ID | Requirement | Acceptance |
 |---|---|---|
@@ -101,4 +108,8 @@ In headless tools, `ProjectStore` runs on `@MainActor` too (the CLI has a main r
 | MODEL-020 | done (T-016) | `GraphDescriptionBuilderTests` (snapshots of 4 fixture projects in `Tests/Fixtures/graph_snapshots/`; well-formed; pure; send/sidechain taps; stable edge IDs; role-tagged NodeIDs); real engine accepts the graphs (`EngineSyncIntegrationTests`) |
 | MODEL-021 | done (T-016) | `EngineSyncTests` (param-only → setParam, never applyGraph; structural → one apply per 10 ms window from the latest project; 100-step fader drag rebuilds nothing; clip drag coalesces); end to end in `EngineSyncIntegrationTests`. Cost measured in `SyncCostTests` (DW-032) |
 | MODEL-022 | done (T-016) | `EngineSyncTests` (slots allocated on attach, freed after the apply that drops a node, runtime-only and reallocated on open; counts/defaults from ParamInfo) |
+| MODEL-005 | partial (T-022: routing subset) | `RoutingCommandTests` (AddTrack, RemoveTrack, MoveTrack, RenameTrack, SetTrackOutput, AddBus, RemoveBus, AddSend, RemoveSend, SetSendLevel, SetSendTap, SetSidechain, SetParam; apply → JSON-decoded inverse → redo; Restore* inverses keep IDs); `CommandRegistryTests`; end to end in `RoutingEngineTests`. Clip/tempo (T-030) and note (T-042) subsets todo |
+| MODEL-030 | done (T-022) | `RoutingCommandTests` (A → B then B → A rejected with `routingCycle([B, A, B])`; self-routing, longer cycles through sends and sidechains; bypassed devices count) |
+| MODEL-031 | done (T-022) | `RoutingCommandTests` "unknown IDs and bad arguments throw and change nothing" (35 cases); routing fuzz (150 runs × 40 commands, undo-all restores) |
+| MODEL-032 | done (T-022) | `ProjectValidationTests` (unique IDs in 1…maxModelID below the allocator; references; acyclic; clip/note/param ranges; Debug `UndoStack` hook rejects an invalidating command; decoding reserves IDs). Clip order isn't enforced yet (DW-110) |
 | MODEL-* (rest) | todo | |

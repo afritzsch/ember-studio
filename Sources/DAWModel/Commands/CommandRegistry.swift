@@ -8,6 +8,22 @@ public enum CommandRegistry {
     public static let builtIn: [any Command.Type] = [
         CompositeCommand.self,
         RenameTrack.self,
+        // T-022: routing (MODEL-005, routing subset)
+        AddTrack.self,
+        RemoveTrack.self,
+        RestoreTrack.self,
+        MoveTrack.self,
+        SetTrackOutput.self,
+        AddBus.self,
+        RemoveBus.self,
+        RestoreBus.self,
+        AddSend.self,
+        RemoveSend.self,
+        RestoreSend.self,
+        SetSendLevel.self,
+        SetSendTap.self,
+        SetSidechain.self,
+        SetParam.self,
     ]
 
     private static let table = Mutex<[String: any Command.Type]>(

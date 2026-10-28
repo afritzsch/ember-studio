@@ -223,7 +223,8 @@ let package = Package(
         ),
         .testTarget(
             name: "DAWControlTests",
-            dependencies: ["DAWControl"],
+            // dawctl is listed so `swift test` builds the binary the CLI tests launch (CTL-010/012).
+            dependencies: ["DAWControl", "dawctl"],
             swiftSettings: cxxInterop
         ),
         .testTarget(
