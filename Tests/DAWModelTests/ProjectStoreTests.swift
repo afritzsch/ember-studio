@@ -9,7 +9,7 @@ struct ProjectStoreTests {
 
     /// A store with one track and one clip on it, history cleared.
     private func makeStore() throws -> (ProjectStore, track: NodeIDValue, clip: ModelID) {
-        var project = Project(name: "S")
+        var project = Project.withTestAsset(name: "S")
         _ = try TestAddTrack(name: "A").apply(to: &project)
         let track = project.tracks[0].id
         _ = try TestAddClip(trackID: track, start: 0, length: 960).apply(to: &project)

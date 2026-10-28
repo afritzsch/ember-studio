@@ -11,9 +11,21 @@ public enum Clip: Hashable, Sendable {
     }
 
     public var start: Tick {
-        switch self {
-        case .audio(let clip): clip.start
-        case .midi(let clip): clip.start
+        get {
+            switch self {
+            case .audio(let clip): clip.start
+            case .midi(let clip): clip.start
+            }
+        }
+        set {
+            switch self {
+            case .audio(var clip):
+                clip.start = newValue
+                self = .audio(clip)
+            case .midi(var clip):
+                clip.start = newValue
+                self = .midi(clip)
+            }
         }
     }
 

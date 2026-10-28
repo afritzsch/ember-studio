@@ -2,7 +2,8 @@
 /// rate if needed (D-27); the original file is kept as is.
 public struct AssetRef: Identifiable, Hashable, Sendable, Codable {
     public var id: ModelID
-    /// Relative to the project folder (MODEL-040).
+    /// Relative to the project folder (MODEL-040) when the file is inside it (imported into
+    /// `Audio/`), otherwise absolute: a referenced file, or a project with no folder yet (T-030).
     public var path: String
     public var channels: Int
     public var originalSampleRate: Double
