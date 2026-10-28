@@ -1,4 +1,5 @@
 import DAWControl
+import DAWModel
 import Foundation
 import Testing
 
@@ -96,6 +97,38 @@ struct DawctlTests {
         #expect(out[3].result?["rtViolations"] == 0)
         #endif
         #expect(FileManager.default.fileExists(atPath: dir.file("out.wav").path))
+    }
+
+    @Test("MODEL-045: `dawctl project.open` reports a newer autosave, and with recover opens it; a save then clears it")
+    @MainActor
+    func openRecover() async throws {
+        let dir = try TempDir()
+        // A crashed session: saved once, then an edit that only reached the autosave.
+        let store = ProjectStore(project: Project(name: "r"))
+        store.autosavePolicy = nil
+        try await store.save(to: dir.file("R.dawproject"))
+        try store.perform(AddTrack(name: "Unsaved", kind: .audio))
+        try await store.autosave()
+
+        let plain = try dawctl(["project.open", "--json", #"{"path": "R.dawproject"}"#], in: dir.url)
+        #expect(plain.status == 0, "\(plain.stderr)")
+        let report = try JSONValue(parsing: Data(plain.stdout.utf8))["loadReport"]
+        #expect(report?["recoveryAvailable"] == true && report?["recovered"] == false)
+
+        try """
+            project.open {"path": "R.dawproject", "recover": true}
+            project.get {"path": "/tracks/0/name"}
+            project.save
+            """.write(to: dir.file("recover.jsonl"), atomically: true, encoding: .utf8)
+        let run = try dawctl(["script", "recover.jsonl"], in: dir.url)
+        #expect(run.status == 0, "\(run.stderr)")
+        let out = try responses(run)
+        #expect(out[0].result?["loadReport"]?["recovered"] == true)
+        #expect(out[1].result == "Unsaved")
+        #expect(!FileManager.default.fileExists(atPath: dir.file("R.dawproject/autosave").path), "the save made it stale")
+
+        let after = try dawctl(["project.open", "--json", #"{"path": "R.dawproject"}"#], in: dir.url)
+        #expect(try JSONValue(parsing: Data(after.stdout.utf8))["loadReport"]?["recoveryAvailable"] == false)
     }
 
     @Test("CTL-010, CTL-012: a script stops at the first error and exits 1; --keep-going runs the rest")

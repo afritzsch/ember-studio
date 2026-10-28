@@ -70,12 +70,8 @@ public struct ProjectOpenParams: Codable, Hashable, Sendable {
 }
 
 public struct ProjectOpenResult: Codable, Hashable, Sendable {
-    public struct LoadReport: Codable, Hashable, Sendable {
-        /// Assets whose file couldn't be loaded (MODEL-046); their clips render silence.
-        public var offlineAssets: [ModelID]
-    }
-
-    public var loadReport: LoadReport
+    /// DW-107: DAWModel's report (offline assets, migration, recovery, repairs).
+    public var loadReport: ProjectLoadReport
 }
 
 public struct ProjectSaveParams: Codable, Hashable, Sendable {

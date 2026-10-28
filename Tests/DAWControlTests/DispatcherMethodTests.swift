@@ -39,15 +39,38 @@ struct DispatcherMethodTests {
         #expect(id != nil && id != "00000000-0000-0000-0000-000000000001")
     }
 
-    @Test("CTL-002 project.open / project.save are wired to ProjectStore (not implemented until T-031)")
+    @Test("CTL-002, DW-107, MODEL-046: project.save writes the folder and copies the audio in; project.open loads assets relative to it and returns the ProjectLoadReport")
     func openSave() async throws {
-        let (dispatcher, _) = TestDispatchers.fake()
+        let dir = try TempDir()
+        try TestAudio.write([[0, 0.5, 0]], sampleRate: 48_000, to: dir.file("a.wav"))
+        let (dispatcher, box) = TestDispatchers.fake(workingDirectory: dir.url)
         #expect(await dispatcher.failure(.projectSave)?.dawError == "noProject")
         _ = try await dispatcher.ok(.projectNew, ["name": "a"])
-        let save = await dispatcher.failure(.projectSave, ["path": "/tmp/x.dawproject"])
-        #expect(save?.dawError == "notImplemented")
-        let open = await dispatcher.failure(.projectOpen, ["path": "x.dawproject", "recover": true])
-        #expect(open?.dawError == "notImplemented")
+        #expect(await dispatcher.failure(.projectSave)?.dawError == "invalidArgument", "no folder yet")
+        _ = try await dispatcher.ok(.commandApply, ["command": ["type": "AddTrack", "name": "T", "kind": "audio"]])
+        _ = try await dispatcher.ok(.assetImport, ["path": "a.wav"])
+        #expect(try await dispatcher.ok(.projectSave, ["path": "P.dawproject"]) == [:])
+        let folder = dir.file("P.dawproject")
+        #expect(FileManager.default.fileExists(atPath: folder.appending(path: "project.json").path))
+        #expect(try await dispatcher.ok(.projectGet, ["path": "/assets/0/path"]) == "Audio/a.wav", "DW-124")
+        #expect(dispatcher.store?.autosavePolicy == nil, "MODEL-044: headless runs don't autosave")
+        _ = try await dispatcher.ok(.commandApply, ["command": ["type": "AddTrack", "name": "U", "kind": "audio"]])
+        #expect(try await dispatcher.ok(.projectSave) == [:], "back to the folder it was saved to")
+
+        let opened = try await dispatcher.ok(.projectOpen, ["path": "P.dawproject"])
+        #expect(opened == ["loadReport": ["offlineAssets": [], "recovered": false, "recoveryAvailable": false, "repairs": []]])
+        #expect(dispatcher.store?.project.tracks.map(\.name) == ["T", "U"])
+        let loaded = box.last.calls.compactMap { if case .loadAsset(let id, let path) = $0 { (id, path) } else { nil } }
+        #expect(loaded.count == 1 && loaded[0].0 == 3 && loaded[0].1.hasSuffix("/P.dawproject/Audio/a.wav"))
+
+        // MODEL-046: a missing file is reported, not loaded, and the project still opens.
+        try FileManager.default.removeItem(at: folder.appending(path: "Audio/a.wav"))
+        let missing = try await dispatcher.ok(.projectOpen, ["path": "P.dawproject"])
+        #expect(missing["loadReport"]?["offlineAssets"] == [3])
+        #expect(!box.last.calls.contains { if case .loadAsset = $0 { true } else { false } })
+        #expect(!FileManager.default.fileExists(atPath: folder.appending(path: "autosave").path))
+
+        #expect(await dispatcher.failure(.projectOpen, ["path": "nope.dawproject"])?.dawError == "fileIO")
         #expect(await dispatcher.failure(.projectOpen, [:])?.dawError == "invalidParams")
     }
 
