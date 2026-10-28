@@ -45,6 +45,14 @@ struct CommandRegistryTests {
         SetClip(clip: ClipProject.make().gtr.clips[1]),
         SetClipGain(clipID: 20, gain: 0.7),
         SetClipFades(clipID: 20, fadeIn: 0, fadeOut: 96),
+        SetTempoEvent(tick: 3840, bpm: 92.5),
+        RemoveTempoEvent(tick: 3840),
+        SetTimeSignature(tick: 7680, numerator: 7, denominator: 8),
+        RemoveTimeSignature(tick: 7680),
+        SetLoop(start: 0, end: 3840),
+        SetLoop(loop: nil),
+        RestoreLoop(loop: LoopRange(start: 960, end: 1920, isEnabled: false)),
+        RestoreLoop(loop: nil),
     ]
 
     @Test("MODEL-006: built-in type strings are stable and unique")
@@ -55,7 +63,8 @@ struct CommandRegistryTests {
             "AddTrack", "RemoveTrack", "RestoreTrack", "MoveTrack", "SetTrackOutput", "AddBus", "RemoveBus", "RestoreBus",
             "AddSend", "RemoveSend", "RestoreSend", "SetSendLevel", "SetSendTap", "SetSidechain", "SetParam",
             "ImportAsset", "RemoveAsset", "AddClip", "RemoveClip", "RestoreClip", "MoveClip", "ResizeClip", "SplitClip",
-            "SetClip", "SetClipGain", "SetClipFades",
+            "SetClip", "SetClipGain", "SetClipFades", "SetTempoEvent", "RemoveTempoEvent", "SetTimeSignature",
+            "RemoveTimeSignature", "SetLoop", "RestoreLoop",
         ])
         let all = CommandRegistry.registered.map { $0.type }
         #expect(Set(all).count == all.count)

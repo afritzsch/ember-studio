@@ -30,8 +30,8 @@ extension Project {
     /// in samples, so a tempo edit can shrink it; `SetLoop` checks that, not this.
     func validateLoop() throws(DAWError) {
         guard let loop else { return }
-        guard loop.start.raw >= 0, loop.end > loop.start else {
-            throw .invariant("loop [\(loop.start.raw), \(loop.end.raw)) is empty or negative")
+        guard loop.start.raw >= 0, loop.end > loop.start, loop.end <= Tick.timelineEnd else {
+            throw .invariant("loop [\(loop.start.raw), \(loop.end.raw)) is empty or off the timeline")
         }
     }
 

@@ -36,6 +36,12 @@ public enum CommandRegistry {
         SetClip.self,
         SetClipGain.self,
         SetClipFades.self,
+        SetTempoEvent.self,
+        RemoveTempoEvent.self,
+        SetTimeSignature.self,
+        RemoveTimeSignature.self,
+        SetLoop.self,
+        RestoreLoop.self,
     ]
 
     private static let table = Mutex<[String: any Command.Type]>(
