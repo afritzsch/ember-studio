@@ -26,7 +26,17 @@ module DAWEngineTestSupport {
   header "SendChecks.h"
   header "TelemetryChecks.h"
   header "TempoMapTestSupport.h"
+  header "TestNodeChecks.h"
   header "TransportChecks.h"
+  requires cplusplus
+  export *
+}
+
+// T-019: the golden tests' engine (GoldenEngineSupport.h). A module of its own because it shows
+// only public facade types, so GoldenTests import it without the engine-internal include root
+// and DAW_RT_TRAP flags that importing DAWEngineTestSupport needs.
+module DAWGoldenSupport {
+  header "GoldenEngineSupport.h"
   requires cplusplus
   export *
 }

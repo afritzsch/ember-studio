@@ -56,6 +56,8 @@ inline ClipDesc clip(NodeID player, uint64_t clipID, Tick start, Tick length, ui
 class Rig {
 public:
     Rig() : builder_(makeRegistry(), kRate, kMaxBlock) {}
+    // `extra` runs on the registry after the built-in kinds (test nodes, TEST-004).
+    explicit Rig(const std::function<void(NodeRegistry&)>& extra) : builder_(makeRegistry(extra), kRate, kMaxBlock) {}
 
     void addAsset(AudioAssetRef asset) {
         // Read the ID first: the right side of = (which empties `asset`) is sequenced first.
@@ -124,7 +126,7 @@ public:
     }
 
 private:
-    NodeRegistry makeRegistry() {
+    NodeRegistry makeRegistry(const std::function<void(NodeRegistry&)>& extra = {}) {
         NodeRegistry registry = NodeRegistry::withBuiltins();
         (void)registerBuiltinNodes(
             registry,
@@ -133,6 +135,7 @@ private:
                 return it == assets_.end() ? AudioAssetRef{} : it->second;
             },
             &engine_.telemetry());
+        if (extra) extra(registry);
         return registry;
     }
 
