@@ -151,7 +151,9 @@ public:
     // Diagnostics: cycles(), frames(), blocks() of all runs.
     const DeviceRenderer& renderer() const;
 
-    // The render thread renders while cycles() < the limit (kUnlimited: no limit).
+    // The render thread renders while cycles() < the limit (kUnlimited: no limit). To run exactly
+    // N cycles from a start, set the limit before start(): the count can't move while stopped,
+    // whereas a running unlimited thread may pass a limit computed from cycles() before it lands.
     void setCycleLimit(uint64_t totalCycles);
     uint64_t cycleLimit() const;
     // Waits until the render thread is parked with nothing to render (at the cycle limit, or its

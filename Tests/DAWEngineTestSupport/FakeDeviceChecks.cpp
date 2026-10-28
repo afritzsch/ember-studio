@@ -409,9 +409,11 @@ CheckResult fakeDeviceScriptedEvents() {
     DAW_CHECK(!lost.ok() && lost.error().code == ErrorCode::notFound);
     config.outputDevice = 0;
     config.inputEnabled = true;
+    // The limit is still kUnlimited, so cap the run before start(): set afterwards, a free-running
+    // thread can overshoot it before the store lands (it did under load).
+    driver.setCycleLimit(driver.cycles() + 10);
     DAW_CHECK(driver.start(config).ok());
     DAW_CHECK(driver.current().outputDevice == 2 && driver.current().inputChannels == 0);
-    driver.setCycleLimit(driver.cycles() + 10);
     DAW_CHECK(driver.waitUntilIdle());
     DAW_CHECK(driver.frames() == 7680 + 2560);
 
@@ -439,10 +441,11 @@ CheckResult fakeDeviceScriptedEvents() {
     // The restored device starts at its new nominal rate.
     driver.stop();
     config.outputDevice = 1;
+    driver.setCycleLimit(driver.cycles() + 4);  // before start(), as above
     DAW_CHECK(driver.start(config).ok());
     DAW_CHECK(driver.current().sampleRate == 44100.0 && driver.current().inputChannels == 2);
-    driver.setCycleLimit(driver.cycles() + 4);
     DAW_CHECK(driver.waitUntilIdle());
+    DAW_CHECK(driver.cycles() == 30 + 10 + 4);
     driver.stop();
     DAW_CHECK(driver.rtViolations() == 0);
     DAW_CHECK(engine.telemetry().snapshot().rtViolations == 0);
