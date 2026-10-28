@@ -739,8 +739,10 @@ CheckResult rtRetireQueue() {
         DAW_CHECK(scope.violations() == 0);
     }
     DAW_CHECK(retiring->retired);
-    DAW_CHECK(eventually([&] { return record.destroyed.load(); }));
-    DAW_CHECK(engine.reclaimer().rtObjectsFreed() == 1);
+    // DW-102: the reclaimer counts the object only after its destructor returns, so wait for the
+    // count; `destroyed` is set inside the destructor and could be seen first.
+    DAW_CHECK(eventually([&] { return engine.reclaimer().rtObjectsFreed() == 1; }));
+    DAW_CHECK(record.destroyed.load());
     std::lock_guard lock(record.mutex);
     DAW_CHECK(record.thread == "daw.reclaim");
     return checks;

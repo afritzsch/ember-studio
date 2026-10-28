@@ -41,7 +41,7 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 | T-016 | M | GraphDescriptionBuilder + engine sync (structural vs param); solo-in-place truth table | MODEL-020..022, MIX-006 | T-014, T-015 | done |
 | T-017 | B | DAWControl protocol + Dispatcher + `dawctl` (headless) | CTL-001..005, CTL-010, 012 | T-016 | done |
 | T-018 | B | `dawmcp` headless + `.mcp.json` + command schema tool | CTL-020..022, 024, 025 | T-017 | done |
-| T-019 | E | Golden harness, test-only nodes, M1 goldens, `scripts/test.sh` | TEST-001..004, BUILD-007 | T-017 | wip(t-019-golden-harness) |
+| T-019 | E | Golden harness, test-only nodes, M1 goldens, `scripts/test.sh` | TEST-001..004, BUILD-007 | T-017 | done |
 | T-085 | E | Engine test-support cleanup: one C++ test pattern (test-only module map), no test code in libDAWEngine, `core/`-rooted includes, isolated RT-trap counters | DW-006, 007, 014, 019 | T-003, T-007 | done |
 | T-086 | E | Rename the app to **Ember Studio**: Xcode project/target/scheme/folder `EmberStudio`, bundle ID `dev.emberstudio.EmberStudio`, log subsystem `dev.emberstudio`, all text mentions (specs, CLAUDE.md, SPEC.md text outside the decision log, scripts). Module names unchanged | — | T-004, T-010 (avoid conflicts) | done |
 | T-087 | E | Engine cleanup: RtTrap `LockHook::real` data race + TSan run (DW-028); leftover "macDAW" mentions (DW-045); `ErrorCode::cycle` with NodeIDs in `core/Result.h`, used by GraphBuilder (DW-050); `resetOnLocate` comment says locate only (DW-062) | DW-028, 045, 050, 062 | T-085, T-086 | done |
@@ -56,7 +56,7 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 | T-022 | M | Routing commands (tracks, buses, sends, outputs) + cycle rejection + validation | MODEL-005 (routing subset), MODEL-030..032 | T-016 | done |
 | T-023 | E | Sidechain edges and ports | MIX-008 | T-021 | ready |
 | T-024 | D | Metronome node | TIME-010, DSP-011 | T-008 | ready |
-| T-025 | E | M2 goldens: pan law, bus/send sum, PDC null | TEST (M2 set) | T-020, T-021, T-022, T-019 (harness) | todo |
+| T-025 | E | M2 goldens: pan law, bus/send sum, PDC null | TEST (M2 set) | T-020, T-021, T-022, T-019 (harness) | ready |
 
 ### M3 — Timeline, persistence, app shell
 | Task | Lane | Title | Requirements | Depends on | Status |
@@ -193,7 +193,7 @@ Recorded by the lead from worker reports.
 
 | ID | Found by | Description | Proposed lane | Status |
 |---|---|---|---|---|
-| DW-001 | T-001 | Golden stage in `test.sh` only counts fixtures; harness must expose `fixtures/`+`references/` as GoldenTests resources and run real comparisons | E (T-019) | todo |
+| DW-001 | T-001 | Golden stage in `test.sh` only counts fixtures; harness must expose `fixtures/`+`references/` as GoldenTests resources and run real comparisons | E (T-019) | done (T-019) |
 | DW-002 | T-001 | `test.sh` engine-objects check relies on `daw_build_rt_trap_enabled` in `Sources/DAWEngine/BuildConfig.cpp` (defined only under `DAW_RT_TRAP`) to prove BUILD-005 — keep the symbol or update the check | E (T-003) | todo |
 | DW-003 | T-001 | `include/module.modulemap` exposes only placeholder `daw/EngineFacade.h`; bridge task must keep the module map pointing at it | B (T-014) | done (T-014) |
 | DW-004 | T-001 | `.patchbay.json` setup runs `git submodule update --init --recursive`, pulling VSTGUI/docs/tutorials the build excludes; `scripts/bootstrap.sh` alone fetches only what's needed | lead | todo |
@@ -205,7 +205,7 @@ Recorded by the lead from worker reports.
 | DW-010 | T-002 | Generate compile_commands.json so editor diagnostics use the package's C++20 flags; also cover `DAWEngineTestSupport` (needs `-I Sources/DAWEngine`) | lead (low) | todo |
 | DW-011 | T-003 | Wire the trap: `RtTrap::install()` at Engine construction + `daw::RtScope` in `Engine::render` (T-004); `Telemetry::rtViolations` from `RtTrap::violationCount()` and expose `RtTrap::firstViolation()` via telemetry/dawmcp (T-006) | E (T-004, T-006) | done (T-004, T-006) |
 | DW-012 | T-003 | ENG-031 says "interpose"; dyld `__interpose` doesn't apply to the test executable or dlopen'd bundles, so the trap uses `malloc_logger` + GOT rebinding. Gaps: locks inside system libraries and `dispatch_*` aren't counted; allocations invisible under ASan (matters for TEST-007). Spec wording needs a clarification note | spec (user/lead) | todo |
-| DW-013 | T-003 | Optional: `test.sh` engine-objects stage could also assert the trap is absent from Release. `_daw_rt_trap_install` no longer exists (T-085), so retarget to `RtTrap::install`'s mangled name or close | E (T-019) | todo |
+| DW-013 | T-003 | Optional: `test.sh` engine-objects stage could also assert the trap is absent from Release. `_daw_rt_trap_install` no longer exists (T-085), so retarget to `RtTrap::install`'s mangled name or close | E (T-019) | done (T-019: `RtTrap::install` present in Debug, absent in Release) |
 | DW-014 | T-003 | Unify C++ test binding styles (T-002 `@_silgen_name` via SelfTest.h vs T-003 `dlsym`); fold into DW-006 test-support target | E (with DW-006) | done (T-085) |
 | DW-015 | T-060 | App can't use the scanner yet: embed `PluginScanner` in macDAW.app as an auxiliary executable, and expose `PluginCatalog` to the app — via a new library product (changes 01-build-layout Interfaces product list → needs approval) or through DAWModel | U + lead (with T-065) | todo |
 | DW-016 | T-060 | dawctl/dawmcp commands: scan, list plugins, list/reset blocked | B (after T-017) | todo |
@@ -215,10 +215,10 @@ Recorded by the lead from worker reports.
 | DW-020 | T-007 | `TempoMap.sampleRate` duplicates `Project.sessionSampleRate` — choose one source of truth; `SetSessionSampleRate` must rebuild the map | M (T-015) | done (T-015) |
 | DW-021 | T-007 | Map Swift `TempoMapError` into `DAWError` once it exists | M (T-015) | done (T-015) |
 | DW-022 | T-007 | Swift interop can't call `daw::Result::value()` (ref-qualified overloads); T-007 used an inline helper — facade will hit the same | B (T-014) | done (T-014) |
-| DW-023 | T-085 | `test.sh` BUILD-002 check treats every target reaching DAWEngine as Swift; `DAWEngineTestSupport` carries a no-op `swiftSettings: cxxInterop` to pass. The check should skip C-family targets | E (T-084 / T-019) | todo |
+| DW-023 | T-085 | `test.sh` BUILD-002 check treats every target reaching DAWEngine as Swift; `DAWEngineTestSupport` carries a no-op `swiftSettings: cxxInterop` to pass. The check should skip C-family targets | E (T-084 / T-019) | done (T-019: BUILD-002 check skips C-family targets; the no-op cxxInterop on DAWEngineTestSupport can go → DW-136) |
 | DW-024 | T-085 | Telemetry `rtViolations` is process-wide, so in-process engine tests asserting on it (e.g. TEST-004 AllocatingNode) see RtTrapTests' deliberate violations. Nest such tests in `RtTrapTests`, or have the Engine count from its render `RtScope::violations()` — possibly an ENG-032 clarification | E (T-004 / T-006) + spec | done (T-006) |
 | DW-025 | lead | `scripts/bootstrap.sh` can exit 141 under `pipefail`: `xcodebuild -version \| awk '… exit'` (and `\| head -n 1`) close the pipe early, so the producer gets SIGPIPE. It made T-015's worktree setup fail once, and the `bootstrap` stage of `test.sh` fail once in T-004's review | E (T-084) / lead | done (T-086) |
-| DW-026 | T-005 | Golden `gain_ramp_smoothing` for ENG-022 | E (T-019) | todo |
+| DW-026 | T-005 | Golden `gain_ramp_smoothing` for ENG-022 | E (T-019) | done (T-019) |
 | DW-027 | T-005 | ENG-023 "fader sweep → 0 publishes" test needs Engine + GraphBuilder | E/B (T-012 / T-014) | done (T-014) |
 | DW-028 | T-005 | RtTrap data race: `LockHook::real` (RtTrap.cpp ~146-154) is a plain static written by `install()` while hooked locks read it on other threads; TSan flags it and one TSan run hung (malloc_logger/GOT rebinding vs TSan interceptors, unconfirmed). Make it atomic or set once (`std::call_once`). Blocks TEST-007's TSan job | E (T-003 follow-up) | done (T-087; TSan run: no hang, 0 races; see DW-065) |
 | DW-029 | T-005 | Free a node's ParamIDs only after the last graph referencing them is retired (a freed slot is reused at once, so an old graph could read another param for a block) | B / M (T-014, MODEL-022) | done (T-014) |
@@ -294,7 +294,7 @@ Recorded by the lead from worker reports.
 | DW-099 | T-040 | MIDI routing in RenderGraph/GraphBuilder: MIDI edges carry no data (player `midiOut` capacity 0, instrument `midiIn` empty). Needs per-step MIDI storage of fixed capacity that never shrinks between blocks (no-hanging-notes guarantee) and MIDI edge delay for PDC (05 "PDC semantics") | E | todo |
 | DW-100 | T-040 | Sampler should handle CC 123 (All Notes Off): a re-created MidiClipPlayer (DW-051 note edit while playing) sends it on all 16 channels. DSP-023 lists only CC64 and pitch bend | D (T-041) | todo |
 | DW-101 | T-040 | DSP-003 golden (`midi_loop_wrap`) once the golden harness, MIDI routing and a sampler exist | D/E (T-019, T-041) | todo |
-| DW-102 | T-040 | Flaky "ENG-014: RT-retired objects are freed on daw.reclaim" (EngineChecks.cpp:743, `rtRetireQueue`): waits for `destroyed`, then reads `rtObjectsFreed()`, which the reclaimer bumps only after the destructor returns. Wait on `rtObjectsFreed() == 1` instead | E | todo |
+| DW-102 | T-040 | Flaky "ENG-014: RT-retired objects are freed on daw.reclaim" (EngineChecks.cpp:743, `rtRetireQueue`): waits for `destroyed`, then reads `rtObjectsFreed()`, which the reclaimer bumps only after the destructor returns. Wait on `rtObjectsFreed() == 1` instead | E | done (T-019) |
 | DW-103 | T-040 | MidiClipPlayer must chase notes (user decision): playback starting inside a note (play, locate, loop start) sounds it from that frame for its remaining length. T-040 shipped without chase; keep the no-hanging-notes guarantee and the capacity reservation | D (with T-041) | todo |
 | DW-104 | T-040 | `BuiltinNodes.h` doc comment doesn't list midiClipPlayer | D (small) | todo |
 | DW-105 | T-017 | `ImportAsset` command `{"type": "ImportAsset", "asset": AssetRef}` (reserve `asset.id`, append; inverse removes). `asset.import` loads into the engine under `project.ids.next`, then performs it; returns `notImplemented` until registered | M (T-030) | done (T-030) |
@@ -326,3 +326,8 @@ Recorded by the lead from worker reports.
 | DW-131 | T-018 | Schema probe can't see through tagged unions with a private `Kind` enum or non-`CaseIterable` string enums; new ones need a `JSONSchemaDescribing` entry in `Sources/DAWControl/Schema/ModelSchemas.swift` or the enum made `CaseIterable` (`SchemaTests` fails naming the type). Suggest `CaseIterable` on DAWModel wire enums (`SignalTap`, `Track.Kind`/`Monitoring`, `ParamTarget.StripParam`, `ExportSpec.FileType`/`SampleFormat`, `DeviceDriverKind`, `DeviceEvent.Kind`) | M (small) | todo |
 | DW-132 | T-018 | `dawctl` keeps its own copy of the fixture-folder lookup; use `ControlFixtures.defaultDirectories()` (DAWControl) | B (small) | todo |
 | DW-133 | T-018 | CTL-031 progress notifications for long renders aren't sent over MCP yet; `daw_session_mode` (CTL-023) and attach stay with T-032 | B (T-032) | todo |
+| DW-134 | T-019 | `EngineClient` can't take a facade built elsewhere, so GoldenTests has `GoldenEngine` (an `EngineProtocol` copy of EngineClient using its `description(for:)`/`error(_:)` via `@testable`). Add `@_spi(Testing) init(facade:mode:)` to EngineClient and delete the copy; until then every `EngineProtocol` change must update `Tests/GoldenTests/GoldenEngine.swift` | M/B (small) | todo |
+| DW-135 | T-019 | dawctl/dawmcp run golden fixtures but lack the test-only nodes, so `@node` fixtures render silence there. Document in 14's recipe, or offer a test-node engine in a test-only dawmcp build | B / lead (14) | todo |
+| DW-136 | T-019 | Drop `DAWEngineTestSupport`'s no-op `swiftSettings: cxxInterop` (and comment) now that the BUILD-002 check skips C-family targets | E (small, Package.swift) | todo |
+| DW-137 | T-019 | Real-device `DeviceDriverTests` sine test depends on the machine's audio output; with `DAW_SKIP_DEVICE_TESTS=1` it reports "no default output device", misleading when the device exists but delivers no IO cycles. Detect a device that doesn't pull and skip with that reason, or move hardware tests to a non-blocking stage | E (T-084) | todo |
+| DW-138 | T-019 | `TelemetryChecks` (AllocatingNode) and `PdcChecks` (FakeLatencyNode/SourceNode) keep private test-node copies; switch to `TestNodes.h` | E (small) | todo |
