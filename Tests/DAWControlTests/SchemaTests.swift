@@ -102,6 +102,8 @@ struct SchemaTests {
         try check(Track.Monitoring.self)
         try check(ExportSpec.FileType.self)
         try check(ExportSpec.SampleFormat.self)
+        try check(DeviceDriverKind.self)
+        try check(DeviceEvent.Kind.self)
         // Tagged unions: every branch's smallest instance decodes.
         func branches<T: Decodable>(_ type: T.Type) throws {
             let oneOf = try #require(JSONSchema.strict(of: type)["oneOf"]?.arrayValue, "\(type)")

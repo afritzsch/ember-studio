@@ -99,3 +99,35 @@ extension TestFixtureParams: JSONSchemaDocumented {
         ["name": "<name>.jsonl in the fixture folders (Tests/GoldenTests/fixtures); letters, digits, _ and -"]
     }
 }
+
+extension EngineParams: JSONSchemaDocumented {
+    public static var jsonSchemaDocs: [String: String] {
+        [
+            "mode": "offline (default, deterministic) or realtime (a device driver renders; needed for device.*, transport.wait)",
+            "driver": "Realtime only. Default fake (made-up devices driven by device.simulate); coreAudio plays through real hardware",
+            "outputDevice": "Realtime only: a device id from device.list. Default 0, the default output",
+            "bufferFrames": "Realtime only, 32…2048. Default 256",
+        ]
+    }
+}
+
+extension DeviceSetParams: JSONSchemaDocumented {
+    public static var jsonSchemaDocs: [String: String] {
+        [
+            "outputDevice": "A device id from device.list. Default 0, the default output",
+            "inputDevice": "Default 0, the default input",
+            "sampleRate": "Default 0: keep the session rate if the device runs it; another rate becomes the session rate (DW-079)",
+            "bufferFrames": "32…2048. Default: unchanged",
+        ]
+    }
+}
+
+extension DeviceSimulateParams: JSONSchemaDocumented {
+    public static var jsonSchemaDocs: [String: String] {
+        [
+            "kind": "Fake driver only. deviceLost: the device goes away (the engine falls back to the default, D-26)",
+            "deviceID": "Default 0: the running device",
+            "sampleRate": "sampleRateChanged: a rate the device supports",
+        ]
+    }
+}

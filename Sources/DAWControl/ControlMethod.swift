@@ -23,6 +23,9 @@ public enum ControlMethod: String, CaseIterable, Hashable, Sendable {
     case engineTelemetry = "engine.telemetry"
     case engineEvents = "engine.events"
     case engineParamInfo = "engine.paramInfo"
+    case deviceList = "device.list"
+    case deviceSet = "device.set"
+    case deviceSimulate = "device.simulate"
     case uiState = "ui.state"
     case uiSnapshot = "ui.snapshot"
     case uiPerform = "ui.perform"
@@ -46,7 +49,7 @@ public enum ControlMethod: String, CaseIterable, Hashable, Sendable {
         case .commandApply: CommandApplyParams.self
         case .commandBatch: CommandBatchParams.self
         case .commandSchema: CommandSchemaParams.self
-        case .undo, .redo, .transportPlay, .transportStop, .engineTelemetry, .uiState: NoParams.self
+        case .undo, .redo, .transportPlay, .transportStop, .engineTelemetry, .uiState, .deviceList: NoParams.self
         case .transportLocate: TransportLocateParams.self
         case .transportSetLoop: TransportSetLoopParams.self
         case .transportRecord: TransportRecordParams.self
@@ -57,6 +60,8 @@ public enum ControlMethod: String, CaseIterable, Hashable, Sendable {
         case .audioCompare: AudioCompareParams.self
         case .engineEvents: EngineEventsParams.self
         case .engineParamInfo: EngineParamInfoParams.self
+        case .deviceSet: DeviceSetParams.self
+        case .deviceSimulate: DeviceSimulateParams.self
         case .uiSnapshot: UISnapshotParams.self
         case .uiPerform: UIPerformParams.self
         case .testFixture: TestFixtureParams.self
@@ -66,8 +71,8 @@ public enum ControlMethod: String, CaseIterable, Hashable, Sendable {
     /// One line for `dawctl methods` and tool descriptions.
     public var summary: String {
         switch self {
-        case .projectNew: "Start a new empty project {name, sampleRate?} → {projectID}"
-        case .projectOpen: "Open a project folder {path, recover?} → {loadReport}"
+        case .projectNew: "Start a new empty project {name, sampleRate?, engine?} → {projectID}"
+        case .projectOpen: "Open a project folder {path, recover?, engine?} → {loadReport}"
         case .projectSave: "Save the project {path?} → {}"
         case .projectGet: "The project JSON, or the subtree at a JSON Pointer {path?}"
         case .commandApply: "Apply one Command {command: {type, …}} → {ok, createdIDs, label}"
@@ -88,6 +93,9 @@ public enum ControlMethod: String, CaseIterable, Hashable, Sendable {
         case .engineTelemetry: "Engine telemetry, per-node latency and rtViolations"
         case .engineEvents: "Engine events after a cursor {since?} → {events, next}"
         case .engineParamInfo: "Param info of a node kind {kind}"
+        case .deviceList: "Audio devices and the running one → {devices, outputDeviceID, driver}"
+        case .deviceSet: "Switch the output/input device or rate {outputDevice?, inputDevice?, sampleRate?, bufferFrames?} (realtime engine)"
+        case .deviceSimulate: "Make the fake device lose, restore, change rate or overload {kind, deviceID?, sampleRate?} → {outputDeviceID, sampleRate, events}"
         case .uiState: "UI state dump (attach only)"
         case .uiSnapshot: "Window snapshot as PNG {path?} → {pngPath} (attach only)"
         case .uiPerform: "Click or toggle a control {accessibilityId, action} (attach only)"

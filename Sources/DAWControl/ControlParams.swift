@@ -19,10 +19,40 @@ public struct ProjectNewParams: Codable, Hashable, Sendable {
     public var name: String
     /// Default 48000.
     public var sampleRate: Double?
+    /// Default: offline (deterministic, CTL-004).
+    public var engine: EngineParams?
 
-    public init(name: String, sampleRate: Double? = nil) {
+    public init(name: String, sampleRate: Double? = nil, engine: EngineParams? = nil) {
         self.name = name
         self.sampleRate = sampleRate
+        self.engine = engine
+    }
+}
+
+/// DW-115: the engine a new or opened project runs on.
+public struct EngineParams: Codable, Hashable, Sendable {
+    public enum Mode: String, Codable, Hashable, Sendable, CaseIterable {
+        /// Renders only through `render.offline`; deterministic (CTL-004).
+        case offline
+        /// A device driver renders in real time (`transport.wait`, `device.*`).
+        case realtime
+    }
+
+    /// Default offline.
+    public var mode: Mode?
+    /// Realtime only. Default `fake`: the made-up devices `device.simulate` drives (T-051), so a
+    /// headless tool never plays through the speakers unless asked to.
+    public var driver: DeviceDriverKind?
+    /// Realtime only: `AudioDeviceInfo.id`; default 0, the default output.
+    public var outputDevice: UInt32?
+    /// Realtime only, 32…2048. Default 256.
+    public var bufferFrames: UInt32?
+
+    public init(mode: Mode? = nil, driver: DeviceDriverKind? = nil, outputDevice: UInt32? = nil, bufferFrames: UInt32? = nil) {
+        self.mode = mode
+        self.driver = driver
+        self.outputDevice = outputDevice
+        self.bufferFrames = bufferFrames
     }
 }
 
@@ -35,6 +65,8 @@ public struct ProjectOpenParams: Codable, Hashable, Sendable {
     public var path: String
     /// MODEL-045: open the autosave instead if it is newer. Default false.
     public var recover: Bool?
+    /// Default: offline.
+    public var engine: EngineParams?
 }
 
 public struct ProjectOpenResult: Codable, Hashable, Sendable {
@@ -238,6 +270,49 @@ public struct EngineEventsResult: Codable, Hashable, Sendable {
 
 public struct EngineParamInfoParams: Codable, Hashable, Sendable {
     public var kind: NodeKind
+}
+
+// MARK: device.* (DW-115)
+
+public struct DeviceListResult: Codable, Hashable, Sendable {
+    public var devices: [AudioDeviceInfo]
+    /// The running output (`AudioDeviceInfo.id`); 0 while stopped.
+    public var outputDeviceID: UInt32
+    /// The engine's driver; nil for an offline engine.
+    public var driver: DeviceDriverKind?
+}
+
+/// `setDevice` (IO-003/004). The driver kind is the engine's; it can't change.
+public struct DeviceSetParams: Codable, Hashable, Sendable {
+    /// `AudioDeviceInfo.id`; default 0, the default output.
+    public var outputDevice: UInt32?
+    /// Default 0, the default input.
+    public var inputDevice: UInt32?
+    /// Default 0: keep the session rate if the device runs it. Another rate becomes the session
+    /// rate (DW-079).
+    public var sampleRate: Double?
+    /// 32…2048. Default: the current one.
+    public var bufferFrames: UInt32?
+}
+
+/// `simulateDeviceEvent` (fake driver only).
+public struct DeviceSimulateParams: Codable, Hashable, Sendable {
+    public var kind: DeviceEvent.Kind
+    /// Default 0: the running device.
+    public var deviceID: UInt32?
+    /// `sampleRateChanged`: a rate the device supports.
+    public var sampleRate: Double?
+}
+
+/// After `device.set` / `device.simulate`: where the engine ended up, and the events it raised.
+public struct DeviceStateResult: Codable, Hashable, Sendable {
+    /// 0: none running.
+    public var outputDeviceID: UInt32
+    public var deviceRunning: Bool
+    /// The engine's session rate now (it moves when a device can't run the old one).
+    public var sampleRate: Double
+    /// The engine events the call raised (`deviceChanged`, …), also kept for `engine.events`.
+    public var events: [EngineEventRecord]
 }
 
 // MARK: ui.* (attach only, CTL-005)

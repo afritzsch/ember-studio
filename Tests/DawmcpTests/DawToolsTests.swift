@@ -18,7 +18,8 @@ struct DawToolsTests {
         #expect(Set(tools.map(\.name)).count == tools.count)
         for name in ["daw_project_new", "daw_command_apply", "daw_command_schema", "daw_render_offline", "daw_audio_analyze",
                      "daw_audio_compare", "daw_engine_telemetry", "daw_ui_snapshot", "daw_ui_state", "daw_ui_perform",
-                     "daw_test_fixture", "daw_transport_set_loop", "daw_engine_param_info", "daw_undo"]
+                     "daw_test_fixture", "daw_transport_set_loop", "daw_engine_param_info", "daw_undo", "daw_device_list",
+                     "daw_device_set", "daw_device_simulate"]
         {
             #expect(tools.contains { $0.name == name }, "\(name)")
         }
@@ -136,6 +137,22 @@ struct DawToolsTests {
         let telemetry = try await tools.ok("daw_engine_telemetry")
         #expect(telemetry["rtViolations"] == 0)
         #expect(telemetry["renderRtViolations"] == 0)
+    }
+
+    @Test("DW-115: a scripted device loss through the tools: deviceChanged in engine.events, telemetry outputDeviceID, 0 RT violations")
+    func deviceLoss() async throws {
+        let tools = DawTools(dispatcher: Dispatcher())
+        _ = try await tools.ok("daw_project_new", ["name": "dev", "engine": ["mode": "realtime", "driver": "fake"]])
+        #expect(try await tools.ok("daw_engine_telemetry")["outputDeviceID"] == 1)
+        let lost = try await tools.ok("daw_device_simulate", ["kind": "deviceLost"])
+        #expect(lost["outputDeviceID"] == 2)
+        let events = try await tools.ok("daw_engine_events")
+        let change = try #require(events["events"]?.arrayValue?.first { $0["event"]?["kind"] == "deviceChanged" })
+        #expect(change["event"]?["device"]?["reason"] == "deviceLost")
+        #expect(change["event"]?["device"]?["previousDeviceID"] == 1 && change["event"]?["device"]?["deviceID"] == 2)
+        let telemetry = try await tools.ok("daw_engine_telemetry")
+        #expect(telemetry["outputDeviceID"] == 2 && telemetry["deviceRunning"] == true)
+        #expect(telemetry["rtViolations"] == 0)
     }
 
     /// Renders the first second and returns its peak (dBFS), skipping the first block's ramps.

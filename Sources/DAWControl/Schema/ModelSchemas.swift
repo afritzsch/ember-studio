@@ -91,3 +91,15 @@ extension ExportSpec.FileType: JSONSchemaDescribing {
 extension ExportSpec.SampleFormat: JSONSchemaDescribing {
     public static var jsonSchema: JSONValue { JSONSchema.stringEnum(["float32", "int24", "int16"]) }
 }
+
+extension DeviceDriverKind: JSONSchemaDescribing {
+    public static var jsonSchema: JSONValue {
+        JSONSchema.stringEnum(["fake", "coreAudio"], description: "fake: two made-up devices (1 \"Fake Device A\", 2 \"Fake Device B\", 44.1 kHz only)")
+    }
+}
+
+extension DeviceEvent.Kind: JSONSchemaDescribing {
+    public static var jsonSchema: JSONValue {
+        JSONSchema.stringEnum(["deviceLost", "deviceRestored", "sampleRateChanged", "processorOverload"])
+    }
+}
