@@ -48,6 +48,15 @@ IDs are `UInt64`, allocated by `IDAllocator` stored in the project (never reused
 | MODEL-021 | After each Command (or gesture end), the store diffs whether structure changed. Structural change → build a description → `EngineFacade.applyGraph` (debounced 10 ms, coalesced). Param-only change → `EngineFacade.setParam` (no rebuild). | Test: SetParam does not call applyGraph |
 | MODEL-022 | `ParamID` allocation: the model asks the facade for ParamIDs per device slot when it is created and stores them in runtime-only state (not persisted). On load, they are reallocated. | — |
 
+**Engine sync semantics (clarified in T-016).**
+- *NodeIDs* (`GraphNodeID`): a channel strip has its track's, bus's or master's ID, so `meter(track.id)` reads the track meter. A device slot has the slot's ID, and a send's `gain` node has the send's ID. Nodes without a model entity get the owner's ID with a role in the top 8 bits: a track's clip player is `source`, a bus's or the master's summing input (`NodeKind.bus`) is `input`, and the master node is `output`. Edge IDs hash `(from, to, kind)`, so an edge whose ends don't change keeps its ID (MIX-022).
+- *Sends* (agreed with T-020): post-fader is `strip → gain(send) → bus input`. Pre-fader taps the node that feeds the strip instead (the last insert, or the source/instrument).
+- *Structural vs param-only*: a change is structural exactly when the built `EngineGraph` differs from the last one applied. Param values (strip gain/pan/mute/phase, send levels, device params) never enter the graph. They are diffed against the last written values and sent with `setParam`. Structural changes inside a gesture are applied too, coalesced per 10 ms window.
+- *Param slots*: strips get 4 (gain 0, pan 1, mute 2, phase 3), sends get 1 (level), and the master node gets 1 (limiter). Device slots get their kind's ParamInfo count, or as many as their stored values need. A slot is freed after the graph without its node is applied.
+- *Solo (MIX-006)*: soloing a track or a bus counts. A channel stays audible if it is soloed, upstream of a soloed channel or downstream of one, following outputs and sends but not sidechains. A channel's own mute always wins, and solo never mutes the master. A muted channel's send levels are written as 0, so a pre-fader send can't leak a muted channel.
+- *Clip players (DW-072)*: a player gets the next `configVersion` when its clips or notes differ from the applied graph, or when an `assetLoaded` event names an asset its clips use.
+- *Left out of the graph*: bypassed devices (until host bypass, PLUG-018), outputs and sends to a missing bus, and a MIDI track's player when it has no active instrument.
+
 ### Validation
 | ID | Requirement | Acceptance |
 |---|---|---|
