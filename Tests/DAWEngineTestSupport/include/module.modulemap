@@ -17,6 +17,7 @@ module DAWEngineTestSupport {
   header "DeviceMonitorChecks.h"
   header "EngineChecks.h"
   header "FacadeChecks.h"
+  header "FacadeDeviceChecks.h"
   header "FakeDeviceChecks.h"
   header "GraphChecks.h"
   header "MidiClipPlayerChecks.h"

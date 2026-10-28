@@ -468,8 +468,11 @@ CheckResult facadeRealtimeDriverSeam() {
         facade.armInput(8, 1, false);
         DAW_CHECK(!h.driver->config().inputEnabled && h.driver->log().size() == 7);
         DAW_CHECK(h.driver->running());
+        // DW-079: another rate makes it the session rate, but this test driver only ever runs at
+        // 44.1 kHz, so the restart is refused and the device stays stopped.
         config.sampleRate = 96000;
         DAW_CHECK(facade.setDevice(config).code == FacadeErrorCode::unsupported);
+        DAW_CHECK(facade.telemetry().sampleRate == 96000.0 && !facade.telemetry().deviceRunning);
 
         h.driver->failStarts(true);
         config.sampleRate = 0;
@@ -489,6 +492,7 @@ CheckResult facadeRealtimeDriverSeam() {
             EngineEventPOD event;
             DAW_CHECK(facade->pollEvents(&event, 1) == 1);
             DAW_CHECK(event.type == EngineEventType::deviceChanged && event.error.code == FacadeErrorCode::io);
+            DAW_CHECK(event.device.reason == DeviceChangeReason::startFailed && event.device.deviceID == 0);  // T-051
             releaseFacade(facade);
         }
     }

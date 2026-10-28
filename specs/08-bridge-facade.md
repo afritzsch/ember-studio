@@ -69,8 +69,8 @@ These amend the contract above; where they differ, they win.
 Affected: T-016 (builds `EngineGraph`, reacts to `assetLoaded`), T-017/T-018 (dispatcher uses `EngineProtocol`, `waitForGraph`, events), T-011/T-051 (driver adapter seam `facade/DriverAdapter.h` with `CoreAudioDriverAdapter`; `DriverConfigPOD`; IO-021/023 events).
 
 
-### Contract deltas (T-051, **PROPOSED** — awaiting lead/user approval)
-IO-021 (7) asks for `EngineEvent.deviceChanged{reason}`, but `EngineEventPOD` has no place for a reason or for which device the engine moved to. dawctl/dawmcp also can't reach a fake device to exercise the hot-swap (DW-089), so IO-021 couldn't be driven through the control layer as CONV §5.5 asks. Everything below is **additive**: existing fields, cases and calls keep their meaning, and current Swift code compiles unchanged. The engine side is built in `io/DeviceMonitor.h` (T-051, committed) and isn't wired into the facade until this is approved.
+### Contract deltas (T-051, accepted by the user 2026-10-28)
+IO-021 (7) asks for `EngineEvent.deviceChanged{reason}`, but `EngineEventPOD` has no place for a reason or for which device the engine moved to. dawctl/dawmcp also can't reach a fake device to exercise the hot-swap (DW-089), so IO-021 couldn't be driven through the control layer as CONV §5.5 asks. Everything below is **additive**: existing fields, cases and calls keep their meaning, and current Swift code compiles unchanged. The engine side is `io/DeviceMonitor.h`; `facade/DeviceHost` implements its host.
 
 1. **`deviceChanged` says why and what it changed to.** New in `EngineFacade.h`:
    ```cpp
@@ -103,7 +103,7 @@ IO-021 (7) asks for `EngineEvent.deviceChanged{reason}`, but `EngineEventPOD` ha
    - The facade owns a `DeviceMonitor`. Its host side does steps (1) to (7). Notifications come from `CoreAudioDeviceListener` (or the fake driver's queue) on a new `daw.device` thread, which runs the sequence under the facade lock. That thread isn't in the CONV §3 table; see Discovered work.
    - **DW-079:** `setDevice` with a different `sampleRate` now changes the session rate through the same step (5) as a fallback: transport stops, the graph is rebuilt at the new rate (a new `GraphCompiler`, since its rate is fixed at construction), and the driver restarts. Re-resampling loaded assets (IO-033) stays T-056's. Until then, assets loaded before a rate change keep their old rate, and the facade says so with an `assetsReloaded` event carrying `error = unsupported`.
 
-Affected: T-051 (facade wiring after approval), T-022 or whoever owns `Sources/DAWModel/Engine/` next (Swift `EngineEvent` / `TelemetrySnapshot` / `DriverConfig` mirrors in `EngineProtocol.swift`, `EngineClient.swift`, `FakeEngine`), T-017/T-018 (dawctl/dawmcp: select the fake driver, `device.simulate` command, show `deviceChanged`), T-055 (device toasts read `reason`/`deviceID`), T-056 (IO-033 replaces the asset placeholder in point 4).
+Affected: T-051 (facade wiring, and the Swift `EngineEvent` / `TelemetrySnapshot` / `DriverConfig` mirrors in `EngineProtocol.swift`, `EngineClient.swift`, `FakeEngine`), T-018 (dawctl/dawmcp: select the fake driver, `device.simulate` command, show `deviceChanged`), T-055 (device toasts read `reason`/`deviceID`), T-056 (IO-033 replaces the asset placeholder in point 4).
 
 ## Status
 | ID | status | test |

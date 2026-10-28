@@ -9,7 +9,7 @@
 //   (5) if that device can't run at the session rate, switch the session to the rate it runs at
 //       (the host re-prepares nodes, re-resamples assets (IO-033) and rebuilds the graph);
 //       otherwise keep the session rate, which the driver sets on the device again,
-//   (6) restart the driver, (7) report a DeviceChange (EngineEvent.deviceChanged{reason}).
+//   (6) restart the driver, (7) report a DeviceSwap (EngineEvent.deviceChanged{reason}).
 //
 // What triggers it:
 //   - deviceLost: the output device (or the separate input device) isn't alive any more
@@ -26,7 +26,7 @@
 //
 // IO-022: it runs on whichever non-RT thread calls handle(), never on the audio thread; the audio
 // thread only produces notifications through a lock-free queue (FakeDeviceDriver) or not at all
-// (CoreAudio's arrive on HAL threads). DeviceChanges reach the UI as polled events.
+// (CoreAudio's arrive on HAL threads). DeviceSwaps reach the UI as polled deviceChanged events (facade).
 //
 // Threads: one thread at a time calls handle(), and the host's state must not change meanwhile
 // (the facade holds its lock).
@@ -40,7 +40,8 @@
 
 namespace daw {
 
-enum class DeviceChangeReason : uint8_t {
+// The facade maps these onto EngineFacade.h's DeviceChangeReason (08 T-051 delta).
+enum class DeviceSwapReason : uint8_t {
     deviceLost,
     sampleRateChanged,
     defaultOutputChanged,
@@ -48,8 +49,8 @@ enum class DeviceChangeReason : uint8_t {
 };
 
 // IO-021 (7): what the sequence did, for a UI toast.
-struct DeviceChange {
-    DeviceChangeReason reason = DeviceChangeReason::deviceLost;
+struct DeviceSwap {
+    DeviceSwapReason reason = DeviceSwapReason::deviceLost;
     AudioDeviceRef previousDevice = 0;  // the output device before (0: none was running)
     AudioDeviceRef device = 0;          // the output device running now (0: none, see error)
     double previousSessionRate = 0;
@@ -89,7 +90,7 @@ public:
     // (6). `config` becomes the requested config, so later restarts (say, arming input) keep the
     // fallback device and the session rate.
     virtual Result<void> startDriver(const DriverConfig& config) = 0;
-    virtual void deviceChanged(const DeviceChange& change) = 0;     // (7)
+    virtual void deviceChanged(const DeviceSwap& change) = 0;     // (7)
 };
 
 class DeviceMonitor {
@@ -99,16 +100,16 @@ public:
     DeviceMonitor& operator=(const DeviceMonitor&) = delete;
 
     // Reacts to one notification. Returns the change if it ran the sequence and reported it.
-    std::optional<DeviceChange> handle(const DeviceNotification& notification);
+    std::optional<DeviceSwap> handle(const DeviceNotification& notification);
 
     // Diagnostics: sequences run (reported or not), and retries that found no device yet.
     uint64_t swaps() const { return swaps_; }
     uint64_t failedRetries() const { return failedRetries_; }
 
 private:
-    std::optional<DeviceChangeReason> trigger(const DeviceNotification& n) const;
+    std::optional<DeviceSwapReason> trigger(const DeviceNotification& n) const;
     // `report`: whether a failed restart is reported (not for quiet retries).
-    std::optional<DeviceChange> swap(DeviceChangeReason reason, bool report);
+    std::optional<DeviceSwap> swap(DeviceSwapReason reason, bool report);
 
     DeviceMonitorHost& host_;
     uint64_t swaps_ = 0;

@@ -9,12 +9,15 @@
 // Threads: the facade calls every method from non-RT threads, one at a time (under its lock).
 
 #include <atomic>
+#include <cstddef>
 #include <memory>
 #include <vector>
 
 #include "core/Engine.h"
 #include "core/Result.h"
 #include "daw/EngineFacade.h"
+#include "io/CoreAudioDeviceListener.h"
+#include "io/DeviceNotification.h"
 #include "io/DriverConfig.h"
 #include "io/FakeDeviceDriver.h"
 
@@ -35,10 +38,43 @@ public:
     virtual double sampleRate() const = 0;
     virtual uint32_t bufferFrames() const = 0;
     virtual std::vector<DeviceInfoPOD> devices() const = 0;
+
+    // MARK: IO-020..023 (T-051). The defaults suit a driver without device events (a test
+    // adapter): nothing is ever lost, nothing is notified.
+
+    // What start() resolved; zeros while not running. The default knows only rate and buffer.
+    virtual RunningConfig current() const {
+        RunningConfig config;
+        if (running()) {
+            config.sampleRate = sampleRate();
+            config.bufferFrames = bufferFrames();
+        }
+        return config;
+    }
+    // Devices as they are now, for DeviceMonitor (IO-021 (4), (5)).
+    virtual bool deviceAlive(AudioDeviceRef) const { return true; }
+    virtual AudioDeviceRef defaultOutputDevice() const { return 0; }
+    virtual Result<DeviceCaps> outputCaps(AudioDeviceRef) const {
+        return makeError(ErrorCode::notFound, "this driver can't describe its devices");
+    }
+    // IO-020: device notifications since the last call (one consumer: the facade).
+    virtual std::size_t pollNotifications(DeviceNotification*, std::size_t) { return 0; }
+    // IO-023: xruns by source, since the adapter was made.
+    virtual uint64_t processorOverloads() const { return 0; }
+    virtual uint64_t renderOverruns() const { return 0; }
+    // DW-089: plays a made-up device event; unsupported except on the fake device.
+    virtual Result<void> simulate(const FakeDeviceEvent&) {
+        return makeError(ErrorCode::unsupported, "device events can only be simulated on the fake device driver");
+    }
 };
 
-// The production driver for realtime mode: CoreAudioDriver (T-011).
+// The production driver for realtime mode: CoreAudioDriver (T-011), with a
+// CoreAudioDeviceListener that watches the devices it runs on after every start (IO-020).
 std::unique_ptr<DriverAdapter> makeDefaultDriverAdapter();
+
+// DeviceDriverKind::fake (DW-089): devices 1 "Fake Device A" (44.1/48/88.2/96 kHz, nominal 48 kHz)
+// and 2 "Fake Device B" (44.1 kHz only), both stereo in and out, paced in real time.
+FakeDeviceSpec defaultFakeDeviceSpec();
 
 // TEST-005: a FakeDeviceDriver as a DriverAdapter, so a realtime facade runs on made-up devices
 // on its own render thread (FacadeOptions::driver). Like CoreAudioDriverAdapter, the driver is
@@ -54,12 +90,22 @@ public:
     double sampleRate() const override;
     uint32_t bufferFrames() const override;
     std::vector<DeviceInfoPOD> devices() const override;
+    RunningConfig current() const override;
+    bool deviceAlive(AudioDeviceRef device) const override;
+    AudioDeviceRef defaultOutputDevice() const override;
+    Result<DeviceCaps> outputCaps(AudioDeviceRef device) const override;
+    std::size_t pollNotifications(DeviceNotification* out, std::size_t max) override;
+    uint64_t processorOverloads() const override;
+    uint64_t renderOverruns() const override;
+    Result<void> simulate(const FakeDeviceEvent& event) override;
 
     // The driver, for pacing, scripting and polling it from tests (any thread); null until the
     // first start(). It lives as long as the adapter, i.e. as long as the facade that owns it.
     FakeDeviceDriver* driver() const { return driver_.load(std::memory_order_acquire); }
 
 private:
+    std::vector<FakeDeviceState> states() const;
+
     FakeDeviceSpec spec_;
     Engine* engine_ = nullptr;
     std::unique_ptr<FakeDeviceDriver> owned_;

@@ -120,7 +120,7 @@ public:
     std::vector<pthread_t> threads;
     std::vector<DriverConfig> starts;
     std::vector<double> rateChanges;
-    std::vector<DeviceChange> changes;
+    std::vector<DeviceSwap> changes;
 
     bool deviceWanted() const override { return wanted; }
     DriverConfig requestedConfig() const override { return requested; }
@@ -175,7 +175,7 @@ public:
         if (resolved.outputDevice == 0 && defaultOverride) resolved.outputDevice = *defaultOverride;
         return driver_.start(resolved);
     }
-    void deviceChanged(const DeviceChange& change) override {
+    void deviceChanged(const DeviceSwap& change) override {
         record(Step::deviceChanged);
         changes.push_back(change);
     }
@@ -271,8 +271,8 @@ CheckResult deviceMonitorLossFallsBack() {
     }
     DAW_CHECK(host.changes.size() == 1);
     if (host.changes.size() == 1) {
-        const DeviceChange& c = host.changes[0];
-        DAW_CHECK(c.reason == DeviceChangeReason::deviceLost && !c.error);
+        const DeviceSwap& c = host.changes[0];
+        DAW_CHECK(c.reason == DeviceSwapReason::deviceLost && !c.error);
         DAW_CHECK(c.previousDevice == 1 && c.device == 2);
         DAW_CHECK(c.previousSessionRate == kRate && c.sessionRate == kRate);
     }
@@ -316,8 +316,8 @@ CheckResult deviceMonitorRateChangeKeepsSessionRate() {
     DAW_CHECK(host.starts.size() == 1 && host.starts[0].outputDevice == 0 && host.starts[0].sampleRate == kRate);
     DAW_CHECK(host.changes.size() == 1);
     if (host.changes.size() == 1) {
-        const DeviceChange& c = host.changes[0];
-        DAW_CHECK(c.reason == DeviceChangeReason::sampleRateChanged && !c.error);
+        const DeviceSwap& c = host.changes[0];
+        DAW_CHECK(c.reason == DeviceSwapReason::sampleRateChanged && !c.error);
         DAW_CHECK(c.previousDevice == 1 && c.device == 1 && c.sessionRate == kRate);
     }
     DAW_CHECK(driver.waitUntilIdle());
@@ -352,8 +352,8 @@ CheckResult deviceMonitorFallbackChangesSessionRate() {
     DAW_CHECK(host.starts.size() == 1 && host.starts[0].sampleRate == 44100.0);
     DAW_CHECK(host.changes.size() == 1);
     if (host.changes.size() == 1) {
-        const DeviceChange& c = host.changes[0];
-        DAW_CHECK(c.reason == DeviceChangeReason::deviceLost && !c.error && c.device == 2);
+        const DeviceSwap& c = host.changes[0];
+        DAW_CHECK(c.reason == DeviceSwapReason::deviceLost && !c.error && c.device == 2);
         DAW_CHECK(c.previousSessionRate == kRate && c.sessionRate == 44100.0);
     }
     DAW_CHECK(driver.waitUntilIdle());
@@ -381,8 +381,8 @@ CheckResult deviceMonitorWaitsForADevice() {
     DAW_CHECK(host.steps == lost);  // nothing to start
     DAW_CHECK(host.changes.size() == 1);
     if (host.changes.size() == 1) {
-        const DeviceChange& c = host.changes[0];
-        DAW_CHECK(c.reason == DeviceChangeReason::deviceLost && c.previousDevice == 1 && c.device == 0);
+        const DeviceSwap& c = host.changes[0];
+        DAW_CHECK(c.reason == DeviceSwapReason::deviceLost && c.previousDevice == 1 && c.device == 0);
         DAW_CHECK(c.error && c.error->code == ErrorCode::notFound);
     }
     DAW_CHECK(!driver.running());
@@ -402,8 +402,8 @@ CheckResult deviceMonitorWaitsForADevice() {
     DAW_CHECK(host.steps == back);
     DAW_CHECK(host.changes.size() == 1);
     if (host.changes.size() == 1) {
-        const DeviceChange& c = host.changes[0];
-        DAW_CHECK(c.reason == DeviceChangeReason::deviceAvailable && !c.error);
+        const DeviceSwap& c = host.changes[0];
+        DAW_CHECK(c.reason == DeviceSwapReason::deviceAvailable && !c.error);
         DAW_CHECK(c.previousDevice == 0 && c.device == 1);
     }
     DAW_CHECK(driver.waitUntilIdle());
@@ -446,7 +446,7 @@ CheckResult deviceMonitorIgnoresUnrelatedNotifications() {
     host.requested = config(0);
     host.defaultOverride = 2;
     auto change = monitor.handle(notification(T::defaultOutputChanged, 2));
-    DAW_CHECK(change && change->reason == DeviceChangeReason::defaultOutputChanged && !change->error);
+    DAW_CHECK(change && change->reason == DeviceSwapReason::defaultOutputChanged && !change->error);
     if (change) DAW_CHECK(change->previousDevice == 1 && change->device == 2);
     DAW_CHECK(driver.waitUntilIdle());
     DAW_CHECK(driver.current().outputDevice == 2);

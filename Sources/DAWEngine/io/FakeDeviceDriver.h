@@ -163,6 +163,8 @@ public:
     uint64_t frames() const;
     // Violations counted by the IO cycles' RtScopes, all runs (DW-019). 0 in Release.
     uint64_t rtViolations() const;
+    // processorOverload events applied (each counted as an xrun), all runs.
+    uint64_t overloads() const;
 
     // An event now (atFrame ignored): while running, the render thread applies it before its next
     // cycle; otherwise it is applied here. Returns once applied. invalidArgument for an unknown
