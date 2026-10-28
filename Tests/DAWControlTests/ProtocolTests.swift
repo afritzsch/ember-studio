@@ -6,8 +6,6 @@ import Testing
 @Suite("Control protocol (CTL-001, CTL-003)")
 @MainActor
 struct ProtocolTests {
-    init() { ControlTestCommands.register() }
-
     @Test("CTL-001: JSONValue round-trips JSON, keeping 2^56-range integers exact")
     func jsonValueRoundTrip() throws {
         let text = #"{"a":[1,2.5,"x",true,null],"big":72057594037927935,"nested":{"k":-3}}"#
@@ -116,11 +114,11 @@ struct ProtocolTests {
     func engineCycleOwners() async throws {
         let (dispatcher, box) = TestDispatchers.fake()
         _ = try await dispatcher.ok(.projectNew, ["name": "c"])
-        let track = try #require(try await dispatcher.ok(.commandApply, ["command": ["type": "ControlTestAddAudioTrack", "name": "t"]])["createdIDs"]?[0]?.int64Value)
+        let track = try #require(try await dispatcher.ok(.commandApply, ["command": ["type": "AddTrack", "name": "t", "kind": "audio"]])["createdIDs"]?[0]?.int64Value)
         // The next structural change is rejected by the engine with role-tagged NodeIDs.
         let bus: NodeIDValue = 40
         box.last.rejectNextGraph(with: .routingCycle(path: [GraphNodeID.input(of: bus), bus, UInt64(track), GraphNodeID.input(of: bus)]))
-        _ = try await dispatcher.ok(.commandApply, ["command": ["type": "ControlTestAddAudioTrack", "name": "u"]])
+        _ = try await dispatcher.ok(.commandApply, ["command": ["type": "AddTrack", "name": "u", "kind": "audio"]])
         let error = try #require(await dispatcher.failure(.renderOffline, ["from": 0, "to": 960, "path": "x.wav"]))
         #expect(error.dawError == "routingCycle")
         #expect(error.data?["path"] == [40, .int(track), 40])

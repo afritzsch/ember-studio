@@ -400,10 +400,22 @@ public final class Dispatcher {
             engine.locate(p.tick)
         case .transportSetLoop:
             let p: TransportSetLoopParams = try decode(params)
-            guard p.start.raw >= 0, !p.enabled || p.start < p.end else {
-                throw DAWError.invalidArgument("loop [\(p.start.raw), \(p.end.raw)) is empty or negative")
+            let loop: LoopRange?
+            switch (p.start, p.end) {
+            case (nil, nil) where !p.enabled:
+                loop = nil
+            case (let start?, let end?):
+                guard start.raw >= 0, !p.enabled || start < end else {
+                    throw DAWError.invalidArgument("loop [\(start.raw), \(end.raw)) is empty or negative")
+                }
+                loop = LoopRange(start: start, end: end, isEnabled: p.enabled)
+            default:
+                throw ControlError.invalidParams("start and end go together; leave both out only to clear the loop (enabled: false)")
             }
-            engine.setLoop(enabled: p.enabled, start: p.start, end: p.end)
+            // DW-123: the document's loop follows, validated by SetLoop (MODEL-005), before the engine
+            // hears of it. Engine sync doesn't push the loop yet, so the engine is set directly too.
+            try requireStore().perform(SetLoop(loop: loop))
+            engine.setLoop(enabled: loop?.isEnabled ?? false, start: loop?.start ?? Tick(0), end: loop?.end ?? Tick(0))
         case .transportRecord:
             let p: TransportRecordParams = try decode(params)
             engine.setRecording(p.enabled)

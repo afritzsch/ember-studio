@@ -79,32 +79,24 @@ struct DawToolsTests {
 
     @Test("DW-114: a routing scenario through the tools: buses, sends, cycle rejection, render + analyze, 0 RT violations")
     func routingScenario() async throws {
-        DawmcpTestCommands.register()
         let dir = try TempDir()
         let tools = DawTools(dispatcher: Dispatcher(configuration: .init(workingDirectory: dir.url)))
         // A −6 dB 1 kHz sine, one second at the session rate.
         try writeSine(to: dir.file("sine.wav"), frequency: 1000, amplitude: 0.5, sampleRate: 48_000, frames: 48_000)
 
         _ = try await tools.ok("daw_project_new", ["name": "routing"])
-        // The asset loads as asset.import does it (engine first, under the next ID), since
-        // ImportAsset doesn't exist yet (T-030).
-        let dispatcher = tools.dispatcher
-        let assetID = try #require(dispatcher.store).project.ids.next
-        let engine = try #require(dispatcher.engine)
-        let load = await engine.waitForJob(engine.loadAsset(assetID, path: dir.file("sine.wav").path))
-        try #require(load.state == .succeeded, "\(load)")
+        let imported = try await tools.ok("daw_asset_import", ["path": "sine.wav"])
+        let asset = Value.int(Int(try #require(imported["assetID"]?.int64Value)))
         let built = try await tools.ok("daw_command_batch", ["atomic": true, "commands": [
-            ["type": "DawmcpTestAddAsset", "path": .string(dir.file("sine.wav").path), "channels": 2, "sampleRate": 48_000,
-             "frames": 48_000],
             ["type": "AddTrack", "name": "Gtr", "kind": "audio"],
             ["type": "AddBus", "name": "A"],
             ["type": "AddBus", "name": "B"],
         ]])
         let ids = (built["results"]?.arrayValue ?? []).compactMap { $0["createdIDs"]?[0]?.int64Value }
-        try #require(ids == [Int64(assetID), Int64(assetID) + 1, Int64(assetID) + 2, Int64(assetID) + 3])
-        let (asset, track, busA, busB) = (Value.int(Int(ids[0])), Value.int(Int(ids[1])), Value.int(Int(ids[2])), Value.int(Int(ids[3])))
+        try #require(ids.count == 3)
+        let (track, busA, busB) = (Value.int(Int(ids[0])), Value.int(Int(ids[1])), Value.int(Int(ids[2])))
         _ = try await tools.ok("daw_command_apply", ["command": [
-            "type": "DawmcpTestAddAudioClip", "trackID": track, "assetID": asset, "start": 0, "length": 1920,
+            "type": "AddClip", "trackID": track, "assetID": asset, "start": 0, "length": 1920,
         ]])
 
         // Track → bus A → master.
@@ -132,7 +124,7 @@ struct DawToolsTests {
         ]])
         let cycle = try await tools.failure("daw_command_apply", ["command": ["type": "AddSend", "channelID": busB, "busID": busA]])
         #expect(cycle["code"] == -32000 && cycle["data"]?["dawError"] == "routingCycle")
-        #expect(cycle["data"]?["path"] == [.int(ids[3]), .int(ids[2]), .int(ids[3])])
+        #expect(cycle["data"]?["path"] == [.int(ids[2]), .int(ids[1]), .int(ids[2])])
 
         let telemetry = try await tools.ok("daw_engine_telemetry")
         #expect(telemetry["rtViolations"] == 0)

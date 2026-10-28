@@ -156,10 +156,12 @@ public struct TransportLocateParams: Codable, Hashable, Sendable {
     public var tick: Tick
 }
 
+/// DW-123: also performs `SetLoop`, so the project's loop follows (one undo entry).
 public struct TransportSetLoopParams: Codable, Hashable, Sendable {
     public var enabled: Bool
-    public var start: Tick
-    public var end: Tick
+    /// Required when enabled. Leaving out both with `enabled: false` clears the loop (`loop: null`).
+    public var start: Tick?
+    public var end: Tick?
 }
 
 public struct TransportRecordParams: Codable, Hashable, Sendable {

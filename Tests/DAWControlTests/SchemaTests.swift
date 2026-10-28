@@ -31,6 +31,15 @@ private struct Unprobeable: Codable {
     var hidden: Hidden
 }
 
+/// Registered at run time, like a tool's own command. All test targets share one CommandRegistry,
+/// so the type string is prefixed.
+private struct SchemaTestCommand: Command {
+    static let type = "SchemaTestCommand"
+    var note: String
+    var label: String { "Note" }
+    func apply(to project: inout Project) throws(DAWError) -> any Command { self }
+}
+
 @Suite("JSON Schemas (CTL-021, CTL-024)")
 struct SchemaTests {
     @Test("CTL-021: the probe records keys, optionality, nesting, arrays, enums, dictionaries and docs")
@@ -119,13 +128,13 @@ struct SchemaTests {
 
     @Test("CTL-024: command.schema lists the registry, test-registered commands included, or one type")
     func commandSchemaMethod() async throws {
-        ControlTestCommands.register()
+        CommandRegistry.register(SchemaTestCommand.self)
         let (dispatcher, _) = await TestDispatchers.fake()
         let all = try await dispatcher.ok(.commandSchema).decode(CommandSchemaResult.self)
         let types = all.commands.map(\.type)
         #expect(types == types.sorted())
         #expect(Set(CommandRegistry.builtIn.map { $0.type }).isSubset(of: types))
-        #expect(types.contains(ControlTestAddAudioClip.type))
+        #expect(types.contains(SchemaTestCommand.type))
         let one = try await dispatcher.ok(.commandSchema, ["type": "AddTrack"]).decode(CommandSchemaResult.self)
         #expect(one.commands.map(\.type) == ["AddTrack"])
         #expect(one.commands[0].schema["properties"]?["kind"]?["enum"] == ["audio", "midi"])
