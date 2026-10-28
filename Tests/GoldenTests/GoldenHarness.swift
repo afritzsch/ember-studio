@@ -218,11 +218,17 @@ enum GoldenHarness {
         case let value?: value.doubleValue.map { [$0] }
         case nil: nil
         }
-        guard let values, !values.isEmpty else { return "audio.analyze has no numeric field \(e.field)" }
+        guard var values, !values.isEmpty else { return "audio.analyze has no numeric field \(e.field)" }
+        if let channel = e.channel {
+            guard case .array? = result[e.field] else { return "\(e.field) is not a per-channel field" }
+            guard values.indices.contains(channel) else { return "no channel \(channel) (\(values.count) channels)" }
+            values = [values[channel]]
+        }
         let tolerance = e.tolerance ?? 0
         let off = values.filter { abs($0 - e.value) > tolerance }
         guard off.isEmpty else {
             return "\(list(values)) is not \(format(e.value)) ± \(format(tolerance))" +
+                (e.channel.map { " on channel \($0)" } ?? "") +
                 (e.range.map { " in frames \($0.start)..<\($0.end)" } ?? "")
         }
         return nil

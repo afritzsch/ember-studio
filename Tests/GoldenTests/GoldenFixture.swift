@@ -18,7 +18,9 @@ import Foundation
 /// - `# @expect {"field": "peakDb", "value": -6.02, "tolerance": 0.01, "range": {"start": 0, "end": 512}}`
 ///   checks a field of `audio.analyze` on the golden render (every channel for per-channel
 ///   fields), so the numbers the spec states hold whatever the reference says. `frames` checks
-///   the render's length. `range` and `tolerance` (default 0) are optional.
+///   the render's length. `range` and `tolerance` (default 0) are optional. `"channel": 0`
+///   checks one channel of a per-channel field only (T-025: a hard-left pan is loud on the left
+///   and silent on the right).
 struct GoldenFixture: Sendable {
     struct TestNode: Hashable, Sendable, Decodable {
         enum NodeType: String, Hashable, Sendable, Decodable { case sine, impulse, fakeLatency, nan }
@@ -36,6 +38,7 @@ struct GoldenFixture: Sendable {
         var value: Double
         var tolerance: Double?
         var range: FrameRange?
+        var channel: Int?
     }
 
     struct ParseError: Error, CustomStringConvertible {
