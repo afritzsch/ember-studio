@@ -20,19 +20,19 @@ public struct AudioData: Sendable {
         do {
             let file = try AVAudioFile(forReading: url, commonFormat: .pcmFormatFloat32, interleaved: false)
             let format = file.processingFormat
-            let frames = AVAudioFrameCount(clamping: file.length)
             let channelCount = Int(format.channelCount)
             var channels = [[Float]](repeating: [], count: channelCount)
-            if frames > 0 {
-                guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames) else {
-                    throw DAWError.engine(code: .outOfMemory, detail: "no buffer for \(frames) frames")
-                }
-                try file.read(into: buffer, frameCount: frames)
-                let read = Int(buffer.frameLength)
-                if let data = buffer.floatChannelData {
-                    for c in 0..<channelCount {
-                        channels[c] = Array(UnsafeBufferPointer(start: data[c], count: read))
-                    }
+            for c in 0..<channelCount { channels[c].reserveCapacity(Int(clamping: file.length)) }
+            let chunk: AVAudioFrameCount = 65_536
+            guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: chunk) else {
+                throw DAWError.engine(code: .outOfMemory, detail: "no buffer for \(chunk) frames")
+            }
+            // A read may return fewer frames than asked for, so read until the file is exhausted.
+            while file.framePosition < file.length {
+                try file.read(into: buffer, frameCount: chunk)
+                guard buffer.frameLength > 0, let data = buffer.floatChannelData else { break }
+                for c in 0..<channelCount {
+                    channels[c] += UnsafeBufferPointer(start: data[c], count: Int(buffer.frameLength))
                 }
             }
             self.init(sampleRate: format.sampleRate, channels: channels)
@@ -44,7 +44,7 @@ public struct AudioData: Sendable {
     }
 
     /// Frames [start, end), clamped to the file.
-    func slice(_ range: FrameRange?) throws(DAWError) -> AudioData {
+    public func slice(_ range: FrameRange?) throws(DAWError) -> AudioData {
         guard let range else { return self }
         guard range.start >= 0, range.end >= range.start else {
             throw .invalidArgument("range [\(range.start), \(range.end)) is not a frame range")

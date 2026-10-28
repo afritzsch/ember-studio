@@ -92,7 +92,11 @@ public struct RPCResponse: Hashable, Sendable, Codable {
         id = try c.decodeIfPresent(RPCID.self, forKey: .id)
         error = try c.decodeIfPresent(RPCError.self, forKey: .error)
         // A null result is still a result; it is only absent on errors.
-        result = error == nil ? try c.decodeIfPresent(JSONValue.self, forKey: .result) ?? .null : nil
+        if error == nil {
+            result = try c.decodeIfPresent(JSONValue.self, forKey: .result) ?? .null
+        } else {
+            result = nil
+        }
     }
 
     /// JSON-RPC 2.0: `id` is always present (null if unknown), and exactly one of result/error.

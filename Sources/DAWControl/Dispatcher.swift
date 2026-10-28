@@ -71,14 +71,14 @@ public final class Dispatcher {
 
     /// The `ImportAsset` command `asset.import` performs: `{"type": "ImportAsset", "asset": AssetRef}`
     /// (MODEL-005, not in DAWModel yet).
-    public static let importAssetCommandType = "ImportAsset"
+    nonisolated public static let importAssetCommandType = "ImportAsset"
     /// Script methods `test.fixture` leaves out: they don't build the project.
-    public static let fixtureSkippedMethods: Set<String> = [
+    nonisolated public static let fixtureSkippedMethods: Set<String> = [
         ControlMethod.renderOffline.rawValue, ControlMethod.audioAnalyze.rawValue,
         ControlMethod.audioCompare.rawValue, ControlMethod.testFixture.rawValue,
     ]
     /// `engine.events` keeps this many.
-    public static let eventLogCapacity = 4096
+    nonisolated public static let eventLogCapacity = 4096
 
     private var projectsCreated: UInt64 = 0
     private var eventLog: [EngineEventRecord] = []
