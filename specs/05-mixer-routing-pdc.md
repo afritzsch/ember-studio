@@ -38,6 +38,13 @@ Sidechain: any track/bus (pre- or post-fader) → a plugin's sidechain input
 | MIX-024 | When a plugin reports a latency change, schedule a rebuild (non-RT) and notify via event. | — |
 | MIX-025 | Automation and param changes are not latency-compensated in v1 (documented limitation). | — |
 
+#### PDC semantics (clarified in T-021)
+- **Path latency** (MIX-020) runs over all incoming edges, MIDI included: a node's arrival is the max path latency of its inputs. Only audio and sidechain edges can be delayed, so a MIDI path shorter than an audio path into the same node stays early until T-040. The graph latency is the master's path latency; with every merge aligned, every path from an input-less node to the master adds up to exactly that.
+- **Delay lines** (MIX-021/022) sit on the feed of the delayed edge (`RenderGraph::feed`), never on a direct read. The builder keeps them per edge ID, and the next graph gets the *same* line for an edge with the same endpoints whose new delay still fits, so contents carry over with no copy. One graph renders per block, so only one thread touches a line at a time. A delay that outgrows its line gets a new, silent line; the latency change glitches anyway.
+- **Source pre-roll** (MIX-023) lives in `Engine::render`, not in each player. The transport position is what the graph outputs in that block: offline block *i* is position `from + i`, and the TIME-009 playhead subtracts only the device latency. Timeline nodes (audio/MIDI clip players, metronome) get a TransportBlock laid out `latency` samples ahead, using the transport's loop rule. Every other node gets the transport's block. Each run of playback (play from stopped, or a locate while playing) first renders `latency` frames in chunks of up to `maxBlock` and discards their output. That fills the delays, so the first audible frame is the start position. The cost is a CPU spike in that first block when the latency is large. If the latency changes mid-run, timeline nodes jump by the difference with no new pre-roll.
+- **Latency changes** (MIX-024): node factories get a `LatencyReporter` (`NodeCreateInfo::latency`), and a node calls `changed()` from a non-RT thread. `GraphCompiler` then rebuilds its last good description on `daw.compile`, keeping the same instances, and queues a `LatencyEvent` (`takeEvents()`). The facade doesn't expose that event yet.
+- **Telemetry**: `Engine::render` copies the graph's latent-node table and `graphLatency` into `Telemetry` whenever the rendered graph changes.
+
 ## Interfaces (contract)
 `GraphDescription` is plain data produced by `DAWModel` and passed through the facade (08). Defined in `include/daw/GraphDescription.h`:
 ```cpp
