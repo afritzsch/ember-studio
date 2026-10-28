@@ -48,6 +48,8 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 
 **M1 exit:** through `dawmcp`, an agent creates a project, imports a 44.1k WAV into a 48k session, adds an audio track and clip, renders offline, and `daw_audio_analyze` shows the expected level and frequency; `rtViolations == 0`; the sine, resample and gain-ramp goldens pass.
 
+**M1 exit met (2026-10-28, main @ e556bde):** a 44.1 kHz WAV imported into a 48 kHz session via `asset.import` + `AddTrack` + `AddClip` renders 24000 frames, peak −12.04 dBFS, spectrum peak 1000.18 Hz, `rtViolations` 0 (dawctl, same Dispatcher as dawmcp; through the dawmcp binary in T-018's `DawToolsTests`); goldens `sine_through_graph`, `wav_playback_resampled`, `gain_ramp_smoothing` pass in `scripts/test.sh`.
+
 ### M2 — Mixer & routing
 | Task | Lane | Title | Requirements | Depends on | Status |
 |---|---|---|---|---|---|
