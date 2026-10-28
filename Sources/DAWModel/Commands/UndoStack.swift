@@ -49,7 +49,7 @@ public struct UndoStack: Sendable {
     /// Applies `command`. Outside a gesture it is pushed as one undo entry; inside one it is
     /// recorded for the gesture's entry (MODEL-003). Either way the redo stack is cleared.
     public mutating func perform(_ command: any Command, on project: inout Project) throws(DAWError) {
-        let inverse = try command.applyAtomically(to: &project)
+        let inverse = try Self.apply(command, to: &project)
         redoEntries.removeAll()
         if gesture != nil {
             gesture!.inverses.append(inverse)
@@ -64,7 +64,7 @@ public struct UndoStack: Sendable {
     public mutating func undo(_ project: inout Project) throws(DAWError) -> String? {
         endAllGestures()
         guard let entry = undoEntries.last else { return nil }
-        let redo = try entry.command.applyAtomically(to: &project)
+        let redo = try Self.apply(entry.command, to: &project)
         undoEntries.removeLast()
         redoEntries.append(Entry(label: entry.label, command: redo, serial: entry.serial))
         return entry.label
@@ -75,7 +75,7 @@ public struct UndoStack: Sendable {
     public mutating func redo(_ project: inout Project) throws(DAWError) -> String? {
         endAllGestures()
         guard let entry = redoEntries.last else { return nil }
-        let inverse = try entry.command.applyAtomically(to: &project)
+        let inverse = try Self.apply(entry.command, to: &project)
         redoEntries.removeLast()
         undoEntries.append(Entry(label: entry.label, command: inverse, serial: entry.serial))
         return entry.label
@@ -127,6 +127,23 @@ public struct UndoStack: Sendable {
     }
 
     // MARK: Private
+
+    /// MODEL-032, DW-031: in Debug, every command, undo and redo must leave a valid project. A
+    /// command that breaks an invariant is a bug in that command; it is rejected like an invalid
+    /// one (project and history unchanged), so the error reaches whoever performed it.
+    #if DEBUG
+    static let validatesAfterEachCommand = true
+    #else
+    static let validatesAfterEachCommand = false
+    #endif
+
+    private static func apply(_ command: any Command, to project: inout Project) throws(DAWError) -> any Command {
+        var working = project
+        let inverse = try command.apply(to: &working)
+        if validatesAfterEachCommand { try working.validate() }
+        project = working
+        return inverse
+    }
 
     private mutating func push(label: String, inverse: any Command) {
         undoEntries.append(Entry(label: label, command: inverse, serial: nextSerial))
