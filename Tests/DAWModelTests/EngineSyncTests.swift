@@ -87,8 +87,9 @@ struct EngineSyncTests {
         #expect(written[r.deviceParam(vox.inserts[0].id, 0)!] == 0.6)
         #expect(written[r.stripParam(main.id, ParamLayout.Strip.gain)!] == 2)
         #expect(written[r.stripParam(store.project.master.id, ParamLayout.Strip.gain)!] == 0.5)
-        // Vox is muted, so its send stays silent whatever its level (MIX-006 note in paramValues).
-        #expect(engine.getParam(r.sendLevelParam(vox.sends[0].id)!) == 0)
+        // MIX-007: Vox is muted, so its send's mute slot is on too; the level keeps its value.
+        #expect(written[r.sendMuteParam(vox.sends[0].id)!] == 1)
+        #expect(written[r.sendLevelParam(vox.sends[0].id)!] == 0.75)
     }
 
     @Test("MODEL-021, MIX-006: solo flips other strips' mute slots without a rebuild")
@@ -99,12 +100,17 @@ struct EngineSyncTests {
         let (vox, kick) = (p.tracks[0], p.tracks[1])
         let (group, main, verb) = (p.buses[0], p.buses[1], p.buses[2])
         func muted(_ id: NodeIDValue) -> Bool { engine.getParam(sync.runtime.stripParam(id, ParamLayout.Strip.mute)!) == 1 }
+        func sendMuted(_ send: Send) -> Bool { engine.getParam(sync.runtime.sendMuteParam(send.id)!) == 1 }
+        func sendLevel(_ send: Send) -> Float? { engine.getParam(sync.runtime.sendLevelParam(send.id)!) }
 
         try store.edit { $0.tracks[0].strip.solo = true }
         #expect(!muted(vox.id) && muted(kick.id))
         #expect(!muted(group.id) && !muted(main.id) && !muted(verb.id), "buses Vox feeds stay audible")
+        // MIX-007: Kick's pre-fader send is muted with it, so solo doesn't leak; its level stays.
+        #expect(!sendMuted(vox.sends[0]) && sendMuted(kick.sends[0]))
+        #expect(sendLevel(kick.sends[0]) == kick.sends[0].level)
         try store.edit { $0.tracks[0].strip.solo = false }
-        #expect(!muted(kick.id))
+        #expect(!muted(kick.id) && !sendMuted(kick.sends[0]))
         try await idle()
         #expect(applies(engine) == 0)
     }

@@ -17,9 +17,9 @@ nodes:
   input:1 bus v0
   12 delay v0 params 39+2
   1 channelStrip v0 params 0+4
-  output:1 master v0 params 43+1
-  13 gain v0 params 41+1
-  14 gain v0 params 42+1
+  output:1 master v0 params 45+1
+  13 gain v0 params 41+2
+  14 gain v0 params 43+2
 edges:
   source:2 -> 7 audio port 0 id 23034ce728abaa2f
   7 -> 8 audio port 0 id 3c7ca5db7cec164

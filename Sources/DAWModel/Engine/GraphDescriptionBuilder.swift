@@ -133,9 +133,10 @@ public enum GraphDescriptionBuilder {
         return out
     }
 
-    /// MODEL-021: the value every allocated slot should hold for `project`. Strip mute slots carry
-    /// the solo-resolved mute (MIX-006); a muted channel's sends are silent too, so a pre-fader
-    /// send can't leak a muted (or solo-muted) channel into a bus.
+    /// MODEL-021: the value every allocated slot should hold for `project`. A channel's resolved
+    /// mute (manual or solo, MIX-006) goes into its strip's mute slot and into the mute slot of
+    /// every send it owns (MIX-007), so a muted channel can't leak into a bus through a pre-fader
+    /// send. Send levels keep their value while muted.
     public static func paramValues(_ project: Project, runtime: RuntimeIDs, catalog: ParamCatalog) -> [ParamID: Float] {
         let muted = SoloResolver.mutedChannels(in: project)
         var out: [ParamID: Float] = [:]
@@ -149,7 +150,10 @@ public enum GraphDescriptionBuilder {
             set(id, ParamLayout.Strip.phase, state.phaseInvert ? 1 : 0)
         }
         func sends(_ owner: NodeIDValue, _ sends: [Send]) {
-            for send in sends { set(send.id, ParamLayout.Send.level, muted.contains(owner) ? 0 : send.level) }
+            for send in sends {
+                set(send.id, ParamLayout.Send.level, send.level)
+                set(send.id, ParamLayout.Send.mute, muted.contains(owner) ? 1 : 0)
+            }
         }
 
         strip(project.master.id, project.master.strip)

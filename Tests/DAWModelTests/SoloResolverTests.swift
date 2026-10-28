@@ -83,7 +83,7 @@ struct SoloResolverTests {
         #expect(SoloResolver.mutedChannels(in: p).contains(p.master.id))
     }
 
-    @Test("MIX-006: resolved mutes land in strip mute slots; a muted channel's sends go silent")
+    @Test("MIX-006, MIX-007: resolved mutes land in strip mute slots and the owner's send mute slots")
     func paramValues() {
         let (p, id) = Self.project(solo: [.t1])
         let runtime = RuntimeIDs.sequential(for: p)
@@ -91,10 +91,12 @@ struct SoloResolverTests {
         func mute(_ ch: Ch) -> Float? { values[runtime.stripParam(id[ch]!, ParamLayout.Strip.mute)!] }
         #expect(mute(.t1) == 0 && mute(.t2) == 1 && mute(.fx) == 1)
         let send = p.tracks[3].sends[0]
-        #expect(values[runtime.sendLevelParam(send.id)!] == 0, "T4 is solo-muted: its send is silent too")
+        #expect(values[runtime.sendMuteParam(send.id)!] == 1, "T4 is solo-muted: its send is muted too")
+        #expect(values[runtime.sendLevelParam(send.id)!] == send.level, "the level slot keeps its value")
 
         let (open, _) = Self.project(solo: [])
         let openValues = GraphDescriptionBuilder.paramValues(open, runtime: runtime, catalog: ParamCatalog())
+        #expect(openValues[runtime.sendMuteParam(send.id)!] == 0)
         #expect(openValues[runtime.sendLevelParam(send.id)!] == send.level)
     }
 }

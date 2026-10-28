@@ -3,8 +3,9 @@ import Testing
 
 @testable import DAWModel
 
-// MODEL-020/021/022 and DW-072 against the real engine (EngineClient, offline). Only the node kinds
-// the engine registers so far are used: clip players, channel strips, bus inputs and the master.
+// MODEL-020/021/022, DW-072 and MIX-006/007 against the real engine (EngineClient, offline). Only
+// the node kinds the engine registers so far are used: clip players, channel strips, sends (gain),
+// bus inputs and the master.
 
 /// A fresh folder under $TMPDIR, unique per call (CONV §9).
 private func tempDir() throws -> URL {
@@ -71,6 +72,70 @@ struct EngineSyncIntegrationTests {
         render = try #require(await engine.waitForJob(engine.renderOffline(from: 0, to: 960, spec: spec)).render)
         #expect(render.rtViolations == 0)
         #expect(engine.meter(track.id)?.peak == 0)
+        #expect(engine.telemetry().rtViolations == 0)
+    }
+
+    @Test("MIX-007, MIX-006: send graphs compile; a muted track silences its pre-fader send without a rebuild; 0 RT violations")
+    func sendMute() async throws {
+        let dir = try tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let wav = dir.appending(path: "loop.wav")
+        try writeSineWAV(wav, sampleRate: 48_000, frames: 48_000)
+
+        // Src (fader at 0) → master; Src pre-fader → FX; Other post-fader → FX; FX → master.
+        var p = Project(name: "sends")
+        let asset = p.ids.allocate()
+        p.assets = [AssetRef(id: asset, path: wav.path, channels: 1, originalSampleRate: 48_000, frames: 48_000)]
+        let fx = Bus(id: p.ids.allocate(), name: "FX")
+        p.buses = [fx]
+        let src = Track(id: p.ids.allocate(), name: "Src", kind: .audio,
+                        clips: [.audio(AudioClip(id: p.ids.allocate(), assetID: asset, start: 0, length: 7680))],
+                        strip: ChannelStripState(gain: 0),
+                        sends: [Send(id: p.ids.allocate(), target: fx.id, level: 1, tap: .preFader)])
+        let other = Track(id: p.ids.allocate(), name: "Other", kind: .audio,
+                          sends: [Send(id: p.ids.allocate(), target: fx.id, level: 1, tap: .postFader)])
+        p.tracks = [src, other]
+
+        let engine = try EngineClient(.offline(sampleRate: 48_000))
+        let store = ProjectStore(project: p)
+        let sync = try store.attachEngine(engine)
+        var status = engine.waitForGraph(1, timeout: .seconds(5))
+        #expect(status.isPublished(1) && status.lastError == nil, "send gain nodes (numParams 2) compile: \(String(describing: status.lastError))")
+        let job = engine.loadAsset(asset, path: wav.path)
+        #expect(await engine.waitForJob(job).state == .succeeded)
+        _ = sync.pollEvents()
+        await sync.settle()
+        status = await engine.graphApplied(2)
+        #expect(status.isPublished(2) && status.lastError == nil)
+        let version = engine.graphStatus().submittedVersion
+
+        let spec = ExportSpec(path: "", blockSize: 512, tailEnabled: false)
+        func fxPeak() async throws -> Float {
+            let render = try #require(await engine.waitForJob(engine.renderOffline(from: 0, to: 960, spec: spec)).render)
+            #expect(render.rtViolations == 0)
+            return try #require(engine.meter(fx.id)).peak
+        }
+
+        // Pre-fader: the send ignores Src's fader at 0.
+        #expect(try await fxPeak() > 0.1)
+        #expect(engine.meter(src.id)?.peak == 0)
+
+        // MIX-007: muting Src silences its pre-fader send; the level slot keeps its value.
+        try store.edit { $0.tracks[0].strip.mute = true }
+        #expect(engine.getParam(sync.runtime.sendMuteParam(src.sends[0].id)!) == 1)
+        #expect(engine.getParam(sync.runtime.sendLevelParam(src.sends[0].id)!) == 1)
+        _ = try await fxPeak()  // the mute fades out over the first block
+        #expect(try await fxPeak() == 0)
+
+        // MIX-006: soloing Other solo-mutes Src, and its send stays silent; FX is fed by Other.
+        try store.edit { $0.tracks[0].strip.mute = false; $0.tracks[1].strip.solo = true }
+        _ = try await fxPeak()
+        #expect(try await fxPeak() == 0, "solo doesn't leak through Src's pre-fader send")
+
+        try store.edit { $0.tracks[1].strip.solo = false }
+        _ = try await fxPeak()
+        #expect(try await fxPeak() > 0.1)
+        #expect(!sync.hasPendingApply && engine.graphStatus().submittedVersion == version, "mute and solo never rebuild")
         #expect(engine.telemetry().rtViolations == 0)
     }
 }

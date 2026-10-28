@@ -39,6 +39,8 @@ public struct RuntimeIDs: Hashable, Sendable {
     public func stripParam(_ channel: NodeIDValue, _ index: UInt32) -> ParamID? { paramID(channel, index) }
     /// A send's level slot.
     public func sendLevelParam(_ send: ModelID) -> ParamID? { paramID(send, ParamLayout.Send.level) }
+    /// A send's mute slot (MIX-007).
+    public func sendMuteParam(_ send: ModelID) -> ParamID? { paramID(send, ParamLayout.Send.mute) }
     /// Param `index` of a device slot, as in its kind's ParamInfo list.
     public func deviceParam(_ slot: NodeIDValue, _ index: UInt32) -> ParamID? { paramID(slot, index) }
     /// MIX-009: the master's safety limiter switch (on when ≥ 0.5).
@@ -62,10 +64,14 @@ public enum ParamLayout {
         public static let count: UInt32 = 4
     }
 
-    /// MIX-007: a send is a `NodeKind.gain` node with one smoothed level slot (linear amplitude).
+    /// MIX-007: a send is a `NodeKind.gain` node with a smoothed level slot (linear amplitude)
+    /// and a mute slot. The model writes its owner's resolved mute (MIX-006) into the mute slot,
+    /// so a muted track silences all its sends, pre-fader included; the level keeps its value.
     public enum Send {
         public static let level: UInt32 = 0
-        public static let count: UInt32 = 1
+        /// 1 = muted, 0 = audible.
+        public static let mute: UInt32 = 1
+        public static let count: UInt32 = 2
     }
 
     /// MIX-009: the master node's limiter switch.
