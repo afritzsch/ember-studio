@@ -37,6 +37,18 @@ struct DriverConfig {
     uint32_t inputChannels = 2;
 };
 
+// What a driver's start() resolved (IO-003, IO-004), for any driver (DW-088). Zeros while
+// stopped.
+struct RunningConfig {
+    AudioDeviceRef outputDevice = 0;
+    AudioDeviceRef inputDevice = 0;  // 0: no input (not enabled, or the device has none)
+    bool separateInput = false;      // input comes from another device (CoreAudioDriver's InputFifo)
+    double sampleRate = 0;
+    uint32_t bufferFrames = 0;
+    uint32_t outputChannels = 0;
+    uint32_t inputChannels = 0;
+};
+
 struct SampleRateRange {
     double minimum = 0;
     double maximum = 0;

@@ -73,7 +73,7 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 | Task | Lane | Title | Requirements | Depends on | Status |
 |---|---|---|---|---|---|
 | T-040 | D | MidiClipPlayer, hanging-note handling | DSP-003 | T-008, T-012 | done |
-| T-041 | D | Sampler (zones, Hermite, voices, ADSR, CC64, bend) | DSP-020..023 | T-040, T-010 | ready |
+| T-041 | D | Sampler (zones, Hermite, voices, ADSR, CC64, bend) | DSP-020..023 | T-040, T-010 | wip(t-041-sampler) |
 | T-042 | M | Note commands, instrument slot on MIDI tracks | MODEL-005 (note subset) | T-030 | todo |
 | T-043 | U | Piano roll + velocity lane + audition (`previewNote` facade addition) | UI-020, 021 | T-033, T-042 | todo |
 | T-044 | D | M4 goldens | TEST (M4 set) | T-041, T-042 | todo |
@@ -82,12 +82,12 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 | Task | Lane | Title | Requirements | Depends on | Status |
 |---|---|---|---|---|---|
 | T-050 | E | FakeDeviceDriver (loopback, scripted events) | TEST-005 | T-011 | done |
-| T-051 | E | DeviceMonitor, hot-swap sequence, xrun detection, EngineEvents | IO-020..023 | T-050 | wip(t-051-device-monitor) |
+| T-051 | E | DeviceMonitor, hot-swap sequence, xrun detection, EngineEvents | IO-020..023 | T-050 | done |
 | T-052 | E | Audio recording: FIFOs, disk writer, latency comp, finalize, punch | REC-001..005 | T-050, T-009 | todo |
 | T-053 | E | CoreMIDI input + MIDI recording | REC-010..012 | T-040 | todo |
 | T-054 | E | Input monitoring modes | REC-020..022 | T-052 | todo |
 | T-055 | U | Audio preferences, device toasts, arm/monitor buttons | UI-040, UI-004 | T-051, T-034 | todo |
-| T-056 | E+M | Session sample-rate change (re-convert assets, re-prepare) | IO-033, MODEL-005 (`SetSessionSampleRate`) | T-051 | todo |
+| T-056 | E+M | Session sample-rate change (re-convert assets, re-prepare) | IO-033, MODEL-005 (`SetSessionSampleRate`) | T-051 | ready |
 
 ### M6 — Plugins
 | Task | Lane | Title | Requirements | Depends on | Status |
@@ -260,9 +260,9 @@ Recorded by the lead from worker reports.
 | DW-065 | T-087 | Under TSan (like ASan, DW-054) malloc is replaced, so the RT-trap allocation tests (RtTrap ENG-031/032, DW-019, Telemetry DW-011/024, OfflineDriver IO-013) fail; Swift Testing exit tests always SIGABRT under TSan whatever their body (so ENG-032's abort test passes only by accident); IO-010 "60 s in < 10 s" is too slow. The TEST-007 TSan job must skip these. TSan otherwise clean (0 reports, 12.7 s) | E (T-019 / T-084) | todo |
 | DW-066 | T-087 | `Package.swift` still has `name: "macDAW"` (package name, not a module). Rename when no worker owns Package.swift | lead (small) | todo |
 | DW-067 | T-011 | Facade: publish graphs prepared for at least `driver.current().bufferFrames` (shorter → silence, counted in oversizeBlocks); stop the driver before an offline render (DW-057); enabling input (record/monitor armed) means restarting the driver with `inputEnabled` — no live input switch | B (T-014) | done (T-014) |
-| DW-068 | T-011 | IO-023 rest: overruns from render time vs block duration, `EngineEvent.overload`; one processor-overload notification often arrives right at start, so ignore a short window after start | E (T-051) | todo |
+| DW-068 | T-011 | IO-023 rest: overruns from render time vs block duration, `EngineEvent.overload`; one processor-overload notification often arrives right at start, so ignore a short window after start | E (T-051) | done (T-051: render overruns per IO cycle, 0.25 s start grace window) |
 | DW-069 | T-011 | 04 Interfaces names `DriverConfig` and `DeviceLatency` without defining them; T-011 defined them in `io/DriverConfig.h` / `io/DeviceLatency.h` (like `ExportSpec`). Add them to the Interfaces block | spec (lead) | todo |
-| DW-070 | T-011 | FakeDeviceDriver can reuse `DeviceRenderer` (device-independent IO cycle) and `publishDeviceLatency()`. Device start/stop/config/latency not reachable via dawctl/dawmcp until the facade + control exist | E (T-050), B (T-017/T-018) | FakeDeviceDriver part done (T-050); dawctl/dawmcp device control todo (T-017/T-018) |
+| DW-070 | T-011 | FakeDeviceDriver can reuse `DeviceRenderer` (device-independent IO cycle) and `publishDeviceLatency()`. Device start/stop/config/latency not reachable via dawctl/dawmcp until the facade + control exist | E (T-050), B (T-017/T-018) | FakeDeviceDriver part done (T-050); facade done (T-051); dawctl/dawmcp device control → T-018 (DW-115) |
 | DW-071 | T-013 | Facade/telemetry need the NodeID → MeterID map (today only `GraphBuilder::meterOf`, compile thread): publish it with each graph or through GraphCompiler | B (T-014 / T-020) | done (T-014) |
 | DW-072 | T-013 | DW-051 decision: the model must bump a clip player's `configVersion` whenever its track's clips change and when an asset they use finishes loading (facade emits `assetLoaded`) | M (T-016) | done (T-016) |
 | DW-073 | T-013 | Goldens: two adjacent clips with fades (DSP-001), loop wrap mid-block through the clip player (TIME-005/006), locate reset (TIME-008), pan hard-left/centre/right (MIX-005, T-025) | E (T-019 / T-025 / T-036) | todo |
@@ -271,7 +271,7 @@ Recorded by the lead from worker reports.
 | DW-076 | T-014 | `DAWError` has no case for engine I/O / out-of-memory / internal errors; `EngineClient` maps them to `.invalidArgument("i/o: …")`. Add `.engine(code:detail:)` | M | done (T-016: `DAWError.engine(code:detail:)`) |
 | DW-077 | T-014 | `loadAsset` takes no peak-cache directory, so IO-034 peaks aren't computed through the facade | B (with T-056) | todo |
 | DW-078 | T-014 | `NodeKindInfo` has no param-info hook; facade `paramInfoJSON` names `ChannelStrip::kParamInfo` directly, other kinds return "[]" (see DW-074) | E/D | todo |
-| DW-079 | T-014 | `setDevice` with a different session rate returns `unsupported` until IO-021/IO-033 | E (T-051 / T-056) | todo |
+| DW-079 | T-014 | `setDevice` with a different session rate returns `unsupported` until IO-021/IO-033 | E (T-051 / T-056) | done (T-051: setDevice with a new rate rebuilds the graph at that rate; assets wait for T-056) |
 | DW-080 | T-014 | Facade adds a `daw.export` thread for offline jobs; not in the CONV §3 thread table | spec (lead) | todo |
 | DW-081 | T-014 | `GraphCompiler::Status` keeps only the latest error: two builds finishing between polls can lose the earlier `graphRejected` event (`waitForGraph` is still right) | E | todo |
 | DW-082 | T-021 | Expose `GraphCompiler::takeEvents()` (latency change, MIX-024) as `EngineEventType::latencyChanged`; needs a PROPOSED delta to 08 events (`include/daw/`) | B | todo |
@@ -280,10 +280,10 @@ Recorded by the lead from worker reports.
 | DW-085 | T-021 | Metronome is already a timeline node (scheduled `latency` ahead); T-024 should confirm and decide whether it resets on locate | D (T-024) | todo |
 | DW-086 | T-021 | Pre-roll renders `latency` frames inside the first block of a run: a CPU spike that can overrun a live callback when latency is large; a mid-run latency change jumps timeline nodes with no new pre-roll. Consider spreading pre-roll over blocks (output silent) | E | todo |
 | DW-087 | T-021 | `Engine.cpp` duplicates the `makeSegment` helper (from `time/TransportSegments.h`); dawmcp check on `graphLatency` once a latent node is reachable over the protocol | E (small), B (T-018+) | todo |
-| DW-088 | T-050 | Move `RunningConfig` from `io/CoreAudioDriver.h` to `io/DriverConfig.h` (FakeDeviceDriver includes CoreAudioDriver.h only for it) | E (small, T-051) | todo |
+| DW-088 | T-050 | Move `RunningConfig` from `io/CoreAudioDriver.h` to `io/DriverConfig.h` (FakeDeviceDriver includes CoreAudioDriver.h only for it) | E (small, T-051) | done (T-051) |
 | DW-089 | T-050 | dawctl/dawmcp can't pick the fake device: `EngineFacade::create` realtime always uses CoreAudio. Needs a facade option/mode (`include/daw/`) | B (T-017/T-018) | todo: needs a facade driver option (`DriverConfigPOD.driver = coreAudio | fake` + fake options), then `device.list/set/start/stop`, device latency in telemetry, `project.new {engine: offline|realtime}` (T-017 notes) |
-| DW-090 | T-050 | CoreAudio property listeners (T-051, IO-020) should emit the same `io/DeviceNotification.h` notifications so DeviceMonitor reads either source; render-time overruns stay with T-051 (DW-068) | E (T-051) | todo |
-| DW-091 | lead | Flaky under full-suite load (~1 in 15–35 runs): "TIME-009: a reader thread never sees a torn playhead" (T-008, TransportTests.swift:69) (T-050's scripted-events flake was a test race, fixed in 69ea8bf). A torn playhead would be a real bug, so investigate before calling it a test issue | E | todo |
+| DW-090 | T-050 | CoreAudio property listeners (T-051, IO-020) should emit the same `io/DeviceNotification.h` notifications so DeviceMonitor reads either source; render-time overruns stay with T-051 (DW-068) | E (T-051) | done (T-051: `io/CoreAudioDeviceListener`) |
+| DW-091 | lead | Flaky under full-suite load (~1 in 15–35 runs): "TIME-009: a reader thread never sees a torn playhead" (T-008, TransportTests.swift:69) (T-050's scripted-events flake was a test race, fixed in 69ea8bf). A torn playhead would be a real bug, so investigate before calling it a test issue | E | done (T-051: test race, not a torn playhead; seqlock correct; test waits for the first block and asserts ≥ 1000 published blocks) |
 | DW-092 | T-020 | Facade `paramInfoJSON(.gain)` should return `GainNode::kParamInfo` (level, mute); then update EngineClientTests.swift (expects "[]" for `.gain`). Same hook as DW-078 | B | todo |
 | DW-093 | T-020 | Goldens: bus_send_sum with pre- and post-fader sends; strip mute ramp; phase-invert null; gain-node level step; muted track with sends goes silent and fades back | E (T-019 / T-025) | todo |
 | DW-094 | T-016 | Real `SetParam` command needs a param-target design (likely shared with 11's `ParamTarget`); MODEL-032 must check model IDs ≤ `GraphNodeID.maxModelID` (2^56−1), since NodeIDs carry a role in the top 8 bits | M (T-022) | done (T-022: `ParamTarget` in `DAWModel/Project/ParamTarget.swift`, strip/sendLevel/device; spec 11 can adopt it) |
@@ -307,3 +307,11 @@ Recorded by the lead from worker reports.
 | DW-112 | T-022 | `SetParam` on a device param index ≥ the kind's published ParamInfo count (or a kind without ParamInfo, e.g. FakeEngine) grows the slot range → structural rebuild instead of a slot write. Goes away once every kind publishes ParamInfo; otherwise cap indices | M/B (with DW-092) | todo |
 | DW-113 | T-022 | No `RenameBus`/`MoveBus` (RenameTrack/MoveTrack take tracks only); the mixer UI (UI-030) will likely want them | M (before T-076) | todo |
 | DW-114 | T-022 | Once dawmcp exists: run a routing scenario (AddBus/AddTrack/AddSend/SetTrackOutput, cycle rejection → CTL-003 `routingCycle` data, render + analyze) | B (T-018) | todo |
+| DW-115 | T-051 | dawctl/dawmcp device methods: create the engine with `DriverConfig(driver: .fake)` (Dispatcher's `EngineFactory` takes only a sample rate today), `device.list`, `device.set` (`setDevice`), `device.simulate` (`simulateDeviceEvent`), `deviceChanged` with its `DeviceChange` in `engine.events`; then a dawmcp check of a scripted loss | B (T-018) | todo |
+| DW-116 | T-051 | Add `io/DeviceMonitor.h` (`DeviceMonitorHost`, `DeviceSwap`) to the 04 Interfaces block, with DW-069 (Interfaces change → user) | spec (user/lead) | todo |
+| DW-117 | T-051 | `GraphCompiler` fixes its sample rate at construction, so a session-rate change replaces the compiler and maps tickets via `ticketBase`; `GraphCompiler::setSampleRate` would be simpler | E (small) | todo |
+| DW-118 | T-051 | After a session-rate change, loaded assets keep their load rate; the facade posts `assetsReloaded` with `unsupported`. The facade doesn't keep asset paths, so T-056 must (see DW-077) | E+M (T-056) | todo |
+| DW-119 | T-051 | IO-021 (2) "finalize recordings" only disarms recording (`DeviceHost::finalizeRecordings`, `Impl::stopForDeviceChange`) | REC (09) | todo |
+| DW-120 | T-051 | A device lost during an export: notifications are dropped while the export pauses the device; a failed restart afterwards reports `startFailed` and recovers on the next notification, with no fallback to the default | E (small) | todo |
+| DW-121 | T-051 | FakeDeviceDriver `start()` with an explicit rate doesn't move the fake device's nominal rate (CoreAudioDriver's does), so fake runs never produce the "rate set back" notification | E (small) | todo |
+| DW-122 | T-051 | Document `DAW_DEVICE_EVENT_TESTS=1` in 14 next to `DAW_DEVICE_INPUT_TESTS` / `DAW_SKIP_DEVICE_TESTS` | lead | todo |

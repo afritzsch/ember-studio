@@ -26,6 +26,7 @@ public final class FakeEngine: EngineProtocol {
         case instantiatePlugin(slot: NodeIDValue)
         case setPluginState(slot: NodeIDValue)
         case setDevice(DriverConfig)
+        case simulateDeviceEvent(DeviceEvent)
     }
 
     private struct State {
@@ -237,6 +238,13 @@ public final class FakeEngine: EngineProtocol {
 
     public func setDevice(_ config: DriverConfig) throws(DAWError) {
         state.withLock { $0.calls.append(.setDevice(config)) }
+        throw .notImplemented("FakeEngine has no device")
+    }
+
+    /// Recorded, then refused like `setDevice`. To test reactions to device changes, `post` a
+    /// `deviceChanged` event with a `DeviceChange` instead.
+    public func simulateDeviceEvent(_ event: DeviceEvent) throws(DAWError) {
+        state.withLock { $0.calls.append(.simulateDeviceEvent(event)) }
         throw .notImplemented("FakeEngine has no device")
     }
 
