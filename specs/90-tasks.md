@@ -62,7 +62,7 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 | Task | Lane | Title | Requirements | Depends on | Status |
 |---|---|---|---|---|---|
 | T-030 | M | Clip + tempo/signature + loop commands | MODEL-005 (clip/tempo subset) | T-022 | done |
-| T-031 | M | Persistence: folder format, atomic save, migrations, autosave, recovery, offline assets | MODEL-040..046 | T-030 | ready |
+| T-031 | M | Persistence: folder format, atomic save, migrations, autosave, recovery, offline assets | MODEL-040..046 | T-030 | wip(t-031-persistence) |
 | T-032 | U+B | App shell, window, view-model pattern, toasts, ControlSocketServer, attach mode, UI dump/snapshot | UI-001, 003, 004, 050..052, CTL-011, 023, 030, 031 | T-018 | todo |
 | T-033 | U | Arrange canvas: tiles, waveforms (Metal), grid/snap, clip gestures, playhead layer | UI-010..014 | T-032, T-030 | todo |
 | T-034 | U | Toolbar, transport, keyboard shortcuts | UI-002 | T-032 | todo |
