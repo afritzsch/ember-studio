@@ -122,6 +122,7 @@ struct FakeDeviceDriver::Impl {
     std::atomic<bool> parked{false};
     std::atomic<uint64_t> parkedLimit{0};
     std::atomic<uint64_t> violations{0};
+    std::atomic<uint64_t> overloads{0};
 
     // inject() → render thread (pushed under `control`), and the IO-020 seam out.
     SpscQueue<FakeDeviceEvent, 64> commands;
@@ -192,6 +193,7 @@ struct FakeDeviceDriver::Impl {
             }
             case FakeDeviceEventType::processorOverload:
                 engine.telemetry().countXrun();  // IO-023, DW-049: as CoreAudioDriver counts them
+                overloads.fetch_add(1, std::memory_order_relaxed);
                 notify(DeviceNotificationType::processorOverload, id);
                 break;
         }
@@ -367,7 +369,9 @@ Result<void> FakeDeviceDriver::start(const DriverConfig& request) {
     s.ringMask = ringFrames != 0 ? ringFrames - 1 : 0;
     s.loopbackDelay = delay;
     s.runFrames = 0;
-    s.renderer.configure(resolved->bufferFrames);
+    // IO-023: overruns are judged against the device clock, which only real-time pacing has.
+    s.renderer.configure(resolved->bufferFrames,
+                         s.spec.pacing == FakePacing::realtime ? resolved->sampleRate : 0.0);
 
     s.config = {};
     s.config.outputDevice = outID;
@@ -432,6 +436,7 @@ bool FakeDeviceDriver::waitUntilIdle(std::chrono::milliseconds timeout) const {
 uint64_t FakeDeviceDriver::cycles() const { return impl_->renderer.cycles(); }
 uint64_t FakeDeviceDriver::frames() const { return impl_->renderer.frames(); }
 uint64_t FakeDeviceDriver::rtViolations() const { return impl_->violations.load(std::memory_order_relaxed); }
+uint64_t FakeDeviceDriver::overloads() const { return impl_->overloads.load(std::memory_order_relaxed); }
 
 Result<void> FakeDeviceDriver::inject(const FakeDeviceEvent& event) {
     Impl& s = *impl_;
