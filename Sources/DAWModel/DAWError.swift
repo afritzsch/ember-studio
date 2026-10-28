@@ -59,10 +59,13 @@ public enum EngineErrorCode: String, Hashable, Sendable, Codable {
 
 extension DAWError: CustomStringConvertible {
     public var description: String {
+        // No unapplied `String.init` here: when this file and EngineClient.swift share a batch
+        // compile job, that reference hides CxxStdlib's `String(std.string)` from EngineClient
+        // (a compiler issue with C++ interop; seen in T-022 on a full rebuild).
         switch self {
         case .notFound(let kind, let id): "no \(kind) with id \(id)"
         case .invalidArgument(let detail): "invalid argument: \(detail)"
-        case .routingCycle(let path): "routing cycle: \(path.map(String.init).joined(separator: " → "))"
+        case .routingCycle(let path): "routing cycle: \(path.map { "\($0)" }.joined(separator: " → "))"
         case .invalidTempoMap(let reason): "invalid tempo map: \(reason.rawValue)"
         case .unknownCommandType(let type): "unknown command type \"\(type)\""
         case .malformedCommand(let detail): "malformed command: \(detail)"
