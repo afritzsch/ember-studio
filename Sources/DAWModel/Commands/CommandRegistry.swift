@@ -24,6 +24,24 @@ public enum CommandRegistry {
         SetSendTap.self,
         SetSidechain.self,
         SetParam.self,
+        // T-030: assets, clips, tempo, loop (MODEL-005, clip/tempo subset)
+        ImportAsset.self,
+        RemoveAsset.self,
+        AddClip.self,
+        RemoveClip.self,
+        RestoreClip.self,
+        MoveClip.self,
+        ResizeClip.self,
+        SplitClip.self,
+        SetClip.self,
+        SetClipGain.self,
+        SetClipFades.self,
+        SetTempoEvent.self,
+        RemoveTempoEvent.self,
+        SetTimeSignature.self,
+        RemoveTimeSignature.self,
+        SetLoop.self,
+        RestoreLoop.self,
     ]
 
     private static let table = Mutex<[String: any Command.Type]>(
