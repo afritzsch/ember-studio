@@ -8,16 +8,14 @@ import Testing
 @Suite("Headless determinism (CTL-004)")
 @MainActor
 struct DeterminismTests {
-    init() { ControlTestCommands.register() }
-
     /// Builds a project with a resampled asset on a track (IDs: master 1, asset 2, track 3,
     /// clip 4), renders it, and returns the responses by method.
     private func run(in dir: TempDir, output: String) async throws -> [String: JSONValue] {
         let script = try ControlScript(parsing: """
             project.new {"name": "det", "sampleRate": 48000}
             asset.import {"path": "tone.wav"}
-            command.apply {"command": {"type": "ControlTestAddAudioTrack", "name": "Tone"}}
-            command.apply {"command": {"type": "ControlTestAddAudioClip", "trackID": 3, "assetID": 2, "start": 0, "length": 7680}}
+            command.apply {"command": {"type": "AddTrack", "name": "Tone", "kind": "audio"}}
+            command.apply {"command": {"type": "AddClip", "trackID": 3, "assetID": 2, "start": 0, "length": 7680}}
             render.offline {"from": 0, "to": 7680, "path": "\(output)", "tail": false}
             project.get
             engine.telemetry

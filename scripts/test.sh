@@ -60,7 +60,7 @@ swift_build() {
 # BUILD-001/002/003: the manifest declares the layout from 01-build-layout.
 check_manifest() {
     swift package dump-package | python3 -I -c '
-import json, sys
+import json, os, sys
 
 pkg = json.load(sys.stdin)
 errors = []
@@ -92,11 +92,15 @@ for name, kind in [("DAWEngine", "library"), ("DAWModel", "library"), ("DAWContr
                    ("dawctl", "executable"), ("dawmcp", "executable"), ("PluginScanner", "executable")]:
     check(products.get(name) == kind, f"missing {kind} product {name}")
 
-# BUILD-002: every Swift target that reaches DAWEngine enables C++ interop.
+# BUILD-002: every Swift target that reaches DAWEngine enables C++ interop. C-family targets
+# (no .swift sources, e.g. DAWEngineTestSupport) have nothing to enable it for (DW-023).
 def reaches_engine(t, seen=()):
     return any(d == "DAWEngine" or (d not in seen and reaches_engine(d, seen + (d,))) for d in deps(t))
+def has_swift_sources(t):
+    path = targets[t].get("path") or ("Tests/" if targets[t]["type"] == "test" else "Sources/") + t
+    return any(f.endswith(".swift") for _, _, files in os.walk(path) for f in files)
 for name in targets:
-    if name not in ("DAWEngine", "VST3SDK") and reaches_engine(name):
+    if name not in ("DAWEngine", "VST3SDK") and reaches_engine(name) and has_swift_sources(name):
         check(has_setting(name, "swift", "interoperabilityMode", "Cxx"), f"{name} needs .interoperabilityMode(.Cxx)")
 
 # BUILD-003: DAWEngine links the vendored SDK.
@@ -147,6 +151,19 @@ check_engine_objects() {
         echo "BUILD-005: RT trap marker present in Release"; ok=1
     else
         echo "BUILD-005: RT trap compiled out of Release"
+    fi
+    # DW-013: the trap itself, not just the marker. daw::RtTrap::install() is defined in Debug
+    # (core/RtTrap.cpp) and an inline no-op in Release, so Release exports no such symbol.
+    local install='T __ZN3daw6RtTrap7installEv'
+    if grep -q "$install" <<<"$debug_syms"; then
+        echo "BUILD-005: RtTrap::install defined in Debug"
+    else
+        echo "BUILD-005: RtTrap::install missing from Debug"; ok=1
+    fi
+    if grep -q "$install" <<<"$release_syms"; then
+        echo "BUILD-005: RtTrap::install defined in Release"; ok=1
+    else
+        echo "BUILD-005: RtTrap::install compiled out of Release"
     fi
     return $ok
 }
@@ -219,20 +236,44 @@ check_app_bundle() {
     return $ok
 }
 
-# TEST-001/002: golden fixtures run inside the GoldenTests target under `swift test`. Until the
-# harness lands (T-019) there are none, which is not a failure.
-report_goldens() {
-    local count
-    count=$(find Tests/GoldenTests/fixtures -name '*.jsonl' 2>/dev/null | wc -l | tr -d ' ')
-    echo "golden fixtures: $count (run by GoldenTests under swift test)"
+# Every test target except GoldenTests, which has its own stage.
+swift_test() {
+    swift test --skip '^GoldenTests\.'
+}
+
+# TEST-001/002 (DW-001): every fixture has a reference and every reference a fixture, then
+# GoldenTests renders each fixture in-process and nulls it against its reference (≤ −100 dBFS,
+# 0 RT violations; Tests/GoldenTests/GoldenHarness.swift). DAW_GOLDEN_UPDATE is cleared so this
+# stage can never rewrite a reference (TEST-003: that is scripts/update-goldens.sh).
+check_goldens() {
+    local dir=Tests/GoldenTests ok=0 name count
+    count=$(find "$dir/fixtures" -maxdepth 1 -name '*.jsonl' | wc -l | tr -d ' ')
+    echo "golden fixtures: $count"
+    (( count > 0 )) || { echo "no golden fixtures"; ok=1; }
+    for f in "$dir"/fixtures/*.jsonl; do
+        name=$(basename "$f" .jsonl)
+        [[ -f "$dir/references/$name.wav" ]] || { echo "TEST-002: $name has no reference (scripts/update-goldens.sh $name)"; ok=1; }
+    done
+    for f in "$dir"/references/*.wav; do
+        name=$(basename "$f" .wav)
+        [[ -f "$dir/fixtures/$name.jsonl" ]] || { echo "TEST-002: reference $name.wav has no fixture"; ok=1; }
+    done
+    local out rc
+    out=$(env -u DAW_GOLDEN_UPDATE swift test --filter '^GoldenTests\.' 2>&1)
+    rc=$?
+    echo "$out"
+    (( rc == 0 )) || ok=1
+    # A filter that matched nothing would pass too; the renders suite must have run.
+    grep -q 'Suite "Golden renders (TEST-001, TEST-002)" passed' <<<"$out" || { echo "golden renders didn't run"; ok=1; }
+    return $ok
 }
 
 step bootstrap scripts/bootstrap.sh
 step manifest check_manifest
 step submodule check_submodule
 step swift-build-debug swift_build debug
-step swift-test swift test
-step goldens report_goldens
+step swift-test swift_test
+step goldens check_goldens
 step swift-build-release swift_build release
 step engine-objects check_engine_objects
 if (( run_xcode )); then

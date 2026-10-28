@@ -32,6 +32,8 @@ MidiClipPlayer::MidiClipPlayer(std::vector<Note> notes) : notes_(std::move(notes
     std::stable_sort(notes_.begin(), notes_.end(),
                      [](const Note& a, const Note& b) { return a.start < b.start; });
     active_.resize(notes_.size());
+    maxEnd_.reserve(notes_.size());
+    for (const Note& n : notes_) maxEnd_.push_back(maxEnd_.empty() ? n.end : std::max(maxEnd_.back(), n.end));
 }
 
 void MidiClipPlayer::prepare(const PrepareInfo&) {
@@ -55,6 +57,28 @@ size_t MidiClipPlayer::firstStartingAtOrAfter(Tick tick) const DAW_RT {
     return lo;
 }
 
+void MidiClipPlayer::chase(const TransportBlock& block, const TransportSegment& seg,
+                           MidiEventWriter& out) DAW_RT {
+    // DW-103: the notes that started before the segment and still sound at its first sample.
+    // Ticks before startTick sound before startSample (TransportSegments.h), so start <
+    // startTick puts the on in the past; the off must not be. maxEnd_ skips the prefix of notes
+    // that all ended earlier; the scan is bounded by the note count (CONV-RT-04).
+    const size_t stop = firstStartingAtOrAfter(seg.startTick);
+    size_t lo = 0, hi = stop;
+    while (lo < hi) {  // first i with maxEnd_[i] > startTick − 1, i.e. could still sound
+        const size_t mid = lo + (hi - lo) / 2;
+        if (maxEnd_[mid] < seg.startTick) lo = mid + 1;
+        else hi = mid;
+    }
+    for (size_t i = lo; i < stop; ++i) {
+        const Note& n = notes_[i];
+        if (n.end < seg.startTick || block.tempo->tickToSample(n.end) <= seg.startSample) continue;
+        if (!roomForOn(out)) continue;  // dropped, never hanging
+        out.push(MidiEvent{seg.frameOffset, 3, {uint8_t(kNoteOn | n.channel), n.pitch, n.velocity}});
+        activate(static_cast<uint32_t>(i));
+    }
+}
+
 void MidiClipPlayer::activate(uint32_t index) DAW_RT {
     if (numActive_ == active_.size()) return;  // can't happen: a note is on at most once
     const Tick end = notes_[index].end;
@@ -75,7 +99,10 @@ void MidiClipPlayer::playSegment(const TransportBlock& block, const TransportSeg
                                  MidiEventWriter& out) DAW_RT {
     // Hanging notes (DSP-003): a segment that doesn't continue the previous one's ticks (wrap,
     // locate, tempo edit under the playhead) first ends every note the old pass left on.
-    if (!havePos_ || seg.afterWrap || seg.startTick != nextTick_) releaseAll(out, seg.frameOffset);
+    if (!havePos_ || seg.afterWrap || seg.startTick != nextTick_) {
+        releaseAll(out, seg.frameOffset);
+        chase(block, seg, out);  // DW-103
+    }
     havePos_ = true;
     nextTick_ = seg.endTick;
 
@@ -94,7 +121,7 @@ void MidiClipPlayer::playSegment(const TransportBlock& block, const TransportSeg
         } else if (onTick < seg.endTick) {
             // Keep room for this note's off and every other note's still to come.
             const Note& n = notes_[next];
-            if (out.capacity() - out.size() >= numActive_ + 2) {
+            if (roomForOn(out)) {
                 out.push(MidiEvent{frameOfTick(block, seg, onTick), 3,
                                    {uint8_t(kNoteOn | n.channel), n.pitch, n.velocity}});
                 activate(static_cast<uint32_t>(next));

@@ -1,0 +1,14 @@
+# sine_through_graph (M1, 14-testing): the engine skeleton and the master output.
+# One audio track without clips; in the golden engine its source is a 1 kHz full-scale SineNode
+# (TEST-004). Track strip and master strip are at unity gain, centre pan: each applies the
+# -3 dB constant-power pan law (MIX-005), so both channels peak at 0.5 (-6.02 dBFS).
+# 1920 ticks at the default 120 bpm is one second: 48000 frames at 48 kHz, float32, no tail.
+# @node {"kind": "audioClipPlayer", "type": "sine", "frequency": 1000, "level": 1}
+# @expect {"field": "frames", "value": 48000}
+# @expect {"field": "peakDb", "value": -6.02, "tolerance": 0.01}
+# @expect {"field": "rmsDb", "value": -9.03, "tolerance": 0.01}
+# @expect {"field": "spectrumPeakHz", "value": 1000, "tolerance": 1}
+# @expect {"field": "firstNonSilentSample", "value": 1}
+project.new {"name": "sine_through_graph", "sampleRate": 48000}
+command.apply {"command": {"type": "AddTrack", "name": "Sine", "kind": "audio"}}
+render.offline {"from": 0, "to": 1920, "path": "sine_through_graph.wav", "tail": false}

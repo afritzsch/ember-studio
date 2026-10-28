@@ -5,6 +5,10 @@
 //
 //   audioClipPlayer  DSP-001; clips are fixed at creation (DW-051, see AudioClipPlayer.h), assets
 //                    come from `lookup`
+//   midiClipPlayer   DSP-003; MIDI only (no audio output), notes are fixed at creation (DW-051,
+//                    see MidiClipPlayer.h)
+//   sampler          DSP-020..023; zones from configJSON, fixed at creation (DW-051, see
+//                    Sampler.h), assets from `lookup`; params beyond numParams use defaults
 //   channelStrip     DSP-010 / MIX-005 gain, pan, mute, phase; needs numParams >=
 //                    ChannelStrip::kNumParams (invalidArgument otherwise). Meters into
 //                    `telemetry` (the engine's) with the MeterID GraphBuilder assigns (DW-048,

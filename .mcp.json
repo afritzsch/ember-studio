@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "dawmcp": {
+      "type": "stdio",
+      "command": "sh",
+      "args": ["-c", "exec \"$(git rev-parse --show-toplevel)/scripts/dawmcp.sh\""]
+    }
+  }
+}

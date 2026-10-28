@@ -7,14 +7,12 @@ import Testing
 // here; DeterminismTests and DawctlTests run the real one.
 
 private func addTrack(_ name: String) -> JSONValue {
-    ["type": "ControlTestAddAudioTrack", "name": .string(name)]
+    ["type": "AddTrack", "name": .string(name), "kind": "audio"]
 }
 
 @Suite("Dispatcher methods (CTL-002)")
 @MainActor
 struct DispatcherMethodTests {
-    init() { ControlTestCommands.register() }
-
     // MARK: project.*
 
     @Test("CTL-002 project.new: a project at the given rate with a fresh engine; headless IDs are sequential (DW-033)")
@@ -150,6 +148,29 @@ struct DispatcherMethodTests {
         #expect(await dispatcher.failure(.transportSetLoop, ["enabled": true, "start": 960, "end": 960])?.dawError == "invalidArgument")
         #expect(await dispatcher.failure(.transportLocate, ["tick": -1])?.dawError == "invalidArgument")
         #expect(await dispatcher.failure(.transportLocate, ["tick": "x"])?.dawError == "invalidParams")
+    }
+
+    @Test("DW-123: transport.setLoop performs SetLoop, so the project's loop follows; clearing sets it to null")
+    func setLoopFollowsProject() async throws {
+        let (dispatcher, box) = TestDispatchers.fake()
+        _ = try await dispatcher.ok(.projectNew, ["name": "a"])
+        _ = try await dispatcher.ok(.transportSetLoop, ["enabled": true, "start": 960, "end": 4800])
+        #expect(try await dispatcher.ok(.projectGet, ["path": "/loop"]) == ["start": 960, "end": 4800, "isEnabled": true])
+        #expect(dispatcher.store?.undoLabel == "Set Loop")
+        _ = try await dispatcher.ok(.transportSetLoop, ["enabled": false, "start": 960, "end": 4800])
+        #expect(try await dispatcher.ok(.projectGet, ["path": "/loop/isEnabled"]) == false)
+        let cleared = try await dispatcher.ok(.transportSetLoop, ["enabled": false])
+        #expect(cleared["loopEnabled"] == false)
+        #expect(dispatcher.store?.project.loop == nil)
+        _ = try await dispatcher.ok(.undo)
+        #expect(dispatcher.store?.project.loop == LoopRange(start: 960, end: 4800, isEnabled: false))
+
+        // SetLoop's own checks apply (MODEL-005: at least 4096 samples), and a refused loop never
+        // reaches the engine.
+        let calls = box.last.calls.count
+        #expect(await dispatcher.failure(.transportSetLoop, ["enabled": true, "start": 0, "end": 10])?.dawError == "invalidArgument")
+        #expect(await dispatcher.failure(.transportSetLoop, ["enabled": true])?.dawError == "invalidParams")
+        #expect(box.last.calls.count == calls)
     }
 
     @Test("CTL-002 transport.wait: needs a live engine; returns at the tick or times out with the position")
@@ -290,7 +311,7 @@ struct DispatcherMethodTests {
         try """
             # a fixture as T-019 writes them
             project.new {"name": "fx"}
-            command.apply {"command": {"type": "ControlTestAddAudioTrack", "name": "T"}}
+            command.apply {"command": {"type": "AddTrack", "name": "T", "kind": "audio"}}
             render.offline {"from": 0, "to": 960, "path": "fx.wav"}
             audio.analyze {"path": "fx.wav"}
             """.write(to: dir.file("simple.jsonl"), atomically: true, encoding: .utf8)

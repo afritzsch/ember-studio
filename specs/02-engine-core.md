@@ -101,7 +101,7 @@ public:
 | ENG-061 | done (T-002, T-004) | `CoreUtilsTests` (AudioBufferPool cases); `EngineRenderTests.graphValidation` (RenderGraph owns its pool) |
 | ENG-030..033 | done (T-003) | `RtTrapTests` (Debug only). Allocations caught via libmalloc `malloc_logger`, locks via GOT rebinding — not dyld `__interpose` (see DW-012). Engine installs the trap and `render` runs in an `RtScope` (T-004); telemetry `rtViolations` = the render scope's count, `firstViolation()` exposed (T-006, DW-024) |
 | ENG-020, 021 | done (T-005) | `ParamSlotTableTests`, `ParamSlotTests`, `ParamRealtimeTests` (RtScope count 0). `allocate(count)` returns a contiguous range; `generation` counts writes |
-| ENG-022 | partial (T-005) | `ParamSmootherTests` (0→1 step = linear ramp for every block size 0..4096); golden pending (T-019) |
+| ENG-022 | done (T-005, T-019) | `ParamSmootherTests` (0→1 step = linear ramp for every block size 0..4096); golden `gain_ramp_smoothing` + `GoldenReferenceTests` (reference checked sample by sample) |
 | ENG-023 | partial (T-005) | `ParamSnapshotIsolationTests` (sweep leaves node config unchanged); "fader sweep → 0 publishes" pending Engine + GraphBuilder (T-012/T-014) |
 | ENG-001..004 | done (T-004) | `NodeAPITests` (lifecycle, replaced, nodeIO, midiWriter, randomBlockSizes 0..4096). RenderGraph doesn't route MIDI yet (T-012/T-040) |
 | ENG-010..015 | done (T-004) | `SnapshotTests` (10k publishes during render, freed on reclaim; stalled audio thread; idle reclaim; RetireQueue; silence). ASan clean; LSan unsupported on macOS, so the stress test counts frees. `renderEpoch` is odd during a block, even when idle (seq_cst) |

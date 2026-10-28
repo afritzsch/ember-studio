@@ -19,10 +19,13 @@ public final class Dispatcher {
 
     /// Creates the engine for a new or opened project at its session rate.
     public typealias EngineFactory = @MainActor (_ sampleRate: Double) throws(DAWError) -> any EngineProtocol
+    /// Creates a realtime engine (`project.new`/`project.open` with `engine.mode` realtime, DW-115).
+    public typealias RealtimeEngineFactory = @MainActor (_ config: DriverConfig) throws(DAWError) -> any EngineProtocol
 
     public struct Configuration {
         public var mode: Mode
         public var makeEngine: EngineFactory
+        public var makeRealtimeEngine: RealtimeEngineFactory
         /// CTL-004, DW-033: the n-th `project.new` gets the UUID 00000000-0000-0000-0000-<n in hex>
         /// instead of a random one, so the same requests give the same project JSON.
         public var deterministicProjectIDs: Bool
@@ -43,6 +46,7 @@ public final class Dispatcher {
         @MainActor public init(
             mode: Mode = .headless,
             makeEngine: @escaping EngineFactory = { rate throws(DAWError) in try EngineClient(.offline(sampleRate: rate)) },
+            makeRealtimeEngine: @escaping RealtimeEngineFactory = { config throws(DAWError) in try EngineClient(.realtime(config)) },
             deterministicProjectIDs: Bool? = nil,
             workingDirectory: URL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true),
             fixtureDirectories: [URL] = [],
@@ -53,6 +57,7 @@ public final class Dispatcher {
         ) {
             self.mode = mode
             self.makeEngine = makeEngine
+            self.makeRealtimeEngine = makeRealtimeEngine
             self.deterministicProjectIDs = deterministicProjectIDs ?? (mode == .headless)
             self.workingDirectory = workingDirectory
             self.fixtureDirectories = fixtureDirectories
@@ -193,6 +198,7 @@ public final class Dispatcher {
             let p: CommandApplyParams = try decode(params)
             return try encode(perform(decodeCommand(p.command)))
         case .commandBatch: return try encode(commandBatch(decode(params)))
+        case .commandSchema: return try encode(CommandCatalog.schemas(decode(params)))
         case .undo, .redo:
             let _: NoParams = try decode(params)
             let store = try requireStore()
@@ -218,6 +224,11 @@ public final class Dispatcher {
             let p: EngineParamInfoParams = try decode(params)
             let json = try requireEngine().paramInfoJSON(p.kind)
             return json.isEmpty ? .array([]) : try JSONValue(parsing: Data(json.utf8))
+        case .deviceList:
+            let _: NoParams = try decode(params)
+            return try encode(deviceList())
+        case .deviceSet: return try encode(deviceSet(decode(params)))
+        case .deviceSimulate: return try encode(deviceSimulate(decode(params)))
         case .uiState:
             let _: NoParams = try decode(params)
             return try await configuration.ui!.uiState()
@@ -232,7 +243,7 @@ public final class Dispatcher {
     private func projectNew(_ p: ProjectNewParams) throws -> ProjectNewResult {
         let id = configuration.deterministicProjectIDs ? Self.sequentialProjectID(projectsCreated + 1) : UUID()
         let project = try Project(id: id, name: p.name, sessionSampleRate: p.sampleRate ?? 48_000)
-        try install(ProjectStore(project: project))
+        try install(ProjectStore(project: project), engine: p.engine)
         projectsCreated += 1
         return ProjectNewResult(projectID: id)
     }
@@ -245,7 +256,7 @@ public final class Dispatcher {
     private func projectOpen(_ p: ProjectOpenParams) async throws -> ProjectOpenResult {
         let folder = resolve(p.path)
         let store = try await ProjectStore.open(folder, recover: p.recover ?? false)
-        let engine = try install(store)
+        let engine = try install(store, engine: p.engine)
         // MODEL-046: a missing file leaves its asset offline; its clips render silence.
         var offline: [ModelID] = []
         for asset in store.project.assets {
@@ -260,8 +271,18 @@ public final class Dispatcher {
     /// Makes `store` current with a new engine at its session rate. The previous store and
     /// engine stay as they were if this throws.
     @discardableResult
-    private func install(_ store: ProjectStore) throws -> any EngineProtocol {
-        let engine = try configuration.makeEngine(store.project.sessionSampleRate)
+    private func install(_ store: ProjectStore, engine params: EngineParams?) throws -> any EngineProtocol {
+        let rate = store.project.sessionSampleRate
+        let engine: any EngineProtocol
+        switch params?.mode ?? .offline {
+        case .offline:
+            engine = try configuration.makeEngine(rate)
+        case .realtime:
+            // DW-115: the fake devices unless another driver is asked for, at the session rate.
+            engine = try configuration.makeRealtimeEngine(DriverConfig(
+                outputDevice: params?.outputDevice ?? 0, sampleRate: rate, bufferFrames: params?.bufferFrames ?? 256,
+                driver: params?.driver ?? .fake))
+        }
         try store.attachEngine(engine, debounce: configuration.engineDebounce)
         drainEvents()
         self.store?.detachEngine()
@@ -379,10 +400,22 @@ public final class Dispatcher {
             engine.locate(p.tick)
         case .transportSetLoop:
             let p: TransportSetLoopParams = try decode(params)
-            guard p.start.raw >= 0, !p.enabled || p.start < p.end else {
-                throw DAWError.invalidArgument("loop [\(p.start.raw), \(p.end.raw)) is empty or negative")
+            let loop: LoopRange?
+            switch (p.start, p.end) {
+            case (nil, nil) where !p.enabled:
+                loop = nil
+            case (let start?, let end?):
+                guard start.raw >= 0, !p.enabled || start < end else {
+                    throw DAWError.invalidArgument("loop [\(start.raw), \(end.raw)) is empty or negative")
+                }
+                loop = LoopRange(start: start, end: end, isEnabled: p.enabled)
+            default:
+                throw ControlError.invalidParams("start and end go together; leave both out only to clear the loop (enabled: false)")
             }
-            engine.setLoop(enabled: p.enabled, start: p.start, end: p.end)
+            // DW-123: the document's loop follows, validated by SetLoop (MODEL-005), before the engine
+            // hears of it. Engine sync doesn't push the loop yet, so the engine is set directly too.
+            try requireStore().perform(SetLoop(loop: loop))
+            engine.setLoop(enabled: loop?.isEnabled ?? false, start: loop?.start ?? Tick(0), end: loop?.end ?? Tick(0))
         case .transportRecord:
             let p: TransportRecordParams = try decode(params)
             engine.setRecording(p.enabled)
@@ -555,6 +588,46 @@ public final class Dispatcher {
             nextEventSeq += 1
         }
         if eventLog.count > Self.eventLogCapacity { eventLog.removeFirst(eventLog.count - Self.eventLogCapacity) }
+    }
+
+    // MARK: device.* (DW-115)
+
+    private func deviceList() throws -> DeviceListResult {
+        let engine = try requireEngine()
+        let driver: DeviceDriverKind? = if case .realtime(let config) = engine.mode { config.driver } else { nil }
+        return DeviceListResult(devices: engine.devices(), outputDeviceID: engine.telemetry().outputDeviceID, driver: driver)
+    }
+
+    private func deviceSet(_ p: DeviceSetParams) throws -> DeviceStateResult {
+        let engine = try requireEngine()
+        guard case .realtime(let current) = engine.mode else {
+            throw DAWError.invalidArgument("device.set needs a realtime engine (project.new {engine: {mode: \"realtime\"}})")
+        }
+        return try deviceChange(engine) { () throws(DAWError) in
+            try engine.setDevice(DriverConfig(
+                outputDevice: p.outputDevice ?? 0, inputDevice: p.inputDevice ?? 0, sampleRate: p.sampleRate ?? 0,
+                bufferFrames: p.bufferFrames ?? current.bufferFrames, outputChannels: current.outputChannels,
+                inputChannels: current.inputChannels, driver: current.driver))
+        }
+    }
+
+    private func deviceSimulate(_ p: DeviceSimulateParams) throws -> DeviceStateResult {
+        let engine = try requireEngine()
+        return try deviceChange(engine) { () throws(DAWError) in
+            // Returns once the engine has reacted (IO-021), so its events are queued by now.
+            try engine.simulateDeviceEvent(DeviceEvent(p.kind, deviceID: p.deviceID ?? 0, sampleRate: p.sampleRate ?? 0))
+        }
+    }
+
+    /// Runs a device change and reports where the engine ended up and the events it raised.
+    private func deviceChange(_ engine: any EngineProtocol, _ change: () throws(DAWError) -> Void) throws -> DeviceStateResult {
+        drainEvents()
+        let before = eventLog.last?.seq ?? 0
+        try change()
+        drainEvents()
+        let telemetry = engine.telemetry()
+        return DeviceStateResult(outputDeviceID: telemetry.outputDeviceID, deviceRunning: telemetry.deviceRunning,
+                                 sampleRate: telemetry.sampleRate, events: eventLog.filter { $0.seq > before })
     }
 
     // MARK: test.fixture

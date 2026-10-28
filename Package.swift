@@ -110,6 +110,10 @@ let package = Package(
         .executable(name: "dawmcp", targets: ["dawmcp"]),
         .executable(name: "PluginScanner", targets: ["PluginScanner"]),
     ],
+    dependencies: [
+        // CTL-020: the official MCP Swift SDK, pinned to an exact version (dawmcp only).
+        .package(url: "https://github.com/modelcontextprotocol/swift-sdk.git", exact: "0.12.1"),
+    ],
     targets: [
         // MARK: Vendor
 
@@ -161,7 +165,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "dawmcp",
-            dependencies: ["DAWModel", "DAWControl"],
+            dependencies: ["DAWModel", "DAWControl", .product(name: "MCP", package: "swift-sdk")],
             swiftSettings: cxxInterop
         ),
 
@@ -236,6 +240,12 @@ let package = Package(
             swiftSettings: cxxInterop
         ),
         .testTarget(
+            name: "DawmcpTests",
+            // dawmcp is imported (@testable) for its tool layer and launched as a binary (CTL-020).
+            dependencies: ["dawmcp", "DAWControl", "DAWModel", .product(name: "MCP", package: "swift-sdk")],
+            swiftSettings: cxxInterop
+        ),
+        .testTarget(
             name: "PluginScannerTests",
             // PluginScanner is listed so `swift test` builds the binary the tests launch.
             dependencies: ["PluginCatalog", "PluginScanner"],
@@ -244,7 +254,10 @@ let package = Package(
         ),
         .testTarget(
             name: "GoldenTests",
-            dependencies: ["DAWModel", "DAWControl"],
+            // TEST-001/002/004: fixtures run in-process through DAWControl's Dispatcher on an
+            // engine with the test-only nodes (DAWEngineTestSupport's DAWGoldenSupport module).
+            dependencies: ["DAWModel", "DAWControl", "DAWEngine", "DAWEngineTestSupport"],
+            resources: [.copy("fixtures"), .copy("references")],
             swiftSettings: cxxInterop
         ),
     ],

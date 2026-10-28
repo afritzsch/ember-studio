@@ -50,4 +50,5 @@ macDAW/
 | ID | status | test |
 |---|---|---|
 | BUILD-001..008 | done (T-001) | `scripts/test.sh` stages: manifest, submodule, swift-build-debug/release, swift-test, engine-objects, xcodebuild, app-bundle, arch, bootstrap. BUILD-004 mic prompt not yet exercised (needs recording) |
+| BUILD-007 | done (T-001, T-019) | `scripts/test.sh` stages `swift-test` (all but GoldenTests) and `goldens` (fixture/reference pairing + GoldenTests real comparisons, DW-001) |
 | BUILD-009 | todo (T-084) | |
