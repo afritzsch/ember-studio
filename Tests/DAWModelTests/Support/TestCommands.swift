@@ -78,10 +78,14 @@ struct TestAddClip: Command {
     var length: Tick
     var label: String { "Add Clip" }
 
+    /// A clip of the project's first asset (`Project.withTestAsset`), kept in timeline order
+    /// (DW-110) so the Debug validate() hook accepts it.
     func apply(to project: inout Project) throws(DAWError) -> any Command {
+        guard let asset = project.assets.first?.id else { throw .notFound(kind: "asset", id: 0) }
         let id = project.ids.allocate()
         try project.updateTrack(trackID) { track in
-            track.clips.append(.audio(AudioClip(id: id, assetID: 0, start: start, length: length)))
+            track.clips.append(.audio(AudioClip(id: id, assetID: asset, start: start, length: length)))
+            track.clips.sort { ($0.start, $0.id) < ($1.start, $1.id) }
         }
         return TestRemoveClip(trackID: trackID, clipID: id)
     }
@@ -135,6 +139,7 @@ struct TestNudgeClip: Command {
             else { throw .notFound(kind: "clip", id: clipID) }
             clip.start = Tick(clip.start.raw + delta)
             track.clips[index] = .audio(clip)
+            track.clips.sort { ($0.start, $0.id) < ($1.start, $1.id) }
         }
         return TestNudgeClip(trackID: trackID, clipID: clipID, delta: -delta)
     }
@@ -173,6 +178,16 @@ struct TestSetProject: Command {
     func apply(to project: inout Project) throws(DAWError) -> any Command {
         defer { project = self.project }
         return TestSetProject(project: project)
+    }
+}
+
+extension Project {
+    /// An empty project with one asset, for `TestAddClip`.
+    static func withTestAsset(name: String = "Untitled") -> Project {
+        var project = Project(name: name)
+        project.assets = [AssetRef(id: project.ids.allocate(), path: "Audio/test.wav", channels: 2,
+                                   originalSampleRate: 48_000, frames: 48_000)]
+        return project
     }
 }
 

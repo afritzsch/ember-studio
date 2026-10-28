@@ -9,7 +9,30 @@ extension Project {
         for track in tracks { try track.validateContents() }
         for bus in buses { try bus.validateContents() }
         try master.validateContents()
+        try validateAssets()
         try validateRouting()
+        try validateLoop()
+    }
+
+    /// Assets are well-formed and every audio clip's asset exists (T-030). An asset whose file is
+    /// missing stays in the project, offline (MODEL-046), so its clips keep a valid reference.
+    func validateAssets() throws(DAWError) {
+        for asset in assets { try asset.validate() }
+        let ids = Set(assets.map(\.id))
+        for track in tracks {
+            for case .audio(let clip) in track.clips where !ids.contains(clip.assetID) {
+                throw .invariant("audio clip \(clip.id) uses missing asset \(clip.assetID)")
+            }
+        }
+    }
+
+    /// The loop region is a non-empty range of non-negative ticks. Its minimum length (DW-060) is
+    /// in samples, so a tempo edit can shrink it; `SetLoop` checks that, not this.
+    func validateLoop() throws(DAWError) {
+        guard let loop else { return }
+        guard loop.start.raw >= 0, loop.end > loop.start else {
+            throw .invariant("loop [\(loop.start.raw), \(loop.end.raw)) is empty or negative")
+        }
     }
 
     /// Every ID is unique and in 1…`GraphNodeID.maxModelID` (NodeIDs carry a role in the top
@@ -131,10 +154,7 @@ extension DeviceSlot {
 extension Track {
     func forEachID(_ body: (ModelID, String) -> Void) {
         body(id, "track")
-        for clip in clips {
-            body(clip.id, "clip")
-            if case .midi(let midi) = clip { for note in midi.notes { body(note.id, "note") } }
-        }
+        for clip in clips { clip.forEachID(body) }
         for folder in takeFolders { body(folder.id, "take folder") }
         instrument?.forEachID(body)
         for slot in inserts { slot.forEachID(body) }
@@ -148,19 +168,17 @@ extension Track {
         for send in sends { try send.validate() }
         try instrument?.validate()
         for slot in inserts { try slot.validate() }
-        for clip in clips {
-            guard clip.start.raw >= 0, clip.length.raw > 0 else {
-                throw .invariant("clip \(clip.id) has start \(clip.start.raw), length \(clip.length.raw)")
-            }
+        for (i, clip) in clips.enumerated() {
             switch clip {
             case .audio(let audio):
                 guard kind == .audio else { throw .invariant("audio clip \(audio.id) on MIDI track \(id)") }
-                guard audio.sourceOffsetSamples >= 0, audio.fadeIn.raw >= 0, audio.fadeOut.raw >= 0 else {
-                    throw .invariant("audio clip \(audio.id) has a negative offset or fade")
-                }
             case .midi(let midi):
                 guard kind == .midi else { throw .invariant("MIDI clip \(midi.id) on audio track \(id)") }
-                try midi.validateNotes()
+            }
+            try clip.validate()
+            // DW-110
+            if i > 0, !Clip.timelineOrder(clips[i - 1], clip) {
+                throw .invariant("clips of track \(id) are not sorted by start (then id)")
             }
         }
     }

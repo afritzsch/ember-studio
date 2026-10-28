@@ -30,7 +30,7 @@ struct UndoStackTests {
         var performed = 0
         var rejected = 0
         for _ in 0..<200 {
-            let original = Project(name: "Random")
+            let original = Project.withTestAsset(name: "Random")
             var project = original
             var stack = UndoStack()
             var states = [project]
@@ -140,7 +140,7 @@ struct UndoStackTests {
 
     @Test("MODEL-003: a 100-step drag is one undo entry, and undo/redo restore start and end")
     func hundredStepDrag() throws {
-        var project = Project()
+        var project = Project.withTestAsset()
         var stack = UndoStack()
         try stack.perform(TestAddTrack(name: "A"), on: &project)
         let track = project.tracks[0].id
@@ -209,7 +209,7 @@ struct UndoStackTests {
 
     @Test("MODEL-004: a composite is one entry; its inverse undoes the steps in reverse order")
     func compositeUndo() throws {
-        var project = Project()
+        var project = Project.withTestAsset()
         var stack = UndoStack()
         try stack.perform(TestAddTrack(name: "A"), on: &project)
         let id = project.tracks[0].id

@@ -30,6 +30,21 @@ struct CommandRegistryTests {
         SetParam(target: .strip(channel: 3, param: .pan), value: -0.5),
         SetParam(target: .sendLevel(send: 9), value: 1),
         SetParam(target: .device(slot: 11, index: 2), value: nil),
+        // T-030: assets, clips, tempo, loop
+        ImportAsset(asset: AssetRef(id: 12, path: "Audio/a.wav", channels: 2, originalSampleRate: 44_100, frames: 1000)),
+        ImportAsset(asset: AssetRef(id: 12, path: "/abs/a.wav", channels: 1, originalSampleRate: 48_000, frames: 0), index: 0),
+        RemoveAsset(assetID: 12),
+        AddClip(trackID: 3, start: 960, length: 1920, assetID: 12, sourceOffsetSamples: 10, gain: 0.5, fadeIn: 1, fadeOut: 2),
+        AddClip(trackID: 3, start: 0),
+        RemoveClip(clipID: 20),
+        RestoreClip(trackID: 3, clip: ClipProject.make().keys.clips[0]),
+        MoveClip(clipID: 20, start: 480, trackID: 4),
+        MoveClip(clipID: 20, start: 0),
+        ResizeClip(clipID: 20, start: 240, length: 720),
+        SplitClip(clipID: 20, at: 1000),
+        SetClip(clip: ClipProject.make().gtr.clips[1]),
+        SetClipGain(clipID: 20, gain: 0.7),
+        SetClipFades(clipID: 20, fadeIn: 0, fadeOut: 96),
     ]
 
     @Test("MODEL-006: built-in type strings are stable and unique")
@@ -39,6 +54,8 @@ struct CommandRegistryTests {
             "Composite", "RenameTrack",
             "AddTrack", "RemoveTrack", "RestoreTrack", "MoveTrack", "SetTrackOutput", "AddBus", "RemoveBus", "RestoreBus",
             "AddSend", "RemoveSend", "RestoreSend", "SetSendLevel", "SetSendTap", "SetSidechain", "SetParam",
+            "ImportAsset", "RemoveAsset", "AddClip", "RemoveClip", "RestoreClip", "MoveClip", "ResizeClip", "SplitClip",
+            "SetClip", "SetClipGain", "SetClipFades",
         ])
         let all = CommandRegistry.registered.map { $0.type }
         #expect(Set(all).count == all.count)
@@ -54,7 +71,7 @@ struct CommandRegistryTests {
 
     @Test("MODEL-006: test commands, including ones holding whole tracks and clips, round-trip")
     func testCommandsRoundTrip() throws {
-        var project = Project()
+        var project = Project.withTestAsset()
         _ = try TestAddTrack(name: "A").apply(to: &project)
         let id = project.tracks[0].id
         _ = try TestAddClip(trackID: id, start: 480, length: 960).apply(to: &project)
