@@ -22,16 +22,19 @@ CheckResult midiClipPlayerEmitsNotes();
 CheckResult midiClipPlayerMatchesOracle();
 
 // DSP-003, TIME-005/006: a note hanging over the loop end gets its off at the wrap frame, before
-// the new pass's ons there; notes started before the loop start aren't chased.
+// the new pass's ons there; a note started before the loop start and still sounding at it is
+// chased from the wrap frame (DW-103).
 CheckResult midiClipPlayerLoopWrap();
 
 // DSP-003, TIME-008: a locate while playing releases every note at frame 0 of the next block;
-// a stop does too; play after stop or locate doesn't chase notes already under way.
+// a stop does too. DW-103: playback starting inside a note (locate while playing, play after a
+// stop, locate while stopped) chases it to its own end; a note ending right there isn't.
 CheckResult midiClipPlayerLocateAndStop();
 
 // DSP-003 acceptance "no stuck notes after random locates": random locates, stops, plays, loop
 // changes and block sizes. No off without its on, no note held past its end at any block end,
-// nothing held after a stop; also with a midiOut too small for every event.
+// nothing held after a stop; also with a midiOut too small for every event. With room for every
+// event, the held notes at each block end are exactly the sounding ones (chase, DW-103).
 CheckResult midiClipPlayerNoStuckNotesFuzz();
 
 // DSP-003, DW-051: a new instance opens its first non-empty block with All Notes Off (CC 123)

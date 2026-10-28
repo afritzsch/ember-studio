@@ -11,8 +11,13 @@
 // Timing (D-06, TIME-006/007): notes stay in ticks and are placed through the block's TempoMap.
 // A note's on sounds at tickToSample(start) and its off at tickToSample(start + length). Within
 // a block events are in frame order; at the same tick offs come before ons, so a note that ends
-// where the next one on its key starts retriggers cleanly. Notes aren't chased: playback that
-// starts inside a note (play, locate, loop start) doesn't sound it.
+// where the next one on its key starts retriggers cleanly.
+//
+// Chase (DW-103): playback that starts inside a note (play, locate, loop start, or a tempo edit
+// that moved the playhead's tick) sounds it from that frame for its remaining length. On every
+// segment that doesn't continue the previous one, after the releases below, each note with
+// start < startTick whose off still sounds at or after the segment's first sample gets its on at
+// the segment's first frame, then plays and ends like any other note.
 //
 // Hanging notes (DSP-003). The player remembers which notes it has started, and every one gets
 // exactly one note-off:
@@ -83,8 +88,13 @@ private:
     void activate(uint32_t index) DAW_RT;
     // Index of the first note starting at or after `tick`.
     size_t firstStartingAtOrAfter(Tick tick) const DAW_RT;
+    // DW-103: note-ons at the segment's first frame for the notes it starts inside of.
+    void chase(const TransportBlock& block, const TransportSegment& seg, MidiEventWriter& out) DAW_RT;
+    // A note-on is written only if room stays for its own off and every held note's.
+    bool roomForOn(const MidiEventWriter& out) const DAW_RT { return out.capacity() - out.size() >= numActive_ + 2; }
 
     std::vector<Note> notes_;  // sorted by start
+    std::vector<Tick> maxEnd_; // maxEnd_[i] = max(notes_[0..i].end), non-decreasing (chase)
     // The notes that are on: active_[0, numActive_), by end tick descending, so the next to end
     // is last. Sized notes_.size() up front (a note is on at most once), so it never grows.
     std::vector<uint32_t> active_;

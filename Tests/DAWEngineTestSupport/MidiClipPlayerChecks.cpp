@@ -233,17 +233,20 @@ CheckResult midiClipPlayerLoopWrap() {
     // Loop [1920, 3840) = samples [48000, 96000): the first pass plays from 0, later ones from
     // 48000, so pass k >= 1 starts at output frame 96000 + (k − 1) · 48000.
     const std::vector<NoteDesc> notes = {
-        note(1800, 240, 60),  // [45000, 51000): before the loop start, so later passes don't chase it
+        note(1800, 240, 60),  // [45000, 51000): starts before the loop start, so later passes chase it
         note(1920, 100, 64),  // [48000, 50500): on the loop start
         note(3700, 400, 62),  // [92500, 102500): hangs over the loop end
     };
     std::vector<Ev> expected = {on(45000, 60, 100), on(48000, 64, 100), off(50500, 64), off(51000, 60),
                                 on(92500, 62, 100)};
     for (int64_t pass = 96000; pass < 96000 + 3 * 48000; pass += 48000) {
-        // The wrap: the hanging note ends, then the new pass's ons, on the same frame.
+        // The wrap: the hanging note ends, then the chased note (DW-103) and the new pass's ons,
+        // on the same frame.
         expected.push_back(off(pass, 62));
+        expected.push_back(on(pass, 60, 100));
         expected.push_back(on(pass, 64, 100));
         expected.push_back(off(pass + 2500, 64));
+        expected.push_back(off(pass + 3000, 60));
         expected.push_back(on(pass + 44500, 62, 100));
     }
 
@@ -276,13 +279,14 @@ CheckResult midiClipPlayerLocateAndStop() {
     d.renderFrames(2048, 512);
     DAW_CHECK(notesOnly(d.events()) == std::vector<Ev>{on(0, 60, 100)});
 
-    // Locate while playing: the held note ends at frame 0 of the next block, and isn't chased at
-    // the new position, inside it.
+    // Locate while playing (to sample 24000, inside the long note): the held note ends at frame
+    // 0 of the next block and is chased from there (DW-103), ending at its own end.
     DAW_CHECK(d.transport().locate(960));
     d.render(512);
-    DAW_CHECK(notesOnly(d.blockEvents()) == std::vector<Ev>{off(2048, 60)});
-    d.renderFrames(48000, 512);  // past the long note's end: no off for a note that isn't on
-    DAW_CHECK(notesOnly(d.events()).size() == 2);
+    DAW_CHECK(notesOnly(d.blockEvents()) == (std::vector<Ev>{off(2048, 60), on(2048, 60, 100)}));
+    d.renderFrames(48000, 512);
+    DAW_CHECK(notesOnly(d.events()) ==
+              (std::vector<Ev>{on(0, 60, 100), off(2048, 60), on(2048, 60, 100), off(2048 + 24000, 60)}));
 
     // Locate back to 0 (while playing): the note starts again on frame 0, after the release.
     DAW_CHECK(d.transport().locate(0));
@@ -299,16 +303,29 @@ CheckResult midiClipPlayerLocateAndStop() {
     d.render(256);
     DAW_CHECK(d.blockEvents().empty());
 
-    // Play from where it stopped (inside the long note): not chased, and no off at its end.
+    // Play from where it stopped (sample 4096, inside the long note): chased, and it ends at its
+    // end (sample 48000).
     DAW_CHECK(d.transport().play());
+    at = d.frame();
+    size_t from = d.events().size();
     d.renderFrames(48000, 1000);
-    // Locate while stopped, then play: starts on a fresh note.
+    DAW_CHECK(notesOnly(std::vector<Ev>(d.events().begin() + static_cast<long>(from), d.events().end())) ==
+              (std::vector<Ev>{on(at, 60, 100), off(at + 48000 - 4096, 60)}));
+    // Locate while stopped, then play: the long note is chased, the one starting right there
+    // plays as usual, after it.
     DAW_CHECK(d.transport().stop());
     d.render(64);
+    DAW_CHECK(d.blockEvents().empty());  // nothing was on
     DAW_CHECK(d.transport().locate(100) && d.transport().play());
     at = d.frame();
     d.render(1000);
-    DAW_CHECK(notesOnly(d.blockEvents()) == (std::vector<Ev>{on(at, 72, 100), off(at + 500, 72)}));
+    DAW_CHECK(notesOnly(d.blockEvents()) ==
+              (std::vector<Ev>{on(at, 60, 100), on(at, 72, 100), off(at + 500, 72)}));
+    // A note that ends exactly where playback starts isn't chased.
+    DAW_CHECK(d.transport().locate(1920));
+    at = d.frame();
+    d.render(256);
+    DAW_CHECK(notesOnly(d.blockEvents()) == std::vector<Ev>{off(at, 60)});
 
     Keys keys;
     keys.apply(d.events());
@@ -320,7 +337,7 @@ CheckResult midiClipPlayerLocateAndStop() {
 
 CheckResult midiClipPlayerNoStuckNotesFuzz() {
     CheckResult checks;
-    int locates = 0, wraps = 0, stops = 0, ons = 0;
+    int locates = 0, wraps = 0, stops = 0, ons = 0, chases = 0;
     for (uint32_t seed = 1; seed <= 24; ++seed) {
         std::mt19937 rng(seed);
         auto uniform = [&](int64_t lo, int64_t hi) { return std::uniform_int_distribution<int64_t>(lo, hi)(rng); };
@@ -362,13 +379,20 @@ CheckResult midiClipPlayerNoStuckNotesFuzz() {
             keys.apply(d.blockEvents());
             for (const Ev& e : d.blockEvents()) ons += (e.status & 0xF0) == MidiClipPlayer::kNoteOn;
             const TransportBlock& b = d.lastBlock();
-            for (uint8_t i = 0; i < b.numSegments; ++i) wraps += b.seg[i].afterWrap;
+            for (uint8_t i = 0; i < b.numSegments; ++i) {
+                wraps += b.seg[i].afterWrap;
+                // Jumps that land inside a note (counted loosely: every wrap, and every first
+                // segment), so the chase is exercised.
+                if (b.seg[i].afterWrap || i == 0)
+                    for (const Span& sp : spans) chases += sp.on < b.seg[i].startSample && b.seg[i].startSample < sp.off;
+            }
             if (b.numSegments == 0) {
                 if (d.lastFrames() > 0) DAW_CHECK(keys.total() == 0);  // a stopped block releases everything
                 continue;
             }
             // No note is held past its end: at the last frame played, each key is held at most
-            // as often as notes on it are sounding there.
+            // as often as notes on it are sounding there. With room for every event, chase
+            // (DW-103) makes that exact: every sounding note is held, however playback got there.
             const TransportSegment& last = b.seg[b.numSegments - 1];
             const SamplePos s = last.startSample + last.numFrames - 1;
             for (uint8_t ch = 0; ch < 2; ++ch)
@@ -376,6 +400,7 @@ CheckResult midiClipPlayerNoStuckNotesFuzz() {
                     int sounding = 0;
                     for (const Span& sp : spans) sounding += sp.ch == ch && sp.key == key && sp.on <= s && s < sp.off;
                     DAW_CHECK(keys.held(ch, key) <= sounding);
+                    if (capacity == kCapacity) DAW_CHECK(keys.held(ch, key) == sounding);
                 }
         }
         DAW_CHECK(d.transport().stop());
@@ -386,7 +411,7 @@ CheckResult midiClipPlayerNoStuckNotesFuzz() {
         DAW_CHECK(d.badEvents() == 0);
         DAW_CHECK(d.violations() == 0);
     }
-    DAW_CHECK(locates > 100 && wraps > 50 && stops > 50 && ons > 1000);  // not vacuous
+    DAW_CHECK(locates > 100 && wraps > 50 && stops > 50 && ons > 1000 && chases > 100);  // not vacuous
     return checks;
 }
 
