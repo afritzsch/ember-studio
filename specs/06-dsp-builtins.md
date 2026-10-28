@@ -13,6 +13,13 @@ All processors are `daw::Node` subclasses, stereo in/out, with parameters throug
 | DSP-002 | Overlapping clips on one track: the later clip wins, with an automatic 64-sample equal-power crossfade at boundaries (comp boundaries reuse this, see 09). | Golden |
 | DSP-003 | `MidiClipPlayer`: emits note-on/off events with frame offsets for notes overlapping the segment. On loop wrap/locate it sends note-offs for hanging notes (all-notes-off). | Unit: no stuck notes after random locates |
 
+#### MidiClipPlayer semantics (clarified in T-040)
+- A note's on sounds at `tickToSample(start)` and its off at `tickToSample(start + length)`. Within a block, events are in frame order, and offs come before ons on the same tick. Notes are fixed per instance (DW-051, like DSP-001). Notes with length ≤ 0, pitch > 127 or channel > 15 are dropped, and velocity is clamped to 1..127.
+- Notes aren't chased: playback that starts inside a note (play, locate, loop start) doesn't sound it.
+- "Hanging notes" are the notes the player has started and not yet ended. Each gets exactly one note-off (velocity 64): at its end; at the first frame of a segment that doesn't continue the previous one's ticks (loop wrap, locate, or a tempo edit that moved the playhead's tick), before that segment's ons; or at frame 0 of a stopped block. The offs are explicit per note, not CC 123.
+- A new instance can't know what the instance it replaces left on, so its first non-empty block starts with All Notes Off (CC 123) on all 16 channels.
+- `midiOut` has fixed capacity. A note-on is written only if room stays for its own off and the offs of all held notes, so a full writer drops notes and never leaves one hanging.
+
 ### Channel & utility
 | ID | Requirement | Acceptance |
 |---|---|---|
