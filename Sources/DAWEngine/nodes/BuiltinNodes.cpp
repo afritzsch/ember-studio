@@ -30,11 +30,11 @@ Result<void> registerBuiltinNodes(NodeRegistry& registry, AssetLookup lookup, Te
     if (auto r = registry.set(NodeKind::channelStrip, std::move(stripInfo)); !r) return r;
 
     auto gain = [](const NodeCreateInfo& info) -> Result<std::unique_ptr<Node>> {
-        if (info.desc.numParams < GainNode::kNumParams)
+        if (info.desc.numParams < GainNode::kMinNumParams)
             return makeError(ErrorCode::invalidArgument,
                              "gain " + std::to_string(info.desc.id) + ": needs " +
-                                 std::to_string(GainNode::kNumParams) + " param");
-        return std::unique_ptr<Node>(std::make_unique<GainNode>(info.desc.firstParam));
+                                 std::to_string(GainNode::kMinNumParams) + " param");
+        return std::unique_ptr<Node>(std::make_unique<GainNode>(info.desc.firstParam, info.desc.numParams));
     };
     return registry.set(NodeKind::gain, {std::move(gain)});
 }
