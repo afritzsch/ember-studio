@@ -133,6 +133,7 @@ struct CoreAudioDriver::Impl {
     DeviceLatency latency;
     std::atomic<uint64_t> inputErrors{0};
     std::atomic<uint64_t> overloads{0};
+    std::atomic<uint64_t> ignoredOverloads{0};
 
     Result<void> open(const DriverConfig& request);
     void close();
@@ -204,15 +205,20 @@ OSStatus CoreAudioDriver::Impl::capture(void* ref, AudioUnitRenderActionFlags* f
     return noErr;
 }
 
-// IO-023 (DW-049): a HAL notification thread, not the IO thread.
+// IO-023 (DW-049): a HAL notification thread, not the IO thread. DW-068: one overload often
+// arrives right at start; the renderer's start grace window filters it out.
 OSStatus CoreAudioDriver::Impl::overload(AudioObjectID, UInt32 count,
                                          const AudioObjectPropertyAddress* addresses, void* ref) {
     auto& self = *static_cast<Impl*>(ref);
-    for (UInt32 i = 0; i < count; ++i)
-        if (addresses[i].mSelector == kAudioDeviceProcessorOverload) {
-            self.engine.telemetry().countXrun();
-            self.overloads.fetch_add(1, std::memory_order_relaxed);
+    for (UInt32 i = 0; i < count; ++i) {
+        if (addresses[i].mSelector != kAudioDeviceProcessorOverload) continue;
+        if (self.renderer.inStartGrace()) {
+            self.ignoredOverloads.fetch_add(1, std::memory_order_relaxed);
+            continue;
         }
+        self.engine.telemetry().countXrun();
+        self.overloads.fetch_add(1, std::memory_order_relaxed);
+    }
     return noErr;
 }
 
@@ -263,7 +269,7 @@ Result<void> CoreAudioDriver::Impl::open(const DriverConfig& request) {
     }
 
     // Scratch and FIFO first: the units may call back as soon as they start.
-    renderer.configure(resolved->bufferFrames);
+    renderer.configure(resolved->bufferFrames, rate);  // IO-023: judged against the device clock
     if (in) input.allocate(inResolved.channels);
     if (separate) {
         captured.allocate(inResolved.channels);
@@ -419,5 +425,8 @@ const WorkgroupJoin& CoreAudioDriver::workgroup() const { return impl_->workgrou
 const InputFifo& CoreAudioDriver::inputFifo() const { return impl_->fifo; }
 uint64_t CoreAudioDriver::inputErrors() const { return impl_->inputErrors.load(std::memory_order_relaxed); }
 uint64_t CoreAudioDriver::overloads() const { return impl_->overloads.load(std::memory_order_relaxed); }
+uint64_t CoreAudioDriver::ignoredOverloads() const {
+    return impl_->ignoredOverloads.load(std::memory_order_relaxed);
+}
 
 } // namespace daw

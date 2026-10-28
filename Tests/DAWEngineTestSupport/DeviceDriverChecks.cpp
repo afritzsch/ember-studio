@@ -708,7 +708,8 @@ DeviceRunReport coreAudioPlaysSine() {
     report.rtViolations = telemetry.rtViolations;
     report.xruns = telemetry.xruns;
     DAW_CHECK(telemetry.rtViolations == 0);
-    DAW_CHECK(driver.overloads() == telemetry.xruns);  // the only xrun producer here
+    // IO-023: the only xrun producers here (overload notifications, render overruns).
+    DAW_CHECK(driver.overloads() + driver.renderer().overruns() == telemetry.xruns);
 
     // stop(): the IO thread leaves the workgroup and rendering ends.
     driver.stop();

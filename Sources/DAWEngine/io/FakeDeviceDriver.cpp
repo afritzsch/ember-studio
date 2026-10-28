@@ -367,7 +367,9 @@ Result<void> FakeDeviceDriver::start(const DriverConfig& request) {
     s.ringMask = ringFrames != 0 ? ringFrames - 1 : 0;
     s.loopbackDelay = delay;
     s.runFrames = 0;
-    s.renderer.configure(resolved->bufferFrames);
+    // IO-023: overruns are judged against the device clock, which only real-time pacing has.
+    s.renderer.configure(resolved->bufferFrames,
+                         s.spec.pacing == FakePacing::realtime ? resolved->sampleRate : 0.0);
 
     s.config = {};
     s.config.outputDevice = outID;

@@ -9,7 +9,9 @@
 // IO-002: the IO thread joins the output device's os_workgroup (WorkgroupJoin).
 // IO-003: the device is switched to the resolved rate and buffer size before starting.
 // IO-005: latency() from the device properties; published to telemetry and the transport.
-// IO-023 (with T-051): kAudioDeviceProcessorOverload notifications count as xruns.
+// IO-023: kAudioDeviceProcessorOverload notifications count as xruns, except during the
+// renderer's start grace window (DW-068); so do render overruns (DeviceRenderer). Device changes
+// (IO-020) are CoreAudioDeviceListener's; the driver doesn't react to them.
 //
 // Threads: start/stop/latency/current from one non-RT thread at a time; the diagnostics from any.
 // The graph published to the engine must be prepared for current().bufferFrames frames or more.
@@ -25,17 +27,6 @@ class DeviceRenderer;
 class Engine;
 class InputFifo;
 class WorkgroupJoin;
-
-// What start() resolved (IO-003, IO-004). Zeros while stopped.
-struct RunningConfig {
-    AudioDeviceRef outputDevice = 0;
-    AudioDeviceRef inputDevice = 0;  // 0: no input (not enabled, or the device has none)
-    bool separateInput = false;      // input comes from another device through the InputFifo
-    double sampleRate = 0;
-    uint32_t bufferFrames = 0;
-    uint32_t outputChannels = 0;
-    uint32_t inputChannels = 0;
-};
 
 class CoreAudioDriver final : public AudioDriver {
 public:
@@ -56,7 +47,8 @@ public:
     const WorkgroupJoin& workgroup() const;
     const InputFifo& inputFifo() const;
     uint64_t inputErrors() const;  // failed AudioUnitRender calls pulling input
-    uint64_t overloads() const;    // kAudioDeviceProcessorOverload notifications
+    uint64_t overloads() const;    // kAudioDeviceProcessorOverload notifications counted as xruns
+    uint64_t ignoredOverloads() const;  // ... and those in the start grace window (DW-068)
 
 private:
     struct Impl;  // keeps AudioToolbox out of this header

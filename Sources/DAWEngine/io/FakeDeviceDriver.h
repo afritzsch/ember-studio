@@ -4,6 +4,7 @@
 // cycles through a DeviceRenderer, like CoreAudioDriver's AUHAL callback (DW-070), either paced
 // in real time or as fast as possible, and
 //   - reports configurable latency (IO-005, published with publishDeviceLatency),
+//   - counts render overruns as xruns in real-time pacing (IO-023, DeviceRenderer),
 //   - loops output back to input with N frames of delay while input is enabled,
 //   - plays scripted device events (device loss and return, rate change, processor overload) and
 //     reports them as DeviceNotifications, the seam DeviceMonitor (T-051, IO-020..023) consumes.
@@ -27,7 +28,6 @@
 
 #include "core/Realtime.h"
 #include "io/AudioDriver.h"
-#include "io/CoreAudioDriver.h"  // RunningConfig
 #include "io/DeviceNotification.h"
 #include "io/DriverConfig.h"
 
