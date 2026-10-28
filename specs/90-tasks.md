@@ -61,8 +61,8 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 ### M3 — Timeline, persistence, app shell
 | Task | Lane | Title | Requirements | Depends on | Status |
 |---|---|---|---|---|---|
-| T-030 | M | Clip + tempo/signature + loop commands | MODEL-005 (clip/tempo subset) | T-022 | wip(t-030-clip-tempo-commands) |
-| T-031 | M | Persistence: folder format, atomic save, migrations, autosave, recovery, offline assets | MODEL-040..046 | T-030 | todo |
+| T-030 | M | Clip + tempo/signature + loop commands | MODEL-005 (clip/tempo subset) | T-022 | done |
+| T-031 | M | Persistence: folder format, atomic save, migrations, autosave, recovery, offline assets | MODEL-040..046 | T-030 | ready |
 | T-032 | U+B | App shell, window, view-model pattern, toasts, ControlSocketServer, attach mode, UI dump/snapshot | UI-001, 003, 004, 050..052, CTL-011, 023, 030, 031 | T-018 | todo |
 | T-033 | U | Arrange canvas: tiles, waveforms (Metal), grid/snap, clip gestures, playhead layer | UI-010..014 | T-032, T-030 | todo |
 | T-034 | U | Toolbar, transport, keyboard shortcuts | UI-002 | T-032 | todo |
@@ -74,7 +74,7 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 |---|---|---|---|---|---|
 | T-040 | D | MidiClipPlayer, hanging-note handling | DSP-003 | T-008, T-012 | done |
 | T-041 | D | Sampler (zones, Hermite, voices, ADSR, CC64, bend) | DSP-020..023 | T-040, T-010 | wip(t-041-sampler) |
-| T-042 | M | Note commands, instrument slot on MIDI tracks | MODEL-005 (note subset) | T-030 | todo |
+| T-042 | M | Note commands, instrument slot on MIDI tracks | MODEL-005 (note subset) | T-030 | ready |
 | T-043 | U | Piano roll + velocity lane + audition (`previewNote` facade addition) | UI-020, 021 | T-033, T-042 | todo |
 | T-044 | D | M4 goldens | TEST (M4 set) | T-041, T-042 | todo |
 
@@ -235,7 +235,7 @@ Recorded by the lead from worker reports.
 | DW-040 | T-010 | Reclaim API gaps: no non-RT retire path (RetireQueue is audio-thread-only; Reclaimer takes only graphs/nodes from other threads), and no Release-safe "am I the render thread?" query (`RtTrap::inRealtimeContext()` is false in Release, not nonblocking). So asset retirement is an explicit call, not automatic | E (T-004 follow-up) | todo |
 | DW-041 | T-010 | Something must own the `AudioFileLoader` (daw.loader) and forward its completions as EngineEvents | E/B (T-014) | done (T-014) |
 | DW-042 | T-010 | Rule for asset-playing nodes: on the audio thread drop a reference only via `AudioAssetRef::retire(engine.retireQueue())`; if it returns false keep it and retry next block. Never destroy a handle on the audio thread | D (T-013, T-041) | done for AudioClipPlayer (T-013: refs held for the node's life, released on reclaim); applies again to T-041 |
-| DW-043 | T-010 | ImportAsset command should call `AudioImporter::importFile` and persist `projectRelativePath` | M (T-030) | todo |
+| DW-043 | T-010 | ImportAsset command should call `AudioImporter::importFile` and persist `projectRelativePath` | M (T-030) | done (T-030: import stays outside the command; facade `importFile` → DW-124) |
 | DW-044 | T-010 | IO-033 (T-056): per-request progress events still needed; the peak cache already handles stale rates | E (T-056) | todo |
 | DW-045 | T-086 | Product-name leftovers in files that wave-4 workers own: `core/Denormals.h:16` (`#error "macDAW targets arm64 only"`), `io/AudioFileLoader.cpp:24` (`os_log_create("dev.macdaw", "io")` → `dev.emberstudio`), `Tests/DAWEngineTestSupport/TestAudio.cpp:22` (temp prefix `macdaw-t010-`). Fix after T-006/T-008/T-009/T-012 merge | E (lead, small) | done (T-087) |
 | DW-046 | T-086 | The built app is now `Ember Studio.app` (path contains a space); CTL-023's attach-mode launcher must quote it. The Swift package name stays `macDAW` (01 doesn't constrain it); the repo folder `/Users/artem/dev/macDAW` is unchanged. Plugin cache moved to `~/Library/Application Support/Ember Studio/` (no migration; a rescan) | B (T-018/T-032), lead | todo |
@@ -252,7 +252,7 @@ Recorded by the lead from worker reports.
 | DW-057 | T-009 | Facade: map `ExportSpecPOD` → `daw::ExportSpec`, run offline render on a job thread with the device driver stopped, turn `OfflineProgress` into job status. Cancellation would need `ErrorCode::cancelled` | B (T-014) | done (T-014) |
 | DW-058 | T-008 | Goldens `loop_wrap_midblock` (TIME-005) and locate/no-stuck-voices (TIME-008) | E (T-019) | todo |
 | DW-059 | T-008 | Driver calls `Engine::transport().setOutputLatency(samples)`; facade `TransportPOD` maps from `TransportPlayhead` | E (T-011), B (T-014) | done (T-014) |
-| DW-060 | T-008 | Loops shorter than a block (< 4096 samples) play once then leave a gap (contract allows 2 segments). Model should enforce a minimum loop length | M (T-030 SetLoop) | todo |
+| DW-060 | T-008 | Loops shorter than a block (< 4096 samples) play once then leave a gap (contract allows 2 segments). Model should enforce a minimum loop length | M (T-030 SetLoop) | done in the model (T-030: enabled loops ≥ largest block); tempo edits can still shrink a loop → DW-125 |
 | DW-061 | T-008 | Product question: on a tempo edit the playhead keeps its sample position, so its musical position shifts. Keeping the tick instead needs a decision | user | todo |
 | DW-062 | T-008 | 03 clarifications: a segment's [startTick, endTick) is exactly the ticks whose events sound in it; a stopped/0-frame block has 0 segments and seg[0] carries the position; past the loop end plays on; loop wraps don't reset nodes. Also `RenderStepDesc::resetOnLocate` comment in `core/RenderGraph.h` says "locate or loop jump" — should say locate only | spec (lead) + E (small) | done (T-087) |
 | DW-063 | T-009 | Effect tails survive a locate (TIME-008), so a reverb/delay tail from earlier playback carries into an export on the same engine. Fully repeatable exports need an engine-level "reset all nodes" before offline renders — spec question | user / spec | todo |
@@ -297,12 +297,12 @@ Recorded by the lead from worker reports.
 | DW-102 | T-040 | Flaky "ENG-014: RT-retired objects are freed on daw.reclaim" (EngineChecks.cpp:743, `rtRetireQueue`): waits for `destroyed`, then reads `rtObjectsFreed()`, which the reclaimer bumps only after the destructor returns. Wait on `rtObjectsFreed() == 1` instead | E | todo |
 | DW-103 | T-040 | MidiClipPlayer must chase notes (user decision): playback starting inside a note (play, locate, loop start) sounds it from that frame for its remaining length. T-040 shipped without chase; keep the no-hanging-notes guarantee and the capacity reservation | D (with T-041) | todo |
 | DW-104 | T-040 | `BuiltinNodes.h` doc comment doesn't list midiClipPlayer | D (small) | todo |
-| DW-105 | T-017 | `ImportAsset` command `{"type": "ImportAsset", "asset": AssetRef}` (reserve `asset.id`, append; inverse removes). `asset.import` loads into the engine under `project.ids.next`, then performs it; returns `notImplemented` until registered | M (T-030) | todo |
-| DW-106 | T-017 | `SetLoop` command so `Project.loop` follows `transport.setLoop` (today it only drives the engine) | M (T-030) | todo |
+| DW-105 | T-017 | `ImportAsset` command `{"type": "ImportAsset", "asset": AssetRef}` (reserve `asset.id`, append; inverse removes). `asset.import` loads into the engine under `project.ids.next`, then performs it; returns `notImplemented` until registered | M (T-030) | done (T-030) |
+| DW-106 | T-017 | `SetLoop` command so `Project.loop` follows `transport.setLoop` (today it only drives the engine) | M (T-030) | done in the model (T-030: `SetLoop`); dispatcher/EngineSync push → DW-123 |
 | DW-107 | T-017 | `project.open/save` are wired to `ProjectStore.open/save` (`notImplemented`). The dispatcher creates an engine at the project's rate, loads assets relative to the folder and reports `loadReport.offlineAssets`; T-031's `ProjectLoadReport` should replace that shape | M (T-031) | todo |
 | DW-108 | T-017 | For T-018/T-019: `ControlMethod.paramsType` is ready for CTL-021 schemas; `Dispatcher.call(_:_:)` is the in-process headless entry; `ControlUIProvider` is the attach hook (T-032). GoldenTests can run fixtures in-process with `ControlScript(contentsOf:)` + `Dispatcher.handle(_:)` | B/E (T-018, T-019) | todo |
 | DW-109 | T-022 | C++ interop batch-compile trap: an unapplied `String.init` in any DAWModel file sharing a batch job with `EngineClient.swift` hides CxxStdlib's `String(std.string)`, so clean builds fail ("no exact matches in call to initializer"). Fixed once in `DAWError.swift` (d9eb9d5); can recur when files are added. Wrap EngineClient's std::string → String conversions in one helper that avoids overloaded `String(_:)`; CI clean builds (DW-005) | B (lead) | todo |
-| DW-110 | T-022 | `Track.clips` is documented "sorted by start" but `validate()` doesn't enforce it (test stand-in clip commands don't keep order). Decide with the real clip commands | M (T-030) | todo |
+| DW-110 | T-022 | `Track.clips` is documented "sorted by start" but `validate()` doesn't enforce it (test stand-in clip commands don't keep order). Decide with the real clip commands | M (T-030) | done (T-030: clips sorted by (start, id), checked in validate()) |
 | DW-111 | T-022 | `ProjectStore.open` should run `validate()` on the decoded project and report/repair failures (decoding only reserves IDs and rejects IDs > maxModelID) | M (T-031) | todo |
 | DW-112 | T-022 | `SetParam` on a device param index ≥ the kind's published ParamInfo count (or a kind without ParamInfo, e.g. FakeEngine) grows the slot range → structural rebuild instead of a slot write. Goes away once every kind publishes ParamInfo; otherwise cap indices | M/B (with DW-092) | todo |
 | DW-113 | T-022 | No `RenameBus`/`MoveBus` (RenameTrack/MoveTrack take tracks only); the mixer UI (UI-030) will likely want them | M (before T-076) | todo |
@@ -315,3 +315,9 @@ Recorded by the lead from worker reports.
 | DW-120 | T-051 | A device lost during an export: notifications are dropped while the export pauses the device; a failed restart afterwards reports `startFailed` and recovers on the next notification, with no fallback to the default | E (small) | todo |
 | DW-121 | T-051 | FakeDeviceDriver `start()` with an explicit rate doesn't move the fake device's nominal rate (CoreAudioDriver's does), so fake runs never produce the "rate set back" notification | E (small) | todo |
 | DW-122 | T-051 | Document `DAW_DEVICE_EVENT_TESTS=1` in 14 next to `DAW_DEVICE_INPUT_TESTS` / `DAW_SKIP_DEVICE_TESTS` | lead | todo |
+| DW-123 | T-030 | `transport.setLoop` should also perform `SetLoop` (`{"type":"SetLoop","loop":{start,end,isEnabled}}` or `"loop": null`), and `EngineSync` should push `project.loop` to `engine.setLoop` after each command, undo/redo and attach (an undone SetLoop doesn't reach the transport today); on open (T-031) too | B (T-018) + M | todo |
+| DW-124 | T-030 | Swift can't call `AudioImporter::importFile` (io/, not in include/). Add a facade `importFile(path, projectFolder, mode) → {path, projectRelativePath, copied}` mirrored in EngineProtocol/EngineClient/FakeEngine (08 Interfaces change → user); `asset.import` calls it before `loadAsset`. T-031's save copies assets outside the folder into `Audio/` and rewrites paths | B + M (T-031) | todo |
+| DW-125 | T-030 | A tempo edit after `SetLoop` can shrink an enabled loop below 4096 samples (the model doesn't refuse tempo edits). Either the transport handles loops shorter than a block, or tempo edits get refused (user decision) | E / user | todo |
+| DW-126 | T-030 | `SetSessionSampleRate` not implemented: `AudioClip.sourceOffsetSamples` is in session-rate samples, so a rate change must rescale every clip offset | M (T-056) | todo |
+| DW-127 | T-030 | After a left trim (`ResizeClip`), MIDI notes can have negative relative starts or lie past the clip end (kept so trimming back restores them; the builder clips to the window). Note commands must accept that | M (T-042) | todo |
+| DW-128 | T-030 | `ControlTestImportAsset` in `Tests/DAWControlTests/Support/ControlTestSupport.swift` is dead now; `ControlTestAddAudioClip` etc. can become `AddClip`/`RemoveClip` | B (T-018, small) | todo |
