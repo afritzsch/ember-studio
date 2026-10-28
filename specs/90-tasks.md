@@ -39,7 +39,7 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 | T-014 | B | EngineFacade v0, EngineClient, EngineProtocol, FakeEngine | BRIDGE-001..008 (transport, graph, params, assets, offline, telemetry, events) | T-006, T-009, T-012 | done |
 | T-015 | M | Project types, IDAllocator, Command protocol, UndoStack, gestures, ProjectStore, CommandRegistry | MODEL-001..004, 006, 007 | T-007 | done |
 | T-016 | M | GraphDescriptionBuilder + engine sync (structural vs param); solo-in-place truth table | MODEL-020..022, MIX-006 | T-014, T-015 | done |
-| T-017 | B | DAWControl protocol + Dispatcher + `dawctl` (headless) | CTL-001..005, CTL-010, 012 | T-016 | ready |
+| T-017 | B | DAWControl protocol + Dispatcher + `dawctl` (headless) | CTL-001..005, CTL-010, 012 | T-016 | wip(t-017-dawctl) |
 | T-018 | B | `dawmcp` headless + `.mcp.json` + command schema tool | CTL-020..022, 024, 025 | T-017 | todo |
 | T-019 | E | Golden harness, test-only nodes, M1 goldens, `scripts/test.sh` | TEST-001..004, BUILD-007 | T-017 | todo |
 | T-085 | E | Engine test-support cleanup: one C++ test pattern (test-only module map), no test code in libDAWEngine, `core/`-rooted includes, isolated RT-trap counters | DW-006, 007, 014, 019 | T-003, T-007 | done |
@@ -53,7 +53,7 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 |---|---|---|---|---|---|
 | T-020 | E | Full channel strip: mute (slot; solo resolved by the model, T-016), phase, meters; sends pre/post | MIX-005, MIX-007, DSP-010 | T-013 | done |
 | T-021 | E | PDC: path latency, delay insertion, delay-line carry-over, source pre-roll | MIX-020..025 | T-012 | done |
-| T-022 | M | Routing commands (tracks, buses, sends, outputs) + cycle rejection + validation | MODEL-005 (routing subset), MODEL-030..032 | T-016 | ready |
+| T-022 | M | Routing commands (tracks, buses, sends, outputs) + cycle rejection + validation | MODEL-005 (routing subset), MODEL-030..032 | T-016 | wip(t-022-routing-commands) |
 | T-023 | E | Sidechain edges and ports | MIX-008 | T-021 | ready |
 | T-024 | D | Metronome node | TIME-010, DSP-011 | T-008 | ready |
 | T-025 | E | M2 goldens: pan law, bus/send sum, PDC null | TEST (M2 set) | T-020, T-021, T-022 | todo |
@@ -72,7 +72,7 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 ### M4 — MIDI & Sampler
 | Task | Lane | Title | Requirements | Depends on | Status |
 |---|---|---|---|---|---|
-| T-040 | D | MidiClipPlayer, hanging-note handling | DSP-003 | T-008, T-012 | ready |
+| T-040 | D | MidiClipPlayer, hanging-note handling | DSP-003 | T-008, T-012 | wip(t-040-midi-clip-player) |
 | T-041 | D | Sampler (zones, Hermite, voices, ADSR, CC64, bend) | DSP-020..023 | T-040, T-010 | todo |
 | T-042 | M | Note commands, instrument slot on MIDI tracks | MODEL-005 (note subset) | T-030 | todo |
 | T-043 | U | Piano roll + velocity lane + audition (`previewNote` facade addition) | UI-020, 021 | T-033, T-042 | todo |
@@ -82,7 +82,7 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 | Task | Lane | Title | Requirements | Depends on | Status |
 |---|---|---|---|---|---|
 | T-050 | E | FakeDeviceDriver (loopback, scripted events) | TEST-005 | T-011 | done |
-| T-051 | E | DeviceMonitor, hot-swap sequence, xrun detection, EngineEvents | IO-020..023 | T-050 | ready |
+| T-051 | E | DeviceMonitor, hot-swap sequence, xrun detection, EngineEvents | IO-020..023 | T-050 | wip(t-051-device-monitor) |
 | T-052 | E | Audio recording: FIFOs, disk writer, latency comp, finalize, punch | REC-001..005 | T-050, T-009 | todo |
 | T-053 | E | CoreMIDI input + MIDI recording | REC-010..012 | T-040 | todo |
 | T-054 | E | Input monitoring modes | REC-020..022 | T-052 | todo |
