@@ -1,0 +1,17 @@
+# wav_playback_resampled (M1, 14-testing): a 44.1 kHz asset in a 48 kHz session (D-27, IO-031).
+# assets/tone_1k_44k1.wav (gen_tone_44k1.py): 22050 frames of a 1 kHz sine at 0.5 with 10 ms
+# fades. Imported into a 48 kHz session it is resampled into RAM at load to 24000 frames, then
+# played by the real audioClipPlayer (no test nodes here) through the track and master strips,
+# whose centre pan laws (MIX-005) leave 0.25 (-12.04 dBFS, -15.05 dBFS RMS).
+# Without resampling the tone would read 1088 Hz and last 22050 frames. The fade-out ends near
+# silence (below -60 dBFS) on the last frame.
+# @expect {"field": "frames", "value": 24000}
+# @expect {"field": "spectrumPeakHz", "value": 1000, "tolerance": 1}
+# @expect {"field": "peakDb", "value": -12.04, "tolerance": 0.02}
+# @expect {"field": "rmsDb", "value": -15.05, "tolerance": 0.02, "range": {"start": 1000, "end": 23000}}
+# @expect {"field": "peakDb", "value": -120, "tolerance": 60, "range": {"start": 23999, "end": 24000}}
+project.new {"name": "wav_playback_resampled", "sampleRate": 48000}
+command.apply {"command": {"type": "AddTrack", "name": "Tone", "kind": "audio"}}
+asset.import {"path": "assets/tone_1k_44k1.wav"}
+command.apply {"command": {"type": "AddClip", "trackID": 2, "start": 0, "assetID": 3}}
+render.offline {"from": 0, "to": 960, "path": "wav_playback_resampled.wav", "tail": false}
