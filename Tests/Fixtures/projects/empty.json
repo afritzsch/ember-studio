@@ -1,0 +1,49 @@
+{
+  "assets" : [
+
+  ],
+  "buses" : [
+
+  ],
+  "formatVersion" : 1,
+  "id" : "00000000-0000-0000-0000-000000000016",
+  "ids" : {
+    "next" : 2
+  },
+  "master" : {
+    "automation" : [
+
+    ],
+    "id" : 1,
+    "inserts" : [
+
+    ],
+    "strip" : {
+      "gain" : 1,
+      "mute" : false,
+      "pan" : 0,
+      "phaseInvert" : false,
+      "solo" : false
+    }
+  },
+  "name" : "empty",
+  "sessionSampleRate" : 48000,
+  "tempoMap" : {
+    "tempoEvents" : [
+      {
+        "bpm" : 120,
+        "tick" : 0
+      }
+    ],
+    "timeSignatures" : [
+      {
+        "denominator" : 4,
+        "numerator" : 4,
+        "tick" : 0
+      }
+    ]
+  },
+  "tracks" : [
+
+  ]
+}

@@ -1,0 +1,285 @@
+{
+  "assets" : [
+
+  ],
+  "buses" : [
+    {
+      "automation" : [
+
+      ],
+      "color" : {
+        "blue" : 0.5,
+        "green" : 0.5,
+        "red" : 0.5
+      },
+      "id" : 4,
+      "inserts" : [
+        {
+          "bypass" : true,
+          "id" : 9,
+          "kind" : {
+            "format" : "builtin",
+            "node" : "compressor"
+          },
+          "params" : [
+
+          ]
+        }
+      ],
+      "name" : "Group",
+      "output" : {
+        "id" : 5,
+        "kind" : "bus"
+      },
+      "sends" : [
+
+      ],
+      "strip" : {
+        "gain" : 1,
+        "mute" : false,
+        "pan" : 0,
+        "phaseInvert" : false,
+        "solo" : false
+      }
+    },
+    {
+      "automation" : [
+
+      ],
+      "color" : {
+        "blue" : 0.5,
+        "green" : 0.5,
+        "red" : 0.5
+      },
+      "id" : 5,
+      "inserts" : [
+        {
+          "bypass" : false,
+          "id" : 10,
+          "kind" : {
+            "format" : "builtin",
+            "node" : "eq"
+          },
+          "params" : [
+
+          ]
+        }
+      ],
+      "name" : "Main",
+      "output" : {
+        "kind" : "master"
+      },
+      "sends" : [
+
+      ],
+      "strip" : {
+        "gain" : 1,
+        "mute" : false,
+        "pan" : 0,
+        "phaseInvert" : false,
+        "solo" : false
+      }
+    },
+    {
+      "automation" : [
+
+      ],
+      "color" : {
+        "blue" : 0.5,
+        "green" : 0.5,
+        "red" : 0.5
+      },
+      "id" : 6,
+      "inserts" : [
+        {
+          "bypass" : false,
+          "id" : 11,
+          "kind" : {
+            "format" : "builtin",
+            "node" : "reverb"
+          },
+          "params" : [
+
+          ]
+        }
+      ],
+      "name" : "Verb",
+      "output" : {
+        "kind" : "master"
+      },
+      "sends" : [
+
+      ],
+      "strip" : {
+        "gain" : 1,
+        "mute" : false,
+        "pan" : 0,
+        "phaseInvert" : false,
+        "solo" : false
+      }
+    }
+  ],
+  "formatVersion" : 1,
+  "id" : "00000000-0000-0000-0000-000000000016",
+  "ids" : {
+    "next" : 15
+  },
+  "master" : {
+    "automation" : [
+
+    ],
+    "id" : 1,
+    "inserts" : [
+      {
+        "bypass" : false,
+        "id" : 12,
+        "kind" : {
+          "format" : "builtin",
+          "node" : "delay"
+        },
+        "params" : [
+
+        ]
+      }
+    ],
+    "strip" : {
+      "gain" : 1,
+      "mute" : false,
+      "pan" : 0,
+      "phaseInvert" : false,
+      "solo" : false
+    }
+  },
+  "name" : "routing",
+  "sessionSampleRate" : 48000,
+  "tempoMap" : {
+    "tempoEvents" : [
+      {
+        "bpm" : 120,
+        "tick" : 0
+      }
+    ],
+    "timeSignatures" : [
+      {
+        "denominator" : 4,
+        "numerator" : 4,
+        "tick" : 0
+      }
+    ]
+  },
+  "tracks" : [
+    {
+      "armed" : false,
+      "automation" : [
+
+      ],
+      "clips" : [
+
+      ],
+      "color" : {
+        "blue" : 0.5,
+        "green" : 0.5,
+        "red" : 0.5
+      },
+      "id" : 2,
+      "inserts" : [
+        {
+          "bypass" : false,
+          "id" : 7,
+          "kind" : {
+            "format" : "builtin",
+            "node" : "eq"
+          },
+          "params" : [
+            {
+              "index" : 0,
+              "value" : 0.3
+            }
+          ]
+        },
+        {
+          "bypass" : false,
+          "id" : 8,
+          "kind" : {
+            "format" : "builtin",
+            "node" : "compressor"
+          },
+          "params" : [
+
+          ],
+          "sidechainSource" : {
+            "source" : 3,
+            "tap" : "preFader"
+          }
+        }
+      ],
+      "kind" : "audio",
+      "monitoring" : "auto",
+      "name" : "Vox",
+      "output" : {
+        "id" : 4,
+        "kind" : "bus"
+      },
+      "sends" : [
+        {
+          "id" : 13,
+          "level" : 0.5,
+          "tap" : "postFader",
+          "target" : 6
+        }
+      ],
+      "strip" : {
+        "gain" : 1,
+        "mute" : false,
+        "pan" : 0,
+        "phaseInvert" : false,
+        "solo" : false
+      },
+      "takeFolders" : [
+
+      ]
+    },
+    {
+      "armed" : false,
+      "automation" : [
+
+      ],
+      "clips" : [
+
+      ],
+      "color" : {
+        "blue" : 0.5,
+        "green" : 0.5,
+        "red" : 0.5
+      },
+      "id" : 3,
+      "inserts" : [
+
+      ],
+      "kind" : "audio",
+      "monitoring" : "auto",
+      "name" : "Kick",
+      "output" : {
+        "kind" : "master"
+      },
+      "sends" : [
+        {
+          "id" : 14,
+          "level" : 0.25,
+          "tap" : "preFader",
+          "target" : 6
+        }
+      ],
+      "strip" : {
+        "gain" : 1,
+        "mute" : false,
+        "pan" : 0,
+        "phaseInvert" : false,
+        "solo" : false
+      },
+      "takeFolders" : [
+
+      ]
+    }
+  ]
+}

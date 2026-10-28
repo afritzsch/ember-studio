@@ -284,10 +284,11 @@ public final class EngineClient: EngineProtocol {
         case .cycle: return .routingCycle(path: Array(e.cycle))
         case .invalidArgument: return .invalidArgument(message)
         case .unsupported: return .notImplemented(message)
-        case .notFound: return .invalidArgument("not found: \(message)")
-        case .outOfMemory: return .invalidArgument("out of memory: \(message)")
-        case .io: return .invalidArgument("i/o: \(message)")
-        default: return .invalidArgument("engine: \(message)")
+        // DW-076
+        case .notFound: return .engine(code: .notFound, detail: message)
+        case .outOfMemory: return .engine(code: .outOfMemory, detail: message)
+        case .io: return .engine(code: .io, detail: message)
+        default: return .engine(code: .internal, detail: message)
         }
     }
 

@@ -172,7 +172,7 @@ public final class FakeEngine: EngineProtocol {
             let job = s.nextJob
             s.nextJob += 1
             if s.failingAssetPaths.contains(path) {
-                let error = DAWError.invalidArgument("i/o: cannot open \(path)")
+                let error = DAWError.engine(code: .io, detail: "cannot open \(path)")
                 s.jobs[job] = EngineJobStatus(job: job, kind: .loadAsset, state: .failed, error: error)
                 s.events.append(EngineEvent(kind: .jobFinished, subject: 1, job: job, error: error))
                 s.events.append(EngineEvent(kind: .assetLoadFailed, subject: assetID, job: job, error: error))

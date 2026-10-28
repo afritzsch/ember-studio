@@ -1,0 +1,23 @@
+master output:1
+nodes:
+  source:3 audioClipPlayer v0
+  3 channelStrip v0 params 4+4
+  source:4 audioClipPlayer v0
+  4 channelStrip v0 params 8+4
+  input:1 bus v0
+  1 channelStrip v0 params 0+4
+  output:1 master v0 params 12+1
+edges:
+  source:3 -> 3 audio port 0 id 1c50d9f28257a4fe
+  source:4 -> 4 audio port 0 id e79344258da9524c
+  input:1 -> 1 audio port 0 id 88d197caa07c8efd
+  1 -> output:1 audio port 0 id 54d85b451e08e0e6
+  3 -> input:1 audio port 0 id f5b07f4b450de15c
+  4 -> input:1 audio port 0 id 910e9f101066073e
+clips:
+  source:3 clip 5 asset 2 @0+3840 offset 0 gain 1.0 fades 0/0
+  source:3 clip 6 asset 2 @3840+1920 offset 24000 gain 0.5 fades 120/240
+notes:
+tempo:
+  @0 120.0 bpm
+  @0 4/4

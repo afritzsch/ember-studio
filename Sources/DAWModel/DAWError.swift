@@ -21,6 +21,9 @@ public enum DAWError: Error, Hashable, Sendable, Codable {
     case malformedCommand(String)
     /// A declared API whose implementation belongs to a later task.
     case notImplemented(String)
+    /// DW-076: the engine failed for a reason that isn't the caller's input (file I/O, out of
+    /// memory, an internal error). `detail` is the engine's message.
+    case engine(code: EngineErrorCode, detail: String)
 
     /// DW-021
     public init(_ error: TempoMapError) {
@@ -37,8 +40,21 @@ public enum DAWError: Error, Hashable, Sendable, Codable {
         case .unknownCommandType: "unknownCommandType"
         case .malformedCommand: "malformedCommand"
         case .notImplemented: "notImplemented"
+        case .engine: "engine"
         }
     }
+}
+
+/// DW-076: why the engine failed (`DAWError.engine`). Mirrors the `daw::ErrorCode`s that aren't
+/// about the caller's arguments.
+public enum EngineErrorCode: String, Hashable, Sendable, Codable {
+    /// A file couldn't be read or written.
+    case io
+    case outOfMemory
+    /// The engine has no such object (asset, job, node).
+    case notFound
+    /// A bug or an unexpected engine state.
+    case `internal`
 }
 
 extension DAWError: CustomStringConvertible {
@@ -51,6 +67,7 @@ extension DAWError: CustomStringConvertible {
         case .unknownCommandType(let type): "unknown command type \"\(type)\""
         case .malformedCommand(let detail): "malformed command: \(detail)"
         case .notImplemented(let what): "not implemented: \(what)"
+        case .engine(let code, let detail): "engine error (\(code.rawValue)): \(detail)"
         }
     }
 }

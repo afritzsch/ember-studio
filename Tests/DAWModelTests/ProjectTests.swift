@@ -129,14 +129,14 @@ struct ProjectTests {
         let errors: [DAWError] = [
             .notFound(kind: "track", id: 4), .invalidArgument("x"), .routingCycle(path: [3, 5, 3]),
             .invalidTempoMap(reason: .noTempoEvents), .unknownCommandType("T"), .malformedCommand("m"),
-            .notImplemented("n"),
+            .notImplemented("n"), .engine(code: .io, detail: "d"),
         ]
         for error in errors {
             #expect(try JSONDecoder().decode(DAWError.self, from: JSONEncoder().encode(error)) == error)
         }
         #expect(errors.map(\.code) == [
             "notFound", "invalidArgument", "routingCycle", "invalidTempoMap", "unknownCommandType",
-            "malformedCommand", "notImplemented",
+            "malformedCommand", "notImplemented", "engine",
         ])
         #expect(DAWError.routingCycle(path: [3, 5, 3]).description == "routing cycle: 3 → 5 → 3")
     }
