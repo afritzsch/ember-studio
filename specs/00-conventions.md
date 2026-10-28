@@ -33,6 +33,7 @@ Named threads, created only by `DAWEngine`:
 | `daw.reclaim` | Frees retired snapshots and other RT-retired objects |
 | `daw.diskwrite` | Writes recorded audio from FIFOs to disk |
 | `daw.loader` | Decodes and resamples audio files into RAM |
+| `daw.device` | Reacts to device notifications (IO-020..022): runs the hot-swap sequence through the facade, never on `daw.audio` (T-051) |
 
 In Swift, the model is `@MainActor`-isolated in the app. In `dawctl`/`dawmcp` it runs on a single serial actor.
 

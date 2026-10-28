@@ -15,7 +15,7 @@ All processors are `daw::Node` subclasses, stereo in/out, with parameters throug
 
 #### MidiClipPlayer semantics (clarified in T-040)
 - A note's on sounds at `tickToSample(start)` and its off at `tickToSample(start + length)`. Within a block, events are in frame order, and offs come before ons on the same tick. Notes are fixed per instance (DW-051, like DSP-001). Notes with length ≤ 0, pitch > 127 or channel > 15 are dropped, and velocity is clamped to 1..127.
-- Notes aren't chased: playback that starts inside a note (play, locate, loop start) doesn't sound it.
+- Notes are chased (user decision, DW-103): playback that starts inside a note (play, locate, loop start) sounds it from that frame, for its remaining length. *Not implemented yet:* T-040 shipped without chase; DW-103 tracks it.
 - "Hanging notes" are the notes the player has started and not yet ended. Each gets exactly one note-off (velocity 64): at its end; at the first frame of a segment that doesn't continue the previous one's ticks (loop wrap, locate, or a tempo edit that moved the playhead's tick), before that segment's ons; or at frame 0 of a stopped block. The offs are explicit per note, not CC 123.
 - A new instance can't know what the instance it replaces left on, so its first non-empty block starts with All Notes Off (CC 123) on all 16 channels.
 - `midiOut` has fixed capacity. A note-on is written only if room stays for its own off and the offs of all held notes, so a full writer drops notes and never leaves one hanging.

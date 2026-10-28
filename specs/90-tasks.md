@@ -295,7 +295,7 @@ Recorded by the lead from worker reports.
 | DW-100 | T-040 | Sampler should handle CC 123 (All Notes Off): a re-created MidiClipPlayer (DW-051 note edit while playing) sends it on all 16 channels. DSP-023 lists only CC64 and pitch bend | D (T-041) | todo |
 | DW-101 | T-040 | DSP-003 golden (`midi_loop_wrap`) once the golden harness, MIDI routing and a sampler exist | D/E (T-019, T-041) | todo |
 | DW-102 | T-040 | Flaky "ENG-014: RT-retired objects are freed on daw.reclaim" (EngineChecks.cpp:743, `rtRetireQueue`): waits for `destroyed`, then reads `rtObjectsFreed()`, which the reclaimer bumps only after the destructor returns. Wait on `rtObjectsFreed() == 1` instead | E | todo |
-| DW-103 | T-040 | MidiClipPlayer doesn't chase notes (playback starting inside a note doesn't sound it), written into the 06 clarification. Many DAWs chase by default; confirm with the user | user | todo |
+| DW-103 | T-040 | MidiClipPlayer must chase notes (user decision): playback starting inside a note (play, locate, loop start) sounds it from that frame for its remaining length. T-040 shipped without chase; keep the no-hanging-notes guarantee and the capacity reservation | D (with T-041) | todo |
 | DW-104 | T-040 | `BuiltinNodes.h` doc comment doesn't list midiClipPlayer | D (small) | todo |
 | DW-105 | T-017 | `ImportAsset` command `{"type": "ImportAsset", "asset": AssetRef}` (reserve `asset.id`, append; inverse removes). `asset.import` loads into the engine under `project.ids.next`, then performs it; returns `notImplemented` until registered | M (T-030) | todo |
 | DW-106 | T-017 | `SetLoop` command so `Project.loop` follows `transport.setLoop` (today it only drives the engine) | M (T-030) | todo |
