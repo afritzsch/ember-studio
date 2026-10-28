@@ -11,8 +11,9 @@
 // offline renders) return a JobID that Swift polls with pollJob(); the engine never calls back
 // into Swift. Events are polled too (BRIDGE-004).
 //
-// PROPOSED deltas to the 08 contract (setDevice's return type, EngineEventType's facade cases,
-// graphStatus/waitForGraph/nodeLatencies) are listed in specs/08-bridge-facade.md.
+// Deltas to the 08 contract (setDevice's return type, EngineEventType's facade cases,
+// graphStatus/waitForGraph/nodeLatencies (T-014); device changes, the fake driver and
+// simulateDeviceEvent (T-051)) are listed in specs/08-bridge-facade.md.
 
 #include <cstddef>
 #include <cstdint>
@@ -44,10 +45,16 @@ enum class EngineMode : uint8_t {
     offline,   // no device: renders only through renderOffline (dawctl, dawmcp, tests)
 };
 
-// IO-003/004: mirrors io/DriverConfig.h's DriverConfig (PROPOSED: the 08 contract calls it
-// DriverConfig, which the io type already is; Swift can't see io/). The facade decides
-// inputEnabled itself (DW-067: input runs while a track is armed). In offline mode only
-// sampleRate matters: it is the session rate.
+// T-051, DW-089: which device driver a realtime facade runs. `fake` is FakeDeviceDriver (TEST-005)
+// on two made-up devices, paced in real time: id 1 "Fake Device A" (44.1/48/88.2/96 kHz, nominal
+// 48 kHz) and id 2 "Fake Device B" (44.1 kHz only). simulateDeviceEvent drives it, so dawctl and
+// dawmcp can exercise IO-021 without hardware.
+enum class DeviceDriverKind : uint8_t { coreAudio, fake };
+
+// IO-003/004: mirrors io/DriverConfig.h's DriverConfig (the 08 contract calls it DriverConfig,
+// which the io type already is; Swift can't see io/). The facade decides inputEnabled itself
+// (DW-067: input runs while a track is armed). In offline mode only sampleRate matters: it is the
+// session rate.
 struct DriverConfigPOD {
     uint32_t outputDevice = 0;    // AudioObjectID; 0: the system default output
     uint32_t inputDevice = 0;     // 0: the system default input (IO-004 may pick the output)
@@ -55,6 +62,7 @@ struct DriverConfigPOD {
     uint32_t bufferFrames = 256;  // 32…2048
     uint32_t outputChannels = 2;
     uint32_t inputChannels = 2;
+    DeviceDriverKind driver = DeviceDriverKind::coreAudio;  // fixed at create (T-051)
 };
 
 // Mirrors daw::ErrorCode (core/Result.h), plus `none` for success. DW-050: `cycle` is a
@@ -155,7 +163,7 @@ struct ExportSpecPOD {
     double tailMaxSeconds = 10.0;
 };
 
-// MARK: Graph status (PROPOSED, DW-047)
+// MARK: Graph status (DW-047)
 
 struct GraphStatusPOD {
     uint64_t submittedVersion = 0;  // the latest applyGraph
@@ -188,6 +196,12 @@ struct TelemetryPOD {
     uint64_t eventsDropped = 0;       // the event queue overflowed (nobody polled)
     double sampleRate = 0;            // the session rate graphs are built at
     bool deviceRunning = false;
+    // T-051: the output device running (AudioObjectID; 0 while stopped), and xruns (IO-023) by
+    // source: kAudioDeviceProcessorOverload notifications and render overruns (DW-068). Counted
+    // since the facade was created; xruns may also hold counts from before.
+    uint32_t outputDeviceID = 0;
+    uint64_t processorOverloads = 0;
+    uint64_t renderOverruns = 0;
 };
 
 struct NodeLatencyPOD {
@@ -203,9 +217,9 @@ struct MeterPOD {
 
 // MARK: Events (BRIDGE-004, IO-022)
 
-// 04 Interfaces' EngineEventType, plus the facade's own cases (PROPOSED).
+// 04 Interfaces' EngineEventType, plus the facade's own cases (T-014 delta).
 enum class EngineEventType : uint8_t {
-    deviceChanged,
+    deviceChanged,       // IO-021: `device` says why and what changed; error: the device isn't running
     overload,            // IO-023: `count` is the total xrun count
     recordingFinalized,
     assetsReloaded,
@@ -216,12 +230,46 @@ enum class EngineEventType : uint8_t {
     jobFinished,         // subject = job kind, job = the job; error set if it failed
 };
 
+// IO-021 (7), T-051: why a deviceChanged event happened.
+enum class DeviceChangeReason : uint8_t {
+    deviceLost,            // the running output (or separate input) device went away: fell back
+                           // to the system default (D-26)
+    sampleRateChanged,     // its nominal rate moved off the session rate: restarted
+    defaultOutputChanged,  // following the system default (outputDevice 0), and it moved
+    deviceAvailable,       // nothing was running (no device, a failed start) and a device appeared
+    startFailed,           // a start the facade made itself failed (create, after an export,
+                           // arming input)
+};
+
+struct DeviceChangePOD {
+    DeviceChangeReason reason = DeviceChangeReason::deviceLost;
+    uint32_t previousDeviceID = 0;  // output AudioObjectID before (0: none was running)
+    uint32_t deviceID = 0;          // running now (0: none; the event's error says why)
+    double previousSampleRate = 0;  // session rate before
+    double sampleRate = 0;          // session rate after (differs only when IO-021 (5) changed it)
+};
+
 struct EngineEventPOD {
     EngineEventType type = EngineEventType::deviceChanged;
     uint64_t subject = 0;
     JobID job = 0;
     uint64_t count = 0;
     FacadeError error;
+    DeviceChangePOD device;  // deviceChanged
+};
+
+// T-051, DW-089: what simulateDeviceEvent makes the fake device do.
+enum class DeviceEventKind : uint8_t {
+    deviceLost,         // it disappears (IO-021 runs)
+    deviceRestored,     // it comes back
+    sampleRateChanged,  // another app sets its nominal rate to `sampleRate`
+    processorOverload,  // a kAudioDeviceProcessorOverload notification (an xrun, IO-023)
+};
+
+struct DeviceEventPOD {
+    DeviceEventKind kind = DeviceEventKind::deviceLost;
+    uint32_t deviceID = 0;  // 0: the device running (stopped: the default output)
+    double sampleRate = 0;  // sampleRateChanged: a rate the device supports
 };
 
 // MARK: Devices and plugins (04, 10)
@@ -320,7 +368,7 @@ public:
     // MARK: Graph & params
 
     // MIX-001, DW-053: queues the description for daw.compile (coalesced) and returns the
-    // version it stamped on it (PROPOSED). The outcome shows in graphStatus() and, on failure,
+    // version it stamped on it (T-014 delta). The outcome shows in graphStatus() and, on failure,
     // as a graphRejected event.
     uint64_t applyGraph(const GraphDescription& desc);
     GraphStatusPOD graphStatus() const;
@@ -372,7 +420,15 @@ public:
     // MARK: Device (04)
 
     std::vector<DeviceInfoPOD> devices() const;
-    FacadeError setDevice(const DriverConfigPOD& config);  // PROPOSED: not Result<void>
+    // Restarts the device with `config` (its `driver` must be the one the facade was created
+    // with). DW-079: a sampleRate other than the session rate makes it the session rate (the
+    // graph is rebuilt at it, as in IO-021 (5)); rate 0 keeps the session rate if the device
+    // supports it.
+    FacadeError setDevice(const DriverConfigPOD& config);  // T-014 delta: not Result<void>
+    // DW-089: plays `event` on the fake device and returns once the facade has reacted to it
+    // (IO-021 ran if it needed to; see the deviceChanged event). unsupported unless the facade
+    // was created with DeviceDriverKind::fake; invalidArgument for an unknown device or rate.
+    FacadeError simulateDeviceEvent(const DeviceEventPOD& event);
 
     // MARK: Observability (BRIDGE-004/005)
 

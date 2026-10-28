@@ -10,6 +10,13 @@ public typealias ParamID = UInt32
 /// rejected before a job was created.
 public typealias JobID = UInt64
 
+/// T-051, DW-089 (`daw::DeviceDriverKind`): the device driver a realtime engine runs, fixed when it
+/// is created. `fake` plays two made-up devices in real time: 1 "Fake Device A" (44.1/48/88.2/96
+/// kHz, nominal 48 kHz) and 2 "Fake Device B" (44.1 kHz only); `simulateDeviceEvent` drives them.
+public enum DeviceDriverKind: String, Hashable, Sendable, Codable {
+    case coreAudio, fake
+}
+
 /// IO-003/004 (`daw::DriverConfigPOD`). The engine turns input on while a track is armed
 /// (DW-067). In offline mode only `sampleRate` matters: it is the session rate.
 public struct DriverConfig: Hashable, Sendable, Codable {
@@ -23,15 +30,35 @@ public struct DriverConfig: Hashable, Sendable, Codable {
     public var bufferFrames: UInt32
     public var outputChannels: UInt32
     public var inputChannels: UInt32
+    /// Realtime mode only; `setDevice` can't change it.
+    public var driver: DeviceDriverKind
 
     public init(outputDevice: UInt32 = 0, inputDevice: UInt32 = 0, sampleRate: Double = 0,
-                bufferFrames: UInt32 = 256, outputChannels: UInt32 = 2, inputChannels: UInt32 = 2) {
+                bufferFrames: UInt32 = 256, outputChannels: UInt32 = 2, inputChannels: UInt32 = 2,
+                driver: DeviceDriverKind = .coreAudio) {
         self.outputDevice = outputDevice
         self.inputDevice = inputDevice
         self.sampleRate = sampleRate
         self.bufferFrames = bufferFrames
         self.outputChannels = outputChannels
         self.inputChannels = inputChannels
+        self.driver = driver
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case outputDevice, inputDevice, sampleRate, bufferFrames, outputChannels, inputChannels, driver
+    }
+
+    /// `driver` is optional in JSON written before T-051 (it means CoreAudio).
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(outputDevice: try c.decode(UInt32.self, forKey: .outputDevice),
+                  inputDevice: try c.decode(UInt32.self, forKey: .inputDevice),
+                  sampleRate: try c.decode(Double.self, forKey: .sampleRate),
+                  bufferFrames: try c.decode(UInt32.self, forKey: .bufferFrames),
+                  outputChannels: try c.decode(UInt32.self, forKey: .outputChannels),
+                  inputChannels: try c.decode(UInt32.self, forKey: .inputChannels),
+                  driver: try c.decodeIfPresent(DeviceDriverKind.self, forKey: .driver) ?? .coreAudio)
     }
 }
 
@@ -228,6 +255,11 @@ public struct EngineTelemetry: Hashable, Sendable, Codable {
     public var eventsDropped: UInt64 = 0
     public var sampleRate: Double = 0
     public var deviceRunning: Bool = false
+    /// T-051: the output device running (`AudioDeviceInfo.id`; 0 while stopped).
+    public var outputDeviceID: UInt32 = 0
+    /// IO-023: `xruns` by source (DW-068): device overload notifications and render overruns.
+    public var processorOverloads: UInt64 = 0
+    public var renderOverruns: UInt64 = 0
 
     public init() {}
 }
@@ -253,6 +285,60 @@ public struct MeterReading: Hashable, Sendable, Codable {
     }
 }
 
+/// IO-021 (7), T-051 (`daw::DeviceChangePOD`): what a `deviceChanged` event changed, for a toast.
+public struct DeviceChange: Hashable, Sendable, Codable {
+    public enum Reason: String, Hashable, Sendable, Codable {
+        /// The running device went away; the engine fell back to the system default (D-26).
+        case deviceLost
+        /// Its nominal rate moved off the session rate; it restarted.
+        case sampleRateChanged
+        /// Following the system default, which moved.
+        case defaultOutputChanged
+        /// Nothing was running and a device appeared.
+        case deviceAvailable
+        /// A start the engine made itself failed (at creation, after an export, arming input).
+        case startFailed
+    }
+
+    public var reason: Reason
+    /// Output `AudioDeviceInfo.id` before (0: none was running) and now (0: none; see the
+    /// event's `error`).
+    public var previousDeviceID: UInt32
+    public var deviceID: UInt32
+    /// The session rate before and after; they differ when the new device can't run the old one,
+    /// and the engine rebuilt the graph at the new rate.
+    public var previousSampleRate: Double
+    public var sampleRate: Double
+
+    public init(reason: Reason, previousDeviceID: UInt32 = 0, deviceID: UInt32 = 0,
+                previousSampleRate: Double = 0, sampleRate: Double = 0) {
+        self.reason = reason
+        self.previousDeviceID = previousDeviceID
+        self.deviceID = deviceID
+        self.previousSampleRate = previousSampleRate
+        self.sampleRate = sampleRate
+    }
+}
+
+/// DW-089 (`daw::DeviceEventPOD`): what `simulateDeviceEvent` makes the fake device do.
+public struct DeviceEvent: Hashable, Sendable, Codable {
+    public enum Kind: String, Hashable, Sendable, Codable {
+        case deviceLost, deviceRestored, sampleRateChanged, processorOverload
+    }
+
+    public var kind: Kind
+    /// 0: the device running (stopped: the default output).
+    public var deviceID: UInt32
+    /// `sampleRateChanged`: a rate the device supports.
+    public var sampleRate: Double
+
+    public init(_ kind: Kind, deviceID: UInt32 = 0, sampleRate: Double = 0) {
+        self.kind = kind
+        self.deviceID = deviceID
+        self.sampleRate = sampleRate
+    }
+}
+
 /// BRIDGE-004: `daw::EngineEventPOD`.
 public struct EngineEvent: Hashable, Sendable, Codable {
     public enum Kind: String, Hashable, Sendable, Codable {
@@ -270,14 +356,19 @@ public struct EngineEvent: Hashable, Sendable, Codable {
     public var job: JobID
     /// `overload`: the total xrun count.
     public var count: UInt64
+    /// `deviceChanged`: the device still isn't running when set.
     public var error: DAWError?
+    /// `deviceChanged` (T-051).
+    public var device: DeviceChange?
 
-    public init(kind: Kind, subject: UInt64 = 0, job: JobID = 0, count: UInt64 = 0, error: DAWError? = nil) {
+    public init(kind: Kind, subject: UInt64 = 0, job: JobID = 0, count: UInt64 = 0, error: DAWError? = nil,
+                device: DeviceChange? = nil) {
         self.kind = kind
         self.subject = subject
         self.job = job
         self.count = count
         self.error = error
+        self.device = device
     }
 }
 
@@ -468,7 +559,12 @@ public protocol EngineProtocol: AnyObject, Sendable {
 
     // Device (04)
     func devices() -> [AudioDeviceInfo]
+    /// DW-079: a `sampleRate` other than the session rate makes it the session rate (the graph is
+    /// rebuilt at it); 0 keeps the session rate if the device supports it.
     func setDevice(_ config: DriverConfig) throws(DAWError)
+    /// DW-089: plays `event` on the fake device; returns once the engine has reacted (IO-021;
+    /// see the `deviceChanged` event). Throws unless the engine runs `DeviceDriverKind.fake`.
+    func simulateDeviceEvent(_ event: DeviceEvent) throws(DAWError)
 
     // Observability (BRIDGE-004/005)
     func telemetry() -> EngineTelemetry

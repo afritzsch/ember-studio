@@ -6,6 +6,15 @@
 // completions (daw.loader) and by the export thread. Under it the facade may call into the
 // GraphCompiler and the driver adapter, which never call back into the facade, so there is no
 // lock cycle. The audio thread never takes it (CONV-RT-02).
+//
+// Devices (T-051, IO-020..022). In realtime mode a DeviceMonitor reacts to the driver's device
+// notifications on daw.device, under the facade mutex; DeviceHost is its host, so the whole
+// hot-swap sequence runs with the facade's state held still. A session-rate change (IO-021 (5),
+// DW-079) replaces the GraphCompiler, whose rate is fixed. waitForGraph and exports wait on the
+// compiler outside the facade mutex, on a shared_ptr they copied under it; the swap first lets
+// every submitted build finish (so their waits return) and then waits for the old compiler to be
+// gone before it makes the new one. Versions stay the facade's; the new compiler's tickets count
+// from `ticketBase`.
 
 #include "daw/EngineFacade.h"
 
@@ -35,6 +44,7 @@
 #include "graph/GraphCompiler.h"
 #include "graph/NodeRegistry.h"
 #include "io/AudioFileLoader.h"
+#include "io/DeviceMonitor.h"
 #include "io/DriverConfig.h"
 #include "io/ExportSpec.h"
 #include "io/OfflineDriver.h"
@@ -50,6 +60,9 @@ namespace {
 constexpr std::size_t kMaxEvents = 1024;      // BRIDGE-004: polled at 60 Hz; overflow drops oldest
 constexpr std::size_t kMaxFinishedJobs = 1024;
 constexpr auto kExportGraphWait = std::chrono::seconds(30);
+constexpr auto kRateRebuildWait = std::chrono::seconds(10);  // IO-021 (5): the rebuild at the new rate
+constexpr auto kDevicePoll = std::chrono::milliseconds(10);  // daw.device: how often it looks
+constexpr std::size_t kNotificationBatch = 64;
 
 // DW-067: graphs must be prepared for the device's whole buffer, or its blocks render silence.
 // GraphCompiler prepares for kMaxBlock, above any buffer a driver accepts (IO-003).
@@ -181,9 +194,26 @@ struct EngineFacade::Impl {
     void exportLoop();
     void runExport(JobID job, Tick from, Tick to, const ExportSpecPOD& spec);
 
+    // GraphCompiler status and waits in facade versions (see ticketBase).
+    GraphCompiler::Status compilerStatus() const;
+    uint64_t ticketOf(uint64_t version) const { return version > ticketBase ? version - ticketBase : 0; }
+    // T-051. With `mutex` held, except deviceLoop (daw.device), which takes it.
+    struct DeviceHost;
+    void deviceLoop();
+    void processDeviceNotifications();
+    void pushDeviceChanged(const DeviceChangePOD& change, FacadeError error);
+    void pushStartFailed(const Error& error);
+    // IO-021 (1)..(3): stops the transport (applied right away), finalizes recordings, stops the driver.
+    void stopForDeviceChange();
+    // IO-021 (5), DW-079: with the driver stopped, rebuilds everything at `rate`.
+    Result<void> changeSessionRate(double rate);
+    bool exportBusy() const { return exportRunning || exportActive || !exportQueue.empty(); }
+
     std::atomic<uint32_t> refs{1};  // BRIDGE-001
     uint64_t instanceID = 0;
     const EngineMode mode;
+    // Kept to rebuild the registry when the session rate changes.
+    std::function<Result<void>(NodeRegistry&)> registerNodes;
 
     // Declaration order is destruction order in reverse: the loader and compiler threads stop
     // before the state their callbacks touch, and the engine outlives everything rendering
@@ -197,6 +227,9 @@ struct EngineFacade::Impl {
     // the versions applyGraph stamps (1, 2, …).
     uint64_t submitted = 0;
     uint64_t lastSeenCompleted = 0;  // graphRejected events up to here
+    // The compiler's ticket t is facade version ticketBase + t (0 until a session-rate change).
+    uint64_t ticketBase = 0;
+    std::optional<GraphDescription> lastDesc;  // the latest applyGraph, rebuilt at a new rate
     // The published version and every later one: their tempo maps (DW-064) and node IDs, sorted
     // (DW-071, to prune the meter map).
     struct VersionInfo {
@@ -223,6 +256,7 @@ struct EngineFacade::Impl {
     uint64_t lastXruns = 0;
 
     bool exportRunning = false;  // an OfflineDriver render is using the engine
+    bool exportActive = false;   // daw.export has taken a request and not finished it
     struct ExportRequest {
         JobID job;
         Tick from, to;
@@ -231,19 +265,98 @@ struct EngineFacade::Impl {
     std::deque<ExportRequest> exportQueue;
     bool stopping = false;
     std::condition_variable exportWake;
+    std::condition_variable deviceWake;  // daw.device: stopping
 
     Engine engine;
     AssetTable assets;
     MeterMap meters;
-    std::unique_ptr<GraphCompiler> compiler;
+    // Waiters outside `mutex` copy it first; replaced only by changeSessionRate.
+    std::shared_ptr<GraphCompiler> compiler;
     AudioFileLoader loader;
     std::unique_ptr<DriverAdapter> driver;
     bool driverStarted = false;  // the device should be running (export pauses it)
+    std::unique_ptr<DeviceMonitorHost> deviceHost;  // realtime mode with a driver (T-051)
+    std::unique_ptr<DeviceMonitor> monitor;
     std::thread exportThread;    // last: started once everything above exists
+    std::thread deviceThread;
+};
+
+namespace {
+
+DeviceChangeReason toReason(DeviceSwapReason reason) {
+    switch (reason) {
+    case DeviceSwapReason::deviceLost: return DeviceChangeReason::deviceLost;
+    case DeviceSwapReason::sampleRateChanged: return DeviceChangeReason::sampleRateChanged;
+    case DeviceSwapReason::defaultOutputChanged: return DeviceChangeReason::defaultOutputChanged;
+    case DeviceSwapReason::deviceAvailable: return DeviceChangeReason::deviceAvailable;
+    }
+    return DeviceChangeReason::deviceLost;
+}
+
+FakeDeviceEventType toFakeEvent(DeviceEventKind kind) {
+    switch (kind) {
+    case DeviceEventKind::deviceLost: return FakeDeviceEventType::deviceLost;
+    case DeviceEventKind::deviceRestored: return FakeDeviceEventType::deviceRestored;
+    case DeviceEventKind::sampleRateChanged: return FakeDeviceEventType::sampleRateChanged;
+    case DeviceEventKind::processorOverload: return FakeDeviceEventType::processorOverload;
+    }
+    return FakeDeviceEventType::deviceLost;
+}
+
+} // namespace
+
+// IO-021 for DeviceMonitor: the facade's engine, driver and session. Every call comes from
+// DeviceMonitor::handle with the facade mutex held (processDeviceNotifications).
+struct EngineFacade::Impl::DeviceHost final : public DeviceMonitorHost {
+    explicit DeviceHost(Impl& impl) : impl_(impl) {}
+
+    // An export pauses the device and restarts it itself.
+    bool deviceWanted() const override { return impl_.driver && !impl_.exportRunning && !impl_.stopping; }
+    DriverConfig requestedConfig() const override { return impl_.driverConfig(); }
+    RunningConfig runningConfig() const override {
+        return impl_.driver->running() ? impl_.driver->current() : RunningConfig{};
+    }
+    double sessionRate() const override { return impl_.sampleRate; }
+    bool recording() const override { return impl_.engine.transport().playhead().recording; }
+
+    bool deviceAlive(AudioDeviceRef device) const override { return impl_.driver->deviceAlive(device); }
+    AudioDeviceRef defaultOutputDevice() const override { return impl_.driver->defaultOutputDevice(); }
+    Result<DeviceCaps> outputCaps(AudioDeviceRef device) const override { return impl_.driver->outputCaps(device); }
+
+    // (1)..(3) together: stopForDeviceChange applies the transport commands once the driver is
+    // stopped, so the readout shows "stopped" even when no device comes back.
+    void stopTransport() override { (void)impl_.engine.transport().stop(); }
+    void finalizeRecordings() override { (void)impl_.engine.transport().setRecording(false); }  // 09: finalize takes
+    void stopDriver() override {
+        impl_.driver->stop();
+        impl_.driverStarted = false;
+        impl_.applyTransportCommands();
+    }
+    Result<void> changeSessionRate(double rate) override { return impl_.changeSessionRate(rate); }
+    Result<void> startDriver(const DriverConfig& config) override {
+        impl_.config.outputDevice = config.outputDevice;
+        impl_.config.inputDevice = config.inputDevice;
+        impl_.config.sampleRate = config.sampleRate;
+        auto started = impl_.driver->start(impl_.engine, impl_.driverConfig());
+        impl_.driverStarted = started.ok();
+        return started;
+    }
+    void deviceChanged(const DeviceSwap& swap) override {
+        DeviceChangePOD change;
+        change.reason = toReason(swap.reason);
+        change.previousDeviceID = swap.previousDevice;
+        change.deviceID = swap.device;
+        change.previousSampleRate = swap.previousSessionRate;
+        change.sampleRate = swap.sessionRate;
+        impl_.pushDeviceChanged(change, swap.error ? toFacadeError(*swap.error) : FacadeError{});
+    }
+
+private:
+    Impl& impl_;
 };
 
 EngineFacade::Impl::Impl(EngineMode m, const DriverConfigPOD& cfg, FacadeOptions options)
-    : mode(m), config(cfg) {
+    : mode(m), registerNodes(options.registerNodes), config(cfg) {
     sampleRate = cfg.sampleRate;
     if (mode == EngineMode::realtime) {
         driver = std::move(options.driver);
@@ -253,10 +366,7 @@ EngineFacade::Impl::Impl(EngineMode m, const DriverConfigPOD& cfg, FacadeOptions
                 driverStarted = true;
                 sampleRate = driver->sampleRate();
             } else {
-                EngineEventPOD event;
-                event.type = EngineEventType::deviceChanged;
-                event.error = toFacadeError(started.error());
-                pushEvent(std::move(event));
+                pushStartFailed(started.error());
             }
         }
     }
@@ -270,9 +380,14 @@ EngineFacade::Impl::Impl(EngineMode m, const DriverConfigPOD& cfg, FacadeOptions
         event.error = toFacadeError(registry.error());
         pushEvent(std::move(event));
     }
-    compiler = std::make_unique<GraphCompiler>(
+    compiler = std::make_shared<GraphCompiler>(
         engine, registry ? std::move(registry).value() : NodeRegistry::withBuiltins(), sampleRate);
     exportThread = std::thread([this] { exportLoop(); });
+    if (driver) {
+        deviceHost = std::make_unique<DeviceHost>(*this);
+        monitor = std::make_unique<DeviceMonitor>(*deviceHost);
+        deviceThread = std::thread([this] { deviceLoop(); });
+    }
 }
 
 EngineFacade::Impl::~Impl() {
@@ -282,7 +397,9 @@ EngineFacade::Impl::~Impl() {
         if (driver) driver->stop();
     }
     exportWake.notify_all();
+    deviceWake.notify_all();
     exportThread.join();
+    if (deviceThread.joinable()) deviceThread.join();
     // The loader and compiler join in their destructors, then the engine frees what's left.
 }
 
@@ -315,8 +432,130 @@ void EngineFacade::Impl::pushEvent(EngineEventPOD event) {
     events.push_back(std::move(event));
 }
 
+// MARK: Devices (T-051, IO-020..022)
+
+// daw.device: polls the driver's notifications and lets the monitor react, all under the facade
+// mutex. 10 ms is quick enough for a device change and costs nothing.
+void EngineFacade::Impl::deviceLoop() {
+    pthread_setname_np("daw.device");
+    pthread_set_qos_class_self_np(QOS_CLASS_USER_INITIATED, 0);
+    std::unique_lock lock(mutex);
+    while (!stopping) {
+        deviceWake.wait_for(lock, kDevicePoll, [this] { return stopping; });
+        if (stopping) return;
+        processDeviceNotifications();
+    }
+}
+
+void EngineFacade::Impl::processDeviceNotifications() {
+    if (!driver || !monitor) return;
+    DeviceNotification batch[kNotificationBatch];
+    // Bounded: a few batches per call; whatever is left waits for the next poll.
+    for (int round = 0; round < 4; ++round) {
+        const std::size_t n = driver->pollNotifications(batch, kNotificationBatch);
+        for (std::size_t i = 0; i < n; ++i) (void)monitor->handle(batch[i]);
+        if (n < kNotificationBatch) return;
+    }
+}
+
+void EngineFacade::Impl::pushDeviceChanged(const DeviceChangePOD& change, FacadeError error) {
+    EngineEventPOD event;
+    event.type = EngineEventType::deviceChanged;
+    event.device = change;
+    event.error = std::move(error);
+    pushEvent(std::move(event));
+}
+
+void EngineFacade::Impl::pushStartFailed(const Error& error) {
+    DeviceChangePOD change;
+    change.reason = DeviceChangeReason::startFailed;
+    change.previousSampleRate = sampleRate;
+    change.sampleRate = sampleRate;
+    pushDeviceChanged(change, toFacadeError(error));
+}
+
+void EngineFacade::Impl::stopForDeviceChange() {
+    (void)engine.transport().stop();
+    if (engine.transport().playhead().recording) (void)engine.transport().setRecording(false);  // 09
+    if (driver) driver->stop();
+    driverStarted = false;
+    applyTransportCommands();  // nothing renders now, so apply them here
+}
+
+Result<void> EngineFacade::Impl::changeSessionRate(double rate) {
+    if (rate == sampleRate) return {};
+    if (!(rate >= kMinSampleRate && rate <= kMaxSampleRate))
+        return makeError(ErrorCode::invalidArgument, "session rate out of range");
+    if (exportBusy()) return makeError(ErrorCode::unsupported, "can't change the session rate during an export");
+
+    // Finish what was submitted, so no wait on the old compiler is left hanging, then let any
+    // waiter that still holds it go before the new one publishes anything.
+    if (const uint64_t last = ticketOf(submitted); last != 0 && !compiler->wait(last, kRateRebuildWait))
+        return makeError(ErrorCode::internal, "session rate change: a graph build timed out");
+    pump();
+    // Stopped: the playhead is the position; keep its tick across the change (TIME-001).
+    const Tick position = engine.transport().playhead().tick;
+    {
+        std::weak_ptr<GraphCompiler> old = compiler;
+        compiler.reset();
+        const auto deadline = std::chrono::steady_clock::now() + kRateRebuildWait;
+        while (!old.expired() && std::chrono::steady_clock::now() < deadline)
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+
+    FacadeOptions options;
+    options.registerNodes = registerNodes;
+    auto registry = makeRegistry(assets, engine.telemetry(), meters, options);
+    if (!registry) {
+        EngineEventPOD event;
+        event.type = EngineEventType::graphRejected;
+        event.error = toFacadeError(registry.error());
+        pushEvent(std::move(event));
+    }
+    const double previous = sampleRate;
+    sampleRate = rate;
+    compiler = std::make_shared<GraphCompiler>(
+        engine, registry ? std::move(registry).value() : NodeRegistry::withBuiltins(), sampleRate);
+    ticketBase = submitted;
+
+    // IO-021 (5): every node re-prepared at the new rate — the new compiler creates them all.
+    if (lastDesc) {
+        GraphDescription copy = *lastDesc;
+        copy.version = ++submitted;
+        VersionInfo& info = versions[copy.version];
+        info.tempo = copy.tempo;
+        for (const NodeDesc& node : copy.nodes) info.nodes.push_back(node.id);
+        std::sort(info.nodes.begin(), info.nodes.end());
+        lastDesc = copy;
+        (void)compiler->submit(std::move(copy));
+        if (!compiler->wait(1, kRateRebuildWait))
+            return makeError(ErrorCode::internal, "session rate change: the rebuild timed out");
+        pump();
+        if (const auto status = compilerStatus(); status.lastError) return *status.lastError;
+    }
+    (void)engine.transport().locate(position);
+    applyTransportCommands();
+
+    // IO-033 is T-056: assets keep the rate they were loaded at until then.
+    if (assets.size() > 0) {
+        EngineEventPOD event;
+        event.type = EngineEventType::assetsReloaded;
+        event.error = facadeError(FacadeErrorCode::unsupported,
+                                  "assets loaded at " + std::to_string(static_cast<int>(previous)) +
+                                      " Hz were not re-converted (IO-033)");
+        pushEvent(std::move(event));
+    }
+    return {};
+}
+
+GraphCompiler::Status EngineFacade::Impl::compilerStatus() const {
+    GraphCompiler::Status status = compiler->status();
+    status.completed += ticketBase;  // every version up to ticketBase finished on an older compiler
+    return status;
+}
+
 GraphStatusPOD EngineFacade::Impl::graphStatusLocked() const {
-    const GraphCompiler::Status status = compiler->status();
+    const GraphCompiler::Status status = compilerStatus();
     GraphStatusPOD out;
     out.submittedVersion = submitted;
     out.completedVersion = status.completed;
@@ -327,7 +566,7 @@ GraphStatusPOD EngineFacade::Impl::graphStatusLocked() const {
 
 // Turns what changed since the last call into events and finishes deferred param frees.
 void EngineFacade::Impl::pump() {
-    const GraphCompiler::Status status = compiler->status();
+    const GraphCompiler::Status status = compilerStatus();
 
     // A failed build. Several builds may complete between two pumps; only the latest one's
     // error is kept (GraphCompiler::Status), and graphStatus()/waitForGraph report it too.
@@ -448,20 +687,26 @@ void EngineFacade::Impl::exportLoop() {
             if (stopping) return;
             request = std::move(exportQueue.front());
             exportQueue.pop_front();
+            exportActive = true;  // no session-rate change until it's done
         }
         runExport(request.job, request.from, request.to, request.spec);
+        std::lock_guard lock(mutex);
+        exportActive = false;
     }
 }
 
 void EngineFacade::Impl::runExport(JobID jobID, Tick from, Tick to, const ExportSpecPOD& pod) {
     uint64_t latest;
+    std::shared_ptr<GraphCompiler> builder;
     {
         std::lock_guard lock(mutex);
-        latest = submitted;
+        latest = ticketOf(submitted);
+        builder = compiler;  // exportActive also keeps session-rate changes out meanwhile
         if (auto it = jobs.find(jobID); it != jobs.end()) it->second.state = JobState::running;
     }
     // Render what was applied last: wait until every submitted description has been built.
-    const bool built = latest == 0 || compiler->wait(latest, kExportGraphWait);
+    const bool built = latest == 0 || builder->wait(latest, kExportGraphWait);
+    builder.reset();
 
     ExportSpec spec;
     spec.file = pod.path;
@@ -478,7 +723,7 @@ void EngineFacade::Impl::runExport(JobID jobID, Tick from, Tick to, const Export
     {
         std::lock_guard lock(mutex);
         pump();
-        const GraphCompiler::Status status = compiler->status();
+        const GraphCompiler::Status status = compilerStatus();
         auto tempo = versions.find(status.publishedVersion);
         if (!built) {
             error = facadeError(FacadeErrorCode::internal, "offline render: graph build timed out");
@@ -519,10 +764,7 @@ void EngineFacade::Impl::runExport(JobID jobID, Tick from, Tick to, const Export
             auto restarted = driver->start(engine, driverConfig());
             if (!restarted) {
                 driverStarted = false;
-                EngineEventPOD event;
-                event.type = EngineEventType::deviceChanged;
-                event.error = toFacadeError(restarted.error());
-                pushEvent(std::move(event));
+                pushStartFailed(restarted.error());
             }
         }
     }
@@ -556,7 +798,10 @@ bool EngineFacade::isLive(uint64_t instanceID) {
 
 EngineFacade* EngineFacade::create(EngineMode mode, const DriverConfigPOD& config) {
     FacadeOptions options;
-    if (mode == EngineMode::realtime) options.driver = makeDefaultDriverAdapter();
+    if (mode == EngineMode::realtime)
+        options.driver = config.driver == DeviceDriverKind::fake  // DW-089
+                             ? std::make_unique<FakeDeviceDriverAdapter>(defaultFakeDeviceSpec())
+                             : makeDefaultDriverAdapter();
     return EngineFacadeAccess::create(mode, config, std::move(options));
 }
 
@@ -580,8 +825,10 @@ uint64_t EngineFacade::applyGraph(const GraphDescription& desc) {
     info.tempo = copy.tempo;
     for (const NodeDesc& node : copy.nodes) info.nodes.push_back(node.id);
     std::sort(info.nodes.begin(), info.nodes.end());
+    impl_->lastDesc = copy;  // IO-021 (5): rebuilt at a new session rate
     const uint64_t ticket = impl_->compiler->submit(std::move(copy));
-    (void)ticket;  // == version: applyGraph is the only submitter, under this lock
+    // == version − ticketBase: the facade is the only submitter, under this lock
+    (void)ticket;
     impl_->pump();
     return impl_->submitted;
 }
@@ -593,7 +840,17 @@ GraphStatusPOD EngineFacade::graphStatus() const {
 }
 
 GraphStatusPOD EngineFacade::waitForGraph(uint64_t version, uint32_t timeoutMs) {
-    (void)impl_->compiler->wait(version, std::chrono::milliseconds(timeoutMs));
+    {
+        // A version up to ticketBase was finished by an earlier compiler (ticket 0).
+        std::shared_ptr<GraphCompiler> builder;
+        uint64_t ticket;
+        {
+            std::lock_guard lock(impl_->mutex);
+            builder = impl_->compiler;
+            ticket = impl_->ticketOf(version);
+        }
+        if (ticket != 0) (void)builder->wait(ticket, std::chrono::milliseconds(timeoutMs));
+    }
     std::lock_guard lock(impl_->mutex);
     impl_->pump();
     if (version > 0) impl_->applyTransportCommands();  // a first graph lets queued commands apply
@@ -739,12 +996,7 @@ void EngineFacade::armInput(NodeID track, uint32_t, bool armed) {
     else
         impl.armedTracks.erase(track);
     if (wasEnabled == impl.armedTracks.empty() && impl.driverStarted) {
-        if (auto restarted = impl.restartDriver(); !restarted) {
-            EngineEventPOD event;
-            event.type = EngineEventType::deviceChanged;
-            event.error = toFacadeError(restarted.error());
-            impl.pushEvent(std::move(event));
-        }
+        if (auto restarted = impl.restartDriver(); !restarted) impl.pushStartFailed(restarted.error());
     }
 }
 
@@ -785,15 +1037,59 @@ std::vector<DeviceInfoPOD> EngineFacade::devices() const {
     return impl_->driver ? impl_->driver->devices() : std::vector<DeviceInfoPOD>{};
 }
 
+FacadeError EngineFacade::simulateDeviceEvent(const DeviceEventPOD& event) {
+    std::lock_guard lock(impl_->mutex);
+    Impl& impl = *impl_;
+    if (impl.mode != EngineMode::realtime || !impl.driver || impl.config.driver != DeviceDriverKind::fake)
+        return facadeError(FacadeErrorCode::unsupported, "device events can only be simulated on the fake device driver");
+    FakeDeviceEvent fake;
+    fake.type = toFakeEvent(event.kind);
+    fake.device = event.deviceID;
+    fake.sampleRate = event.sampleRate;
+    if (auto injected = impl.driver->simulate(fake); !injected) return toFacadeError(injected.error());
+    // React now rather than at daw.device's next poll, so a script sees the outcome on return.
+    impl.processDeviceNotifications();
+    return {};
+}
+
 FacadeError EngineFacade::setDevice(const DriverConfigPOD& config) {
     std::lock_guard lock(impl_->mutex);
     Impl& impl = *impl_;
     if (impl.mode != EngineMode::realtime || !impl.driver)
         return facadeError(FacadeErrorCode::unsupported, "no device driver in this engine");
-    // Graphs and assets are built at the session rate; changing it is IO-021/IO-033 (T-051, T-056).
-    if (config.sampleRate != 0 && config.sampleRate != impl.sampleRate)
-        return facadeError(FacadeErrorCode::unsupported, "changing the session rate is not supported yet");
+    if (config.driver != impl.config.driver)
+        return facadeError(FacadeErrorCode::invalidArgument, "the device driver kind is fixed when the engine is created");
+
+    // DW-079: the rate the session should run at. Rate 0 keeps the session rate when the device
+    // supports it (IO-021 (5)), else takes the device's; a driver that can't describe its devices
+    // just tries the request.
+    // A bad request fails before anything is stopped.
+    double rate = config.sampleRate;
+    if (rate != 0 && !isSessionRate(rate))
+        return facadeError(FacadeErrorCode::invalidArgument, "not a session rate (44.1/48/88.2/96 kHz)");
+    const AudioDeviceRef target = config.outputDevice != 0 ? config.outputDevice : impl.driver->defaultOutputDevice();
+    auto caps = impl.driver->outputCaps(target);
+    if (rate != 0 && caps && !supportsRate(*caps, rate))
+        return facadeError(FacadeErrorCode::unsupported, "the device can't run at that rate");
+    if (rate == 0) {
+        if (caps) {
+            if (supportsRate(*caps, impl.sampleRate)) {
+                rate = impl.sampleRate;
+            } else {
+                auto resolved = resolveConfig(0, config.bufferFrames, config.outputChannels, *caps);
+                if (!resolved) return toFacadeError(resolved.error());
+                rate = resolved->sampleRate;
+            }
+        }
+    }
+    if (rate != 0 && rate != impl.sampleRate) {
+        if (impl.exportBusy())
+            return facadeError(FacadeErrorCode::unsupported, "can't change the session rate during an export");
+        impl.stopForDeviceChange();
+        if (auto changed = impl.changeSessionRate(rate); !changed) return toFacadeError(changed.error());
+    }
     impl.config = config;
+    if (rate != 0) impl.config.sampleRate = rate;  // later restarts keep the session rate
     // During an export the device is paused; it restarts with the new config afterwards.
     if (impl.exportRunning) return {};
     if (auto started = impl.restartDriver(); !started) return toFacadeError(started.error());
@@ -825,7 +1121,7 @@ TelemetryPOD EngineFacade::telemetry() const {
 
     std::lock_guard lock(impl_->mutex);
     impl_->pump();
-    t.graphVersion = impl_->compiler->status().publishedVersion;  // DW-047
+    t.graphVersion = impl_->compilerStatus().publishedVersion;  // DW-047
     t.blocksRendered = impl_->engine.blocksRendered();
     t.paramsAllocated = impl_->engine.params().allocatedCount();
     for (const auto& p : impl_->pendingFrees) t.paramsPendingFree += p.count;
@@ -833,6 +1129,11 @@ TelemetryPOD EngineFacade::telemetry() const {
     t.eventsDropped = impl_->eventsDropped;
     t.sampleRate = impl_->sampleRate;
     t.deviceRunning = impl_->driver && impl_->driver->running();
+    if (impl_->driver) {
+        t.outputDeviceID = t.deviceRunning ? impl_->driver->current().outputDevice : 0;
+        t.processorOverloads = impl_->driver->processorOverloads();
+        t.renderOverruns = impl_->driver->renderOverruns();
+    }
     return t;
 }
 
