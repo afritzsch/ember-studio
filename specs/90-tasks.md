@@ -51,7 +51,7 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 ### M2 — Mixer & routing
 | Task | Lane | Title | Requirements | Depends on | Status |
 |---|---|---|---|---|---|
-| T-020 | E | Full channel strip: mute (slot; solo resolved by the model, T-016), phase, meters; sends pre/post | MIX-005, MIX-007, DSP-010 | T-013 | wip(t-020-channel-strip) |
+| T-020 | E | Full channel strip: mute (slot; solo resolved by the model, T-016), phase, meters; sends pre/post | MIX-005, MIX-007, DSP-010 | T-013 | done |
 | T-021 | E | PDC: path latency, delay insertion, delay-line carry-over, source pre-roll | MIX-020..025 | T-012 | done |
 | T-022 | M | Routing commands (tracks, buses, sends, outputs) + cycle rejection + validation | MODEL-005 (routing subset), MODEL-030..032 | T-016 | todo |
 | T-023 | E | Sidechain edges and ports | MIX-008 | T-021 | ready |
@@ -284,3 +284,5 @@ Recorded by the lead from worker reports.
 | DW-089 | T-050 | dawctl/dawmcp can't pick the fake device: `EngineFacade::create` realtime always uses CoreAudio. Needs a facade option/mode (`include/daw/`) | B (T-017/T-018) | todo |
 | DW-090 | T-050 | CoreAudio property listeners (T-051, IO-020) should emit the same `io/DeviceNotification.h` notifications so DeviceMonitor reads either source; render-time overruns stay with T-051 (DW-068) | E (T-051) | todo |
 | DW-091 | lead | Flaky under full-suite load (~1 in 15–35 runs): "TIME-009: a reader thread never sees a torn playhead" (T-008, TransportTests.swift:69) and T-050's scripted-events test (being fixed). A torn playhead would be a real bug, so investigate before calling it a test issue | E | todo |
+| DW-092 | T-020 | Facade `paramInfoJSON(.gain)` should return `GainNode::kParamInfo` (level, mute); then update EngineClientTests.swift (expects "[]" for `.gain`). Same hook as DW-078 | B | todo |
+| DW-093 | T-020 | Goldens: bus_send_sum with pre- and post-fader sends; strip mute ramp; phase-invert null; gain-node level step; muted track with sends goes silent and fades back | E (T-019 / T-025) | todo |

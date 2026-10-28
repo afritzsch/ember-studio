@@ -16,7 +16,7 @@ All processors are `daw::Node` subclasses, stereo in/out, with parameters throug
 ### Channel & utility
 | ID | Requirement | Acceptance |
 |---|---|---|
-| DSP-010 | `ChannelStrip` (see MIX-005): gain, pan, mute, phase, meters. | Golden |
+| DSP-010 | `ChannelStrip` (see MIX-005): gain, pan, mute, phase, meters. `GainNode` (`NodeKind::gain`): level slot (+ mute slot as a send), the send node of MIX-007. | Golden |
 | DSP-011 | `Metronome` (TIME-010). | Golden |
 
 ### Sampler (D-19)
@@ -53,5 +53,5 @@ class NodeRegistry { public: static std::span<const ParamInfo> paramInfo(NodeKin
 | ID | status | test |
 |---|---|---|
 | DSP-001 | done (T-013) | `ClipPlayerTests` "AudioClipPlayer (DSP-001)" (sample range, source offset, clip gain, mono → L/R; linear fades clamped, adjacent clips; random clips over a tempo map in random block sizes vs oracle; loop wrap mid-block 64-sample crossfade; locate/stop reset; asset refs released on reclaim, missing/wrong-rate assets silent). Golden "two adjacent clips, fades" waits for T-019. Overlaps summed until DSP-002 |
-| DSP-010 | partial (T-013) | `ChannelStripTests` "ChannelStrip (DSP-010, MIX-005)": gain, pan, meters, clip player → strip → master through the Engine. Mute/solo/phase in T-020 |
+| DSP-010 | done (T-013, T-020) | `ChannelStripTests` (gain, pan, mute, phase, meters; clip player → strip → master through the Engine); `SendTests` (GainNode) |
 | DSP-* (rest) | todo | |

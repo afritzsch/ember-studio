@@ -44,6 +44,10 @@ struct StripRig {
         params.set(ChannelStrip::kGain, gain);
         params.set(ChannelStrip::kPan, pan);
     }
+    void setSwitches(float mute, float phase) {
+        params.set(ChannelStrip::kMute, mute);
+        params.set(ChannelStrip::kPhase, phase);
+    }
 
     // Processes one block of `in` (both channels: inL, inR) into outL/outR.
     void process(const std::vector<float>& inL, const std::vector<float>& inR) {
@@ -249,7 +253,7 @@ CheckResult channelStripThroughEngine() {
 
     // A strip with too few params is rejected at build time.
     GraphDescription bad = d;
-    bad.nodes[2].numParams = 1;
+    bad.nodes[2].numParams = ChannelStrip::kNumParams - 1;  // T-020: mute and phase are slots 2, 3
     DAW_CHECK(!rig.build(bad).ok());
 
     DAW_CHECK(rig.publish(d));
@@ -279,17 +283,18 @@ CheckResult channelStripMetersThroughBuilder() {
     CheckResult checks;
     Rig rig;
     rig.addAsset(makeAsset(1, 1, 100000, [](uint32_t, int64_t) { return 0.5f; }));
-    auto params = rig.engine().params().allocate(6, 0.0f);
+    constexpr uint32_t kStrip = ChannelStrip::kNumParams;
+    auto params = rig.engine().params().allocate(3 * kStrip, 0.0f);
     DAW_CHECK(params.ok());
     const ParamID first = params.value();
-    for (uint32_t i = 0; i < 3; ++i) rig.engine().params().set(first + 2 * i, 1.0f);  // gain 1, pan 0
+    for (uint32_t i = 0; i < 3; ++i) rig.engine().params().set(first + kStrip * i, 1.0f);  // gain 1, rest 0
 
     // player 10 → strip 20 → master; strip 21 (silent input) → master.
     auto describe = [&](uint32_t strip20Version, NodeID secondStrip) {
         GraphDescription d = baseDescription();
         d.nodes.push_back(NodeDesc{10, NodeKind::audioClipPlayer, 1, 0, 0, {}});
-        d.nodes.push_back(NodeDesc{20, NodeKind::channelStrip, strip20Version, first, 2, {}});
-        d.nodes.push_back(NodeDesc{secondStrip, NodeKind::channelStrip, 1, ParamID(first + 2 * (secondStrip - 20)), 2, {}});
+        d.nodes.push_back(NodeDesc{20, NodeKind::channelStrip, strip20Version, first, kStrip, {}});
+        d.nodes.push_back(NodeDesc{secondStrip, NodeKind::channelStrip, 1, ParamID(first + kStrip * (secondStrip - 20)), kStrip, {}});
         d.edges.push_back(EdgeDesc{1, 10, 20, EdgeKind::audio, 0});
         d.edges.push_back(EdgeDesc{2, 20, 1, EdgeKind::audio, 0});
         d.edges.push_back(EdgeDesc{3, secondStrip, 1, EdgeKind::audio, 0});
@@ -320,18 +325,18 @@ CheckResult channelStripMetersThroughBuilder() {
     const MeterID m22 = rig.builder().meterOf(22);
     DAW_CHECK(m22 != kNoMeter && m22 != m20 && m22 != m21);
     GraphDescription withNew = describe(2, 22);
-    withNew.nodes.push_back(NodeDesc{30, NodeKind::channelStrip, 1, first, 2, {}});
+    withNew.nodes.push_back(NodeDesc{30, NodeKind::channelStrip, 1, first, kStrip, {}});
     DAW_CHECK(rig.publish(withNew));
     DAW_CHECK(rig.builder().meterOf(30) == m21);
     DAW_CHECK(rig.violations() == 0);
 
     // Past Telemetry::kMaxMeters, strips still build but get no meter.
     Rig big;
-    auto bigParams = big.engine().params().allocate(2, 1.0f);
+    auto bigParams = big.engine().params().allocate(kStrip, 0.0f);
     DAW_CHECK(bigParams.ok());
     GraphDescription d = baseDescription();
     for (NodeID id = 100; id < 100 + Telemetry::kMaxMeters + 1; ++id) {
-        d.nodes.push_back(NodeDesc{id, NodeKind::channelStrip, 1, bigParams.value(), 2, {}});
+        d.nodes.push_back(NodeDesc{id, NodeKind::channelStrip, 1, bigParams.value(), kStrip, {}});
         d.edges.push_back(EdgeDesc{id, id, 1, EdgeKind::audio, 0});
     }
     DAW_CHECK(big.publish(d));
@@ -339,6 +344,101 @@ CheckResult channelStripMetersThroughBuilder() {
     for (NodeID id = 100; id < 100 + Telemetry::kMaxMeters + 1; ++id)
         metered += big.builder().meterOf(id) != kNoMeter;
     DAW_CHECK(metered == Telemetry::kMaxMeters);
+    return checks;
+}
+
+} // namespace daw::testing
+
+namespace daw::testing {
+
+CheckResult channelStripMuteAndPhase() {
+    CheckResult checks;
+    DAW_CHECK(ChannelStrip::kNumParams == 4);
+    DAW_CHECK(ChannelStrip::kParamInfo[ChannelStrip::kMute].index == 2);
+    DAW_CHECK(ChannelStrip::kParamInfo[ChannelStrip::kPhase].index == 3);
+
+    Telemetry telemetry;
+    StripRig rig(MeterTarget{&telemetry, 7});
+    rig.set(1.0f, -1.0f);  // left only, so outL is the combined gain itself
+    rig.process(128, 1.0f);
+    DAW_CHECK(all(rig.outL, 1.0f) && all(rig.outR, 0.0f));
+
+    // Mute fades out over one block (ENG-022), the last frame exactly 0, then stays silent.
+    rig.setSwitches(1.0f, 0.0f);
+    rig.process(100, 1.0f);
+    bool fade = true;
+    for (uint32_t i = 0; i < 100; ++i) fade = fade && near(rig.outL[i], 1.0 - (i + 1) / 100.0, 1e-6);
+    DAW_CHECK(fade && rig.outL[99] == 0.0f);
+    for (int b = 0; b < 60; ++b) rig.process(256, 1.0f);  // > 300 ms muted
+    DAW_CHECK(all(rig.outL, 0.0f) && all(rig.outR, 0.0f));
+    // The meter is post-mute.
+    DAW_CHECK(telemetry.meter(7).peak == 0.0f && telemetry.meter(7).rms == 0.0f);
+
+    // The switch is on at ≥ 0.5: 0.49 unmutes, fading back in over one block.
+    rig.setSwitches(0.49f, 0.0f);
+    rig.process(100, 1.0f);
+    bool fadeIn = true;
+    for (uint32_t i = 0; i < 100; ++i) fadeIn = fadeIn && near(rig.outL[i], (i + 1) / 100.0, 1e-6);
+    DAW_CHECK(fadeIn && rig.outL[99] == 1.0f);
+    rig.setSwitches(0.5f, 0.0f);
+    rig.process(8, 1.0f);
+    DAW_CHECK(rig.outL[7] == 0.0f);
+    rig.setSwitches(std::nanf(""), 0.0f);  // NaN reads as off
+    rig.process(8, 1.0f);
+    rig.process(8, 1.0f);
+    DAW_CHECK(all(rig.outL, 1.0f));
+
+    // Phase flips polarity, passing linearly through 0 across one block: +1 → −1.
+    rig.setSwitches(0.0f, 1.0f);
+    rig.process(100, 1.0f);
+    bool flip = true;
+    for (uint32_t i = 0; i < 100; ++i) flip = flip && near(rig.outL[i], 1.0 - 2.0 * (i + 1) / 100.0, 1e-6);
+    DAW_CHECK(flip && rig.outL[99] == -1.0f);
+    rig.process(50, 1.0f);
+    DAW_CHECK(all(rig.outL, -1.0f) && all(rig.outR, 0.0f));
+
+    // Inverted, then gain and pan as usual, each channel on its own (stereo, MIX-004).
+    rig.set(2.0f, 0.5f);
+    rig.process(16, 0.0f);  // let gain and pan ramp on silence
+    rig.process(std::vector<float>(64, 0.25f), std::vector<float>(64, -0.5f));
+    const PanGains g = constantPowerPan(0.5f);
+    DAW_CHECK(all(rig.outL, -0.25f * 2.0f * g.left, 1e-6) && all(rig.outR, 0.5f * 2.0f * g.right, 1e-6));
+
+    // Muted and inverted at once: still silent; unmuting fades in inverted.
+    rig.set(1.0f, -1.0f);
+    rig.process(16, 0.0f);
+    rig.setSwitches(1.0f, 1.0f);
+    rig.process(32, 1.0f);
+    rig.process(32, 1.0f);
+    DAW_CHECK(all(rig.outL, 0.0f));
+    rig.setSwitches(0.0f, 1.0f);
+    rig.process(10, 1.0f);
+    DAW_CHECK(near(rig.outL[0], -0.1, 1e-6) && rig.outL[9] == -1.0f);
+
+    // Click-free under any switching: random gain/pan/mute/phase every block of random size never
+    // jumps by more than one ramp step from the previous block's last frame. With gain ≤ 2, the
+    // combined per-channel gain lies in [−2, 2], so one block moves it by at most 4.
+    std::mt19937 rng(20);
+    std::uniform_real_distribution<float> gains(0.0f, 2.0f), pans(-1.0f, 1.0f), coin(0.0f, 1.0f);
+    std::uniform_int_distribution<uint32_t> sizes(1, 512);
+    float lastL = rig.outL.back(), lastR = rig.outR.back();
+    bool continuous = true;
+    for (int b = 0; b < 500; ++b) {
+        rig.set(gains(rng), pans(rng));
+        rig.setSwitches(coin(rng), coin(rng));
+        const uint32_t n = sizes(rng);
+        rig.process(n, 1.0f);
+        const double maxStep = 4.0 / n + 1e-6;
+        continuous = continuous && std::fabs(rig.outL[0] - lastL) <= maxStep && std::fabs(rig.outR[0] - lastR) <= maxStep;
+        for (uint32_t i = 1; i < n; ++i)
+            continuous = continuous && std::fabs(rig.outL[i] - rig.outL[i - 1]) <= maxStep &&
+                         std::fabs(rig.outR[i] - rig.outR[i - 1]) <= maxStep;
+        lastL = rig.outL.back();
+        lastR = rig.outR.back();
+    }
+    DAW_CHECK(continuous);
+    DAW_CHECK(rig.violations == 0);
+    DAW_CHECK(rig.trapInstalled || !DAW_RT_TRAP);
     return checks;
 }
 
