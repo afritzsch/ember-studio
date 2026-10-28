@@ -68,7 +68,7 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 | T-032 | U+B | App shell, window, view-model pattern, toasts, ControlSocketServer, attach mode, UI dump/snapshot | UI-001, 003, 004, 050..052, CTL-011, 023, 030, 031 | T-018 | wip(t-032-app-shell) |
 | T-033 | U | Arrange canvas: tiles, waveforms (Metal), grid/snap, clip gestures, playhead layer | UI-010..014 | T-032, T-030 | todo |
 | T-034 | U | Toolbar, transport, keyboard shortcuts | UI-002 | T-032 | todo |
-| T-035 | D | Overlapping-clip crossfades | DSP-002 | T-013 | wip(t-035-crossfades) |
+| T-035 | D | Overlapping-clip crossfades | DSP-002 | T-013 | ready |
 | T-036 | E | M3 goldens: clips/fades/tempo change, loop wrap mid-block | TEST (M3 set) | T-030, T-035 | todo |
 
 ### M4 — MIDI & Sampler
