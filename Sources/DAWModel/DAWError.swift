@@ -24,6 +24,11 @@ public enum DAWError: Error, Hashable, Sendable, Codable {
     /// DW-076: the engine failed for a reason that isn't the caller's input (file I/O, out of
     /// memory, an internal error). `detail` is the engine's message.
     case engine(code: EngineErrorCode, detail: String)
+    /// MODEL-040/041: a project file or folder couldn't be read or written. `path` is the file.
+    case fileIO(path: String, detail: String)
+    /// MODEL-042, DW-111: a project file doesn't decode, is from a newer format, can't be migrated,
+    /// or breaks an invariant that open can't repair.
+    case invalidProject(String)
 
     /// DW-021
     public init(_ error: TempoMapError) {
@@ -41,6 +46,8 @@ public enum DAWError: Error, Hashable, Sendable, Codable {
         case .malformedCommand: "malformedCommand"
         case .notImplemented: "notImplemented"
         case .engine: "engine"
+        case .fileIO: "fileIO"
+        case .invalidProject: "invalidProject"
         }
     }
 }
@@ -71,6 +78,8 @@ extension DAWError: CustomStringConvertible {
         case .malformedCommand(let detail): "malformed command: \(detail)"
         case .notImplemented(let what): "not implemented: \(what)"
         case .engine(let code, let detail): "engine error (\(code.rawValue)): \(detail)"
+        case .fileIO(let path, let detail): "\(path): \(detail)"
+        case .invalidProject(let detail): "invalid project: \(detail)"
         }
     }
 }

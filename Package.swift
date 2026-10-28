@@ -218,7 +218,15 @@ let package = Package(
         ),
         .testTarget(
             name: "DAWModelTests",
+            // ProjectSaveCrashHelper is listed so `swift test` builds the binary the tests kill (MODEL-041).
+            dependencies: ["DAWModel", "ProjectSaveCrashHelper"],
+            swiftSettings: cxxInterop
+        ),
+        // MODEL-041/044/045: a process that saves or autosaves until the persistence tests kill it.
+        .executableTarget(
+            name: "ProjectSaveCrashHelper",
             dependencies: ["DAWModel"],
+            path: "Tests/ProjectSaveCrashHelper",
             swiftSettings: cxxInterop
         ),
         .testTarget(
