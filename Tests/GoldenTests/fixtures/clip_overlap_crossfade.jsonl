@@ -1,0 +1,27 @@
+# clip_overlap_crossfade (DSP-002, T-035): "later clip wins" with 64-sample equal-power
+# crossfades at both boundaries of an overlap (06 "Overlapping clips").
+# assets/tone_1k_44k1.wav (a 1 kHz sine at 0.5 with 10 ms fades) resampled into the 48 kHz
+# session is 24000 frames. Clip U plays all of it (ticks 0..960) at gain 1; clip W, added later
+# (larger ID), sits fully inside U at ticks 240..720 (samples 6000..18000) with source offset
+# 6000, so it plays the same tone in phase, at gain 0.5. The two strips' centre pan laws
+# (MIX-005) halve the level: U alone peaks at 0.25 (-12.04 dBFS), W alone at 0.125 (-18.06).
+# W wins between the crossfades ([6064, 17936)): the overlap reads W's level, not the sum
+# (0.375, -8.52 dBFS) that the player produced before DSP-002. U fades out over [6000, 6064)
+# and back in over [17936, 18000), then plays on at its own level. The two copies are in phase,
+# so the equal-power crossfades bump the level to at most 0.25·max(cos + 0.5·sin) = 0.2795
+# (-11.07 dBFS; -11.16 and -11.20 sampled), which is what equal power does to correlated
+# signals; the exact curve is checked in ClipPlayerTests.
+# @expect {"field": "frames", "value": 24000}
+# @expect {"field": "spectrumPeakHz", "value": 1000, "tolerance": 1}
+# @expect {"field": "rmsDb", "value": -15.05, "tolerance": 0.02, "range": {"start": 1000, "end": 6000}}
+# @expect {"field": "peakDb", "value": -18.06, "tolerance": 0.02, "range": {"start": 6064, "end": 17936}}
+# @expect {"field": "rmsDb", "value": -21.07, "tolerance": 0.02, "range": {"start": 6064, "end": 17936}}
+# @expect {"field": "rmsDb", "value": -15.05, "tolerance": 0.02, "range": {"start": 18000, "end": 23000}}
+# @expect {"field": "peakDb", "value": -11.2, "tolerance": 0.13, "range": {"start": 6000, "end": 6064}}
+# @expect {"field": "peakDb", "value": -11.2, "tolerance": 0.13, "range": {"start": 17936, "end": 18000}}
+project.new {"name": "clip_overlap_crossfade", "sampleRate": 48000}
+command.apply {"command": {"type": "AddTrack", "name": "Tone", "kind": "audio"}}
+asset.import {"path": "assets/tone_1k_44k1.wav"}
+command.apply {"command": {"type": "AddClip", "trackID": 2, "start": 0, "length": 960, "assetID": 3}}
+command.apply {"command": {"type": "AddClip", "trackID": 2, "start": 240, "length": 480, "assetID": 3, "sourceOffsetSamples": 6000, "gain": 0.5}}
+render.offline {"from": 0, "to": 960, "path": "clip_overlap_crossfade.wav", "tail": false}
