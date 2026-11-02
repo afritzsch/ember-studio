@@ -17,10 +17,13 @@ public struct DeviceSlot: Identifiable, Hashable, Sendable, Codable {
     public var pluginState: Data?
     public var bypass: Bool
     public var sidechainSource: SidechainRef?
+    /// DW-140: a built-in sampler's zones (DSP-020), empty for every other kind. Sent to the
+    /// engine as the node's `configJSON`.
+    public var zones: [SamplerZone]
 
     public init(
         id: NodeIDValue, kind: Kind, params: [ParamValue] = [], pluginState: Data? = nil,
-        bypass: Bool = false, sidechainSource: SidechainRef? = nil
+        bypass: Bool = false, sidechainSource: SidechainRef? = nil, zones: [SamplerZone] = []
     ) {
         self.id = id
         self.kind = kind
@@ -28,7 +31,39 @@ public struct DeviceSlot: Identifiable, Hashable, Sendable, Codable {
         self.pluginState = pluginState
         self.bypass = bypass
         self.sidechainSource = sidechainSource
+        self.zones = zones
     }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, kind, params, pluginState, bypass, sidechainSource, zones
+    }
+
+    // `zones` is written only when there are some, so slots without zones keep the JSON they had
+    // before T-042 and older files decode.
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(NodeIDValue.self, forKey: .id)
+        kind = try c.decode(Kind.self, forKey: .kind)
+        params = try c.decode([ParamValue].self, forKey: .params)
+        pluginState = try c.decodeIfPresent(Data.self, forKey: .pluginState)
+        bypass = try c.decode(Bool.self, forKey: .bypass)
+        sidechainSource = try c.decodeIfPresent(SidechainRef.self, forKey: .sidechainSource)
+        zones = try c.decodeIfPresent([SamplerZone].self, forKey: .zones) ?? []
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(kind, forKey: .kind)
+        try c.encode(params, forKey: .params)
+        try c.encodeIfPresent(pluginState, forKey: .pluginState)
+        try c.encode(bypass, forKey: .bypass)
+        try c.encodeIfPresent(sidechainSource, forKey: .sidechainSource)
+        if !zones.isEmpty { try c.encode(zones, forKey: .zones) }
+    }
+
+    /// The built-in sampler: the only built-in instrument (D-19) and the only kind with zones.
+    public var isSampler: Bool { kind == .builtin(.sampler) }
 }
 
 /// One parameter of a device slot. `index` is the position in the kind's `ParamInfo` list
