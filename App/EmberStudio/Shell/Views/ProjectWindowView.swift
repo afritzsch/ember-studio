@@ -36,6 +36,8 @@ struct ProjectWindowView: View {
             ToastStack(center: model.toasts)
                 .padding(12)
         }
+        // Opaque: cacheDisplay (UI-051) doesn't paint the window background behind the view.
+        .background(Color(nsColor: .windowBackgroundColor))
         .frame(minWidth: 760, minHeight: 480)
     }
 }
@@ -103,7 +105,7 @@ private struct TrackHeaderRow: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            ControlButton(control: track.selectControl)
+            ControlButton(control: track.selectControl, face: track.name)
                 .buttonStyle(.plain)
                 .font(.headline)
             Text(track.kind == .midi ? "MIDI" : "Audio")

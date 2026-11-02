@@ -8,17 +8,20 @@ import SwiftUI
 struct ControlButton: View {
     let control: UIControl
     var systemImage: String?
+    /// Text on the button face when it differs from the label (a track's name on its select button).
+    var face: String?
 
     var body: some View {
         Button(action: control.action) {
             if let systemImage {
-                Label(control.label, systemImage: systemImage)
+                Label(face ?? control.label, systemImage: systemImage)
             } else {
-                Text(control.label)
+                Text(face ?? control.label)
             }
         }
         .disabled(!control.isEnabled)
         .accessibilityIdentifier(control.id)
+        .accessibilityLabel(control.label)
         .help(control.label)
     }
 }
