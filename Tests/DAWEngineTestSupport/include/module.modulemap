@@ -31,6 +31,7 @@ module DAWEngineTestSupport {
   header "TestNodeChecks.h"
   header "TransportChecks.h"
   header "SamplerChecks.h"
+  header "MetronomeChecks.h"
   requires cplusplus
   export *
 }

@@ -1,0 +1,27 @@
+# metronome_click (TIME-010, DSP-011, T-024): the built-in metronome clicks on every beat of the
+# tempo map, sample-exact, with an accented downbeat.
+# No command puts a metronome into the graph yet (project-level toggle is follow-up work), so a
+# built-in "metronome" insert on an audio track (no clips) stands in for it: the node ignores its
+# input and writes the click. IDs: master 1, track "Click" 2, metronome insert 3. Its slots
+# (Metronome.h): 0 on = 1, 1 level = 0.5, 2 accent = 2. Track and master pans are centred
+# (√½ each per side), so a beat peaks at 0.25 (−12.04 dBFS), a downbeat at 0.5 (−6.02).
+# Tempo map: 3/4 at 120 bpm (25 samples a tick), 150 bpm from tick 4320 (half a beat, 20 samples
+# a tick), 4/4 from tick 5760. Beats (tick → sample, * = downbeat): 0* → 0, 960 → 24000,
+# 1920 → 48000, 2880* → 72000, 3840 → 96000, 4800 → 117600, 5760* → 136800, 6720 → 156000,
+# 7680 → 175200, 8640 → 194400, 9600* → 213600. Render to tick 10560 = 232800 frames.
+# Each click is 20 ms (960 frames): amp · (1 − k/960)³ · cos(2π f k / 48000), f = 1000 Hz on
+# beats, 1500 Hz on downbeats. MetronomeGoldenTests checks every sample against that.
+# @expect {"field": "frames", "value": 232800}
+# @expect {"field": "peakDb", "value": -6.021, "tolerance": 0.001, "channel": 0, "range": {"start": 0, "end": 1}}
+# @expect {"field": "peakDb", "value": -12.041, "tolerance": 0.001, "channel": 0, "range": {"start": 24000, "end": 24001}}
+# @expect {"field": "peakDb", "value": -240, "channel": 0, "range": {"start": 960, "end": 24000}}
+# @expect {"field": "peakDb", "value": -12.041, "tolerance": 0.001, "channel": 1, "range": {"start": 117600, "end": 117601}}
+# @expect {"field": "peakDb", "value": -240, "channel": 1, "range": {"start": 96960, "end": 117600}}
+# @expect {"field": "peakDb", "value": -6.021, "tolerance": 0.001, "channel": 1, "range": {"start": 136800, "end": 136801}}
+# @expect {"field": "peakDb", "value": -6.021, "tolerance": 0.001, "channel": 1, "range": {"start": 213600, "end": 213601}}
+project.new {"name": "metronome_click", "sampleRate": 48000}
+command.apply {"command": {"type": "SetTimeSignature", "tick": 0, "numerator": 3, "denominator": 4}}
+command.apply {"command": {"type": "SetTimeSignature", "tick": 5760, "numerator": 4, "denominator": 4}}
+command.apply {"command": {"type": "SetTempoEvent", "tick": 4320, "bpm": 150}}
+command.apply {"command": {"type": "RestoreTrack", "index": 0, "track": {"id": 2, "name": "Click", "kind": "audio", "color": {"red": 0.5, "green": 0.5, "blue": 0.5}, "clips": [], "takeFolders": [], "inserts": [{"id": 3, "kind": {"format": "builtin", "node": "metronome"}, "params": [{"index": 0, "value": 1}, {"index": 1, "value": 0.5}, {"index": 2, "value": 2}], "bypass": false}], "strip": {"gain": 1, "pan": 0, "mute": false, "solo": false, "phaseInvert": false}, "sends": [], "output": {"kind": "master"}, "armed": false, "monitoring": "auto", "automation": []}}}
+render.offline {"from": 0, "to": 10560, "path": "metronome_click.wav", "tail": false}

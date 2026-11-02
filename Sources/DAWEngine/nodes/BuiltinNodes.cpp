@@ -7,6 +7,7 @@
 #include "nodes/AudioClipPlayer.h"
 #include "nodes/ChannelStrip.h"
 #include "nodes/GainNode.h"
+#include "nodes/Metronome.h"
 #include "nodes/MidiClipPlayer.h"
 #include "nodes/Sampler.h"
 
@@ -19,6 +20,7 @@ Result<void> registerBuiltinNodes(NodeRegistry& registry, AssetLookup lookup, Te
     if (auto r = registry.set(NodeKind::audioClipPlayer, {std::move(clipPlayer)}); !r) return r;
     if (auto r = registry.set(NodeKind::midiClipPlayer, MidiClipPlayer::kindInfo()); !r) return r;  // DSP-003
     if (auto r = registry.set(NodeKind::sampler, Sampler::kindInfo(std::move(lookup))); !r) return r;  // DSP-020..023
+    if (auto r = registry.set(NodeKind::metronome, Metronome::kindInfo()); !r) return r;  // TIME-010, DSP-011
 
     auto strip = [telemetry](const NodeCreateInfo& info) -> Result<std::unique_ptr<Node>> {
         if (info.desc.numParams < ChannelStrip::kNumParams)
