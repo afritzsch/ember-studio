@@ -49,7 +49,7 @@ final class AppModel {
         dispatcher.storeDidChange = { [weak self] store in self?.dispatcherReplaced(store) }
         // UI-004: the bound window's engine events are drained by the Dispatcher (once), then toasted.
         dispatcher.engineEventsDidArrive = { [weak self] records in
-            self?.boundWindow?.toasts.handle(records.map(\.event))
+            self?.boundWindow?.engineEventsArrived(records.map(\.event))
         }
     }
 
@@ -221,7 +221,7 @@ final class AppModel {
             if window.store === dispatcher.store {
                 dispatcher.drainEngineEvents()
             } else if let events = window.store.engineSync?.pollEvents(), !events.isEmpty {
-                window.toasts.handle(events)
+                window.engineEventsArrived(events)
             }
             window.toasts.expire()
             window.pollTransport()
