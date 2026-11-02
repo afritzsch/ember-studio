@@ -97,6 +97,8 @@ public final class Dispatcher {
     private var waiting: [CheckedContinuation<Void, Never>] = []
     /// CTL-031: where the running request reports progress (requests run one at a time).
     private var progressHandler: ControlProgressHandler?
+    /// DW-146: the folder of the `test.fixture` script running now; its input paths resolve there.
+    private var fixtureDirectory: URL?
 
     /// With `store`, controls that project and the engine attached to it (attach mode).
     public init(configuration: Configuration = Configuration(), store: ProjectStore? = nil) {
@@ -283,7 +285,7 @@ public final class Dispatcher {
     }
 
     private func projectOpen(_ p: ProjectOpenParams) async throws -> ProjectOpenResult {
-        let store = try await ProjectStore.open(resolve(p.path), recover: p.recover ?? false)
+        let store = try await ProjectStore.open(resolveInput(p.path), recover: p.recover ?? false)
         try install(store, engine: p.engine)
         // DW-097, MODEL-046: relative paths resolve against the folder; a missing or unloadable
         // file leaves its asset offline and its clips render silence.
@@ -477,7 +479,7 @@ public final class Dispatcher {
     private func assetImport(_ p: AssetImportParams) async throws -> AssetImportResult {
         let store = try requireStore()
         let engine = try requireEngine()
-        let url = resolve(p.path)
+        let url = resolveInput(p.path)
         guard FileManager.default.fileExists(atPath: url.path) else {
             throw DAWError.invalidArgument("no file at \(url.path)")
         }
@@ -699,6 +701,9 @@ public final class Dispatcher {
             throw ControlError.invalidParams("no fixture \"\(p.name)\" in [\(searched)]")
         }
         let script = try ControlScript(contentsOf: url)
+        // DW-146: a fixture's relative inputs (`assets/…`) live next to it, wherever the server runs.
+        fixtureDirectory = url.deletingLastPathComponent()
+        defer { fixtureDirectory = nil }
         var ran = 0
         var skipped = 0
         for line in script.lines {
@@ -734,6 +739,14 @@ public final class Dispatcher {
         return expanded.hasPrefix("/")
             ? URL(fileURLWithPath: expanded).standardizedFileURL
             : configuration.workingDirectory.appending(path: expanded).standardizedFileURL
+    }
+
+    /// An input file (`asset.import`, `project.open`): inside a `test.fixture`, relative to the
+    /// fixture's folder (DW-146); otherwise as `resolve`.
+    func resolveInput(_ path: String) -> URL {
+        guard let fixtureDirectory else { return resolve(path) }
+        let expanded = (path as NSString).expandingTildeInPath
+        return expanded.hasPrefix("/") ? resolve(path) : fixtureDirectory.appending(path: expanded).standardizedFileURL
     }
 
     /// Params decode from the request's object; missing params are `{}`.
