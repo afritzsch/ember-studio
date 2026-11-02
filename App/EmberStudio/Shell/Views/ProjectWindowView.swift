@@ -17,7 +17,7 @@ struct ProjectWindowView: View {
                     PanePlaceholder(title: "Browser", detail: "Files and plugins")
                         .frame(minWidth: 140, idealWidth: 180, maxWidth: 260)
                 }
-                ArrangeArea(model: model)
+                ArrangeArea(model: model, controls: controls)
                     .frame(minWidth: 320, maxWidth: .infinity)
                 if model.showsInspector {
                     InspectorPane(model: model)
@@ -74,30 +74,87 @@ private struct ToolbarRow: View {
     }
 }
 
+/// The arrange area (12 *Layout*): a bar with the snap menu and clip actions, then track headers
+/// beside the timeline canvas (UI-010). The canvas scrolls both ways itself; the headers follow its
+/// vertical scroll.
 private struct ArrangeArea: View {
     let model: ProjectWindowModel
+    let controls: [String: UIControl]
 
     var body: some View {
-        GeometryReader { geometry in
-            ScrollView(.vertical) {
-                LazyVStack(spacing: 0) {
-                    ForEach(model.trackHeaders) { track in
-                        TrackHeaderRow(track: track)
-                            .frame(height: ProjectWindowModel.trackHeight)
-                        Divider()
-                    }
-                    if model.trackHeaders.isEmpty {
-                        Text("No tracks yet")
-                            .foregroundStyle(.secondary)
-                            .padding(24)
-                    }
-                }
+        VStack(spacing: 0) {
+            ArrangeBar(model: model.arrange, controls: controls)
+            Divider()
+            HStack(spacing: 0) {
+                TrackHeaderColumn(model: model)
+                    .frame(width: 200)
+                Divider()
+                TimelineCanvas(model: model.arrange)
+                    .accessibilityIdentifier("arrange.canvas")
             }
-            .onAppear { model.viewportHeight = geometry.size.height }
-            .onChange(of: geometry.size.height) { _, height in model.viewportHeight = height }
         }
         .background(Color(nsColor: .textBackgroundColor))
     }
+}
+
+private struct ArrangeBar: View {
+    let model: ArrangeModel
+    let controls: [String: UIControl]
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Menu("Snap: \(model.snap.title)") {
+                ForEach(SnapMode.allCases, id: \.self) { mode in
+                    if let control = controls["snap.\(mode.rawValue)"] { ControlToggle(control: control, face: mode.title) }
+                }
+            }
+            .fixedSize()
+            .accessibilityIdentifier("snap.menu")
+            Text("⌘ while dragging: no snap").font(.caption).foregroundStyle(.secondary)
+            Spacer()
+            if let duplicate = controls["edit.duplicate"] { ControlButton(control: duplicate, systemImage: "plus.square.on.square") }
+            if let split = controls["edit.split"] { ControlButton(control: split, systemImage: "scissors") }
+            if let delete = controls["edit.delete"] { ControlButton(control: delete, systemImage: "trash") }
+        }
+        .labelStyle(.iconOnly)
+        .controlSize(.small)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 4)
+    }
+}
+
+/// Track headers in rows of `trackHeight`, below a spacer as tall as the canvas's ruler, offset by
+/// the canvas's vertical scroll.
+private struct TrackHeaderColumn: View {
+    let model: ProjectWindowModel
+
+    var body: some View {
+        GeometryReader { _ in
+            VStack(spacing: 0) {
+                Color.clear.frame(height: TimelineGeometry.rulerHeight)
+                if model.trackHeaders.isEmpty {
+                    Text("No tracks yet")
+                        .foregroundStyle(.secondary)
+                        .padding(24)
+                }
+                ForEach(model.trackHeaders) { track in
+                    TrackHeaderRow(track: track)
+                        .frame(height: ProjectWindowModel.trackHeight - 1)
+                    Divider()
+                }
+            }
+            .offset(y: -model.scrollY)
+        }
+        .clipped()
+    }
+}
+
+/// UI-010: the AppKit canvas in SwiftUI. The view model drives it; SwiftUI only places it.
+private struct TimelineCanvas: NSViewRepresentable {
+    let model: ArrangeModel
+
+    func makeNSView(context: Context) -> TimelineCanvasView { TimelineCanvasView(model: model) }
+    func updateNSView(_ view: TimelineCanvasView, context: Context) {}
 }
 
 private struct TrackHeaderRow: View {
