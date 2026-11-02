@@ -4,6 +4,7 @@ Unattended phases started by `/autobuild` (see `.claude/skills/autobuild/SKILL.m
 
 | Phase | Tasks | Merged | week% start→end | Notes |
 |---|---|---|---|---|
+| 1 | T-032, T-025, T-042, T-035 | all 4 (T-035, T-025, T-042, T-032) | 0 → 10 | Resumed T-025/T-032 on `-r2` branches; one 5-hour pause (~27 min); DW-148 autosave race fixed; T-045 added |
 
 ## Phase notes
 
@@ -16,3 +17,4 @@ Unattended phases started by `/autobuild` (see `.claude/skills/autobuild/SKILL.m
 - 5-hour window hit 85% at ~1793655150 (epoch). T-032 and T-042 were paused until the reset at 1793656800 + 120 s.
 - Resumed both workers at 1793656923 (five-hour window back to 0%).
 - T-042 merged (2641e0e), including the DW-148 autosave race fix. Added T-045 (MIDI routing, DW-099) as a ready E-lane task.
+- T-032 merged (1bb0c7d). Phase over: 4/4 merged, main green (test.sh 11/11, swift test 2× green), no worker session left open.
