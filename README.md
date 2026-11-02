@@ -2,6 +2,8 @@
 
 A linear-timeline DAW for macOS with audio and MIDI tracks.
 
+It's a learning project on **spec-driven development**: a detailed spec is written first, then coding agents implement it task by task, each citing the requirements it satisfies.
+
 - **Engine:** C++20, single audio thread, immutable render-graph snapshots swapped atomically, shared atomic parameter slots, plugin delay compensation.
 - **Model:** UI-free Swift package (`DAWModel`) with command-pattern undo and a JSON project folder.
 - **App:** SwiftUI shell with AppKit/CALayer/Metal canvases for the timeline and piano roll.
