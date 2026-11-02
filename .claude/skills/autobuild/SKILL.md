@@ -117,7 +117,7 @@ If you get rate-limited anyway, the conductor notices the stall and resumes you 
 4. **Merge and push to main. Mandatory, before you signal the conductor** (the user's standing instruction):
    - Every finished, reviewed and green worker branch of this phase is merged straight into `main`. No finished work stays on a side branch for the next lead.
    - All lead commits (status tables, 90-tasks.md, DECISIONS.md, RUN.md, HANDOVER) are on `main`.
-   - Then run `git push origin main`, and check that it succeeded: `git status -sb` shows no `ahead`. If the push fails, fix it (fetch, merge `origin/main`, re-run the tests, push again) before going on.
+   - Then run `git push origin main`. If it fails with "could not read Username", git has no stored credentials; push through the logged-in `gh` instead: `git -c credential.helper= -c 'credential.helper=!gh auth git-credential' push origin main`. Use the same form for branch pushes. Check that it succeeded: `git status -sb` shows no `ahead`. If the push fails, fix it (fetch, merge `origin/main`, re-run the tests, push again) before going on.
    - Exception: a stopped, unfinished WIP branch is **not** merged, because it would break main. Push it as its own branch (`git push origin <branch>`) so it survives.
    - Workers never push.
 5. Run `usage.sh` and look at the *Stop the run* conditions.
