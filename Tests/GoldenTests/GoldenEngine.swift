@@ -160,6 +160,7 @@ final class GoldenEngine: EngineProtocol {
         out.tailThresholdDb = spec.tailThresholdDb
         out.tailQuietSeconds = spec.tailQuietSeconds
         out.tailMaxSeconds = spec.tailMaxSeconds
+        out.followLoop = spec.followLoop  // T-036: render.offline {loop: true}
         return facade.renderOffline(from.raw, to.raw, out)
     }
 

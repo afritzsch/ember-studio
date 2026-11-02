@@ -717,6 +717,7 @@ void EngineFacade::Impl::runExport(JobID jobID, Tick from, Tick to, const Export
     spec.numChannels = pod.numChannels;
     spec.blockSize = pod.blockSize;
     spec.tail = TailSpec{pod.tailEnabled, pod.tailThresholdDb, pod.tailQuietSeconds, pod.tailMaxSeconds};
+    spec.followLoop = pod.followLoop;  // T-036
 
     FacadeError error;
     bool render = false;

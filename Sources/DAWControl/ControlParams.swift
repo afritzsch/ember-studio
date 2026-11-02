@@ -200,6 +200,9 @@ public struct RenderOfflineParams: Codable, Hashable, Sendable {
     public var tail: Bool?
     /// IO-010, 1…4096. Default 512.
     public var blockSize: UInt32?
+    /// T-036: follow the transport's loop (wrap at its end, as live playback does) instead of
+    /// playing the range straight through. Default false.
+    public var loop: Bool?
 }
 
 public struct RenderOfflineResult: Codable, Hashable, Sendable {

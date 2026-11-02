@@ -18,6 +18,19 @@ namespace {
 
 bool validSeconds(double s) { return std::isfinite(s) && s >= 0; }
 
+// T-036 (ExportSpec::followLoop): where the transport starts its next block after `numFrames`
+// of playback from `pos`, by Transport::layOut's rule (03 "Transport semantics"): it wraps only
+// when it crosses the loop end from before it, and a loop shorter than the rest of a block plays
+// once and leaves the frames after it silent (TIME-005: two segments at most).
+SamplePos nextLoopedStart(SamplePos pos, uint32_t numFrames, bool looping, SamplePos loopStart,
+                          SamplePos loopEnd) {
+    const SamplePos end = pos + numFrames;
+    if (!looping || pos >= loopEnd || end < loopEnd) return end;
+    const SamplePos rest = end - loopEnd;
+    const SamplePos next = loopStart + std::min(rest, loopEnd - loopStart);
+    return next == loopEnd ? loopStart : next;
+}
+
 } // namespace
 
 Result<void> OfflineDriver::render(Engine& engine, Tick from, Tick to, const ExportSpec& spec,
@@ -92,8 +105,9 @@ Result<void> OfflineDriver::render(Engine& engine, Tick from, Tick to, const Exp
         renderCounted(0);
         before = transport.playhead();
         transport.setOutputLatency(0);
-        if (!(transport.setLoop(false, before.loopStart, before.loopEnd) && transport.play() &&
-              transport.locate(from)))
+        // T-036: followLoop leaves the loop as the transport has it.
+        if (!((spec.followLoop || transport.setLoop(false, before.loopStart, before.loopEnd)) &&
+              transport.play() && transport.locate(from)))
             failure = makeError(ErrorCode::internal, "offline render: transport command queue full");
     }
 
@@ -102,6 +116,13 @@ Result<void> OfflineDriver::render(Engine& engine, Tick from, Tick to, const Exp
     const auto started = std::chrono::steady_clock::now();
     const SamplePos startSample = tempo.tickToSample(from);
     int64_t written = 0, quietRun = 0;
+    // T-036: with followLoop, block starts follow the transport's loop as it was before the
+    // render (`before`), resolved through spec.tempo like everything else.
+    const bool looping = spec.followLoop && before.loopEnabled &&
+                         tempo.tickToSample(before.loopEnd) > tempo.tickToSample(before.loopStart);
+    const SamplePos loopStartSample = tempo.tickToSample(before.loopStart);
+    const SamplePos loopEndSample = tempo.tickToSample(before.loopEnd);
+    SamplePos loopedStart = startSample;
     while (failure && written < maxFrames) {
         renderCounted(blockSize);
 
@@ -110,7 +131,11 @@ Result<void> OfflineDriver::render(Engine& engine, Tick from, Tick to, const Exp
         // the graph's (or the graph changed mid-render), or the engine didn't render the block
         // (no graph published, or blockSize above the graph's maxBlock), so the transport stood
         // still. Fail rather than write a wrong file.
-        const SamplePos blockStart = startSample + static_cast<SamplePos>(stats_.blocks) * blockSize;
+        SamplePos blockStart = startSample + static_cast<SamplePos>(stats_.blocks) * blockSize;
+        if (spec.followLoop) {
+            blockStart = loopedStart;
+            loopedStart = nextLoopedStart(loopedStart, blockSize, looping, loopStartSample, loopEndSample);
+        }
         const TransportPlayhead head = transport.playhead();
         ++stats_.blocks;
         if (!head.playing || head.sample != blockStart || head.tick != tempo.sampleToTick(blockStart)) {

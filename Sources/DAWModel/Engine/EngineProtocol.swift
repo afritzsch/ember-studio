@@ -496,6 +496,9 @@ public struct ExportSpec: Hashable, Sendable, Codable {
     public var tailThresholdDb: Double
     public var tailQuietSeconds: Double
     public var tailMaxSeconds: Double
+    /// T-036: keep the transport's loop and wrap at its end; false (the default) plays the range
+    /// straight through with the loop off (`daw::ExportSpecPOD::followLoop`).
+    public var followLoop = false
 
     public init(path: String, fileType: FileType = .wav, sampleFormat: SampleFormat = .float32,
                 dither: Bool = false, ditherSeed: UInt64 = 0x6d61_6344_4157_0035, numChannels: UInt32 = 2,

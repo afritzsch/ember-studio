@@ -46,6 +46,11 @@ struct ExportSpec {
     TempoMap tempo;
     TailSpec tail;
     OfflineBlockSink sink;
+    // T-036 (TIME-005/006 goldens): false, the default, plays [from, to) straight through with
+    // the loop off. True keeps the transport's loop as it is: the export is still
+    // tickToSample(to) − tickToSample(from) frames (plus the tail) of playback from `from`, but
+    // it wraps at the loop end the way live playback does (03 "Transport semantics").
+    bool followLoop = false;
 };
 
 // Reported after every block. The total isn't known up front: the tail ends early when the

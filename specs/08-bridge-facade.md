@@ -105,6 +105,22 @@ IO-021 (7) asks for `EngineEvent.deviceChanged{reason}`, but `EngineEventPOD` ha
 
 Affected: T-051 (facade wiring, and the Swift `EngineEvent` / `TelemetrySnapshot` / `DriverConfig` mirrors in `EngineProtocol.swift`, `EngineClient.swift`, `FakeEngine`), T-018 (dawctl/dawmcp: select the fake driver, `device.simulate` command, show `deviceChanged`), T-055 (device toasts read `reason`/`deviceID`), T-056 (IO-033 replaces the asset placeholder in point 4).
 
+### Contract delta (T-036, accepted (autobuild, see docs/autobuild/DECISIONS.md))
+Additive. Offline renders turn the transport's loop off, so no golden could show a loop wrap
+(TIME-005/006, DW-058, DW-073). `ExportSpecPOD` gets one field, after the existing ones:
+```cpp
+bool followLoop = false;   // keep the transport's loop and wrap at its end (io ExportSpec::followLoop)
+```
+`false`, the default, keeps today's straight-through render bit for bit. `true` makes
+`OfflineDriver` leave the loop on: the export is still `tickToSample(to) − tickToSample(from)`
+frames (plus the tail) of playback from `from`, wrapping at the loop end the way live playback
+does (03 "Transport semantics", including the gap a loop shorter than a block leaves). Its
+per-block playhead check follows the wrap. The Swift mirror is `ExportSpec.followLoop`
+(EngineProtocol.swift), and `render.offline` exposes it as `loop` (13).
+
+Affected: T-036 (implements it and the `loop_wrap_midblock` golden), T-033 (shares
+`facade/` and `EngineProtocol.swift`; nothing existing moved).
+
 ## Status
 | ID | status | test |
 |---|---|---|

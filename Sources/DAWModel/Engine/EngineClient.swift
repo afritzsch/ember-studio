@@ -416,6 +416,7 @@ public final class EngineClient: EngineProtocol {
         out.tailThresholdDb = spec.tailThresholdDb
         out.tailQuietSeconds = spec.tailQuietSeconds
         out.tailMaxSeconds = spec.tailMaxSeconds
+        out.followLoop = spec.followLoop  // T-036
         return out
     }
 
