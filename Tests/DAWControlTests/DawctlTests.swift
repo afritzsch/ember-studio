@@ -6,9 +6,9 @@ import Testing
 // CTL-010 / CTL-012: the dawctl binary, launched as a shell test would. The test target depends
 // on dawctl, so `swift test` builds it next to the test bundle.
 
-private final class BundleMarker {}
+final class BundleMarker {}
 
-private struct Run {
+struct Run {
     var status: Int32
     var stdout: String
     var stderr: String
@@ -16,7 +16,7 @@ private struct Run {
     var lines: [String] { stdout.split(separator: "\n").map(String.init) }
 }
 
-private func dawctl(_ arguments: [String], stdin: String? = nil, in directory: URL) throws -> Run {
+func dawctl(_ arguments: [String], stdin: String? = nil, in directory: URL) throws -> Run {
     let process = Process()
     process.executableURL = Bundle(for: BundleMarker.self).bundleURL.deletingLastPathComponent().appending(path: "dawctl")
     process.arguments = arguments
@@ -40,7 +40,7 @@ private func dawctl(_ arguments: [String], stdin: String? = nil, in directory: U
                stderr: String(decoding: stderr, as: UTF8.self))
 }
 
-private func responses(_ run: Run) throws -> [RPCResponse] {
+func responses(_ run: Run) throws -> [RPCResponse] {
     try run.lines.map { try JSONDecoder().decode(RPCResponse.self, from: Data($0.utf8)) }
 }
 
@@ -67,8 +67,9 @@ struct DawctlTests {
     }
 
     @Test("CTL-012: bad usage exits 2", arguments: [
-        [String](), ["project.new", "--json", "{oops"], ["project.new", "--json"], ["--attach", "undo"], ["--frobnicate"],
-        ["script"], ["undo", "redo"],
+        [String](), ["project.new", "--json", "{oops"], ["project.new", "--json"], ["--launch", "undo"], ["--frobnicate"],
+        ["script"], ["undo", "redo"], ["--socket"], ["serve", "--engine", "nope"], ["serve", "--parent-pid", "x"],
+        ["serve", "--attach"],
     ])
     func usage(arguments: [String]) throws {
         let dir = try TempDir()
