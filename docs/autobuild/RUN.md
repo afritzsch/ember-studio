@@ -18,3 +18,7 @@ Unattended phases started by `/autobuild` (see `.claude/skills/autobuild/SKILL.m
 - Resumed both workers at 1793656923 (five-hour window back to 0%).
 - T-042 merged (2641e0e), including the DW-148 autosave race fix. Added T-045 (MIDI routing, DW-099) as a ready E-lane task.
 - T-032 merged (1bb0c7d). Phase over: 4/4 merged, main green (test.sh 11/11, swift test 2× green), no worker session left open.
+
+### Phase 2 (2026-11-02)
+- Wave: T-023 sidechain (E, graph), T-024 metronome (D), T-033 arrange canvas (U), T-036 M3 goldens (E, test-only). Earliest milestones first (M2, M3); T-045 (E, graph) waits for next phase because it overlaps T-023 in `Sources/DAWEngine/graph`.
+- Start: week 10%, five-hour window 14%.
