@@ -1,0 +1,125 @@
+{
+  "assets": [
+    {
+      "channels": 2,
+      "frames": 96000,
+      "id": 2,
+      "originalSampleRate": 48000,
+      "path": "Audio/loop.wav"
+    }
+  ],
+  "buses": [],
+  "formatVersion": 2,
+  "id": "00000000-0000-0000-0000-000000000016",
+  "ids": {
+    "next": 7
+  },
+  "master": {
+    "automation": [],
+    "id": 1,
+    "inserts": [],
+    "strip": {
+      "gain": 1,
+      "mute": false,
+      "pan": 0,
+      "phaseInvert": false,
+      "solo": false
+    }
+  },
+  "name": "migration",
+  "sessionSampleRate": 48000,
+  "tempoMap": {
+    "tempoEvents": [
+      {
+        "bpm": 120,
+        "tick": 0
+      }
+    ],
+    "timeSignatures": [
+      {
+        "denominator": 4,
+        "numerator": 4,
+        "tick": 0
+      }
+    ]
+  },
+  "tracks": [
+    {
+      "armed": false,
+      "automation": [],
+      "clips": [
+        {
+          "assetID": 2,
+          "fadeIn": 0,
+          "fadeOut": 0,
+          "gain": 1,
+          "id": 5,
+          "kind": "audio",
+          "length": 3840,
+          "sourceOffsetSamples": 0,
+          "start": 0
+        },
+        {
+          "assetID": 2,
+          "fadeIn": 120,
+          "fadeOut": 240,
+          "gain": 0.5,
+          "id": 6,
+          "kind": "audio",
+          "length": 1920,
+          "sourceOffsetSamples": 24000,
+          "start": 3840
+        }
+      ],
+      "color": {
+        "blue": 0.5,
+        "green": 0.5,
+        "red": 0.5
+      },
+      "id": 3,
+      "inserts": [],
+      "kind": "audio",
+      "monitoring": "auto",
+      "name": "Drums",
+      "output": {
+        "kind": "master"
+      },
+      "sends": [],
+      "strip": {
+        "gain": 0.8,
+        "mute": false,
+        "pan": -0.25,
+        "phaseInvert": false,
+        "solo": false
+      },
+      "takeFolders": []
+    },
+    {
+      "armed": false,
+      "automation": [],
+      "clips": [],
+      "color": {
+        "blue": 0.5,
+        "green": 0.5,
+        "red": 0.5
+      },
+      "id": 4,
+      "inserts": [],
+      "kind": "audio",
+      "monitoring": "auto",
+      "name": "Empty",
+      "output": {
+        "kind": "master"
+      },
+      "sends": [],
+      "strip": {
+        "gain": 1,
+        "mute": false,
+        "pan": 0,
+        "phaseInvert": false,
+        "solo": false
+      },
+      "takeFolders": []
+    }
+  ]
+}

@@ -114,7 +114,12 @@ If you get rate-limited anyway, the conductor notices the stall and resumes you 
    Keep it self-contained: the next lead has no memory of you.
 2. Append this phase's row to RUN.md, with week% at its start and end.
 3. Commit: `Autobuild phase N: handover` (explicit paths).
-4. Push: `git push origin main` (backup; the user approved pushes after each phase during autobuild). Workers never push. WIP branches you stopped can be pushed too, so they survive.
+4. **Merge and push to main. Mandatory, before you signal the conductor** (the user's standing instruction):
+   - Every finished, reviewed and green worker branch of this phase is merged straight into `main`. No finished work stays on a side branch for the next lead.
+   - All lead commits (status tables, 90-tasks.md, DECISIONS.md, RUN.md, HANDOVER) are on `main`.
+   - Then run `git push origin main`, and check that it succeeded: `git status -sb` shows no `ahead`. If the push fails, fix it (fetch, merge `origin/main`, re-run the tests, push again) before going on.
+   - Exception: a stopped, unfinished WIP branch is **not** merged, because it would break main. Push it as its own branch (`git push origin <branch>`) so it survives.
+   - Workers never push.
 5. Run `usage.sh` and look at the *Stop the run* conditions.
 6. Write `.git/autobuild/phase-<N>.done`, containing `next` or `stop: <reason>`. This is your last action: don't touch git or files afterwards. End your turn with a one-line summary. The conductor closes your session.
 

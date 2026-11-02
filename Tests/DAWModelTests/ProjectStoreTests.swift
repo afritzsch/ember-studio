@@ -127,13 +127,4 @@ struct ProjectStoreTests {
         #expect(!store.canUndo && !store.canRedo)
         #expect(store.isDirty)
     }
-
-    @Test("save/open are stubs until T-031")
-    func persistenceStubs() async throws {
-        let store = ProjectStore()
-        await #expect(throws: DAWError.self) { try await store.save(to: nil) }
-        await #expect(throws: DAWError.self) {
-            _ = try await ProjectStore.open(URL(fileURLWithPath: "/nonexistent"), recover: false)
-        }
-    }
 }
