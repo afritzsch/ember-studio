@@ -85,6 +85,39 @@ struct GoldenReferenceTests {
         try expectToneSegments("bus_send_sum", [(0.25, 0), (0.25, 0.25), (0.5, 0.25), (0, 0)])
     }
 
+    /// MIX-021/023, exact to the sample: L (dry + phase-inverted 1000-frame latent copy) is 0
+    /// everywhere; R is the click at frame 0 (0.5), then the 300-frame latent tone starting at
+    /// frame 12000 exactly (0.5 × tone), and nothing else.
+    @Test("MIX-021/023: pdc_alignment_null nulls L and keeps the click and tone on their samples")
+    func pdcAlignmentSamples() throws {
+        let audio = try AudioData(contentsOf: GoldenHarness.reference("pdc_alignment_null"))
+        #expect(audio.channels.count == 2)
+        #expect(audio.frameCount == 36000)
+        guard audio.channels.count == 2, audio.frameCount == 36000 else { return }
+        #expect(audio.channels[0].allSatisfy { abs($0) < 1e-6 })
+        let r = audio.channels[1]
+        #expect(abs(Double(r[0]) - 0.5) < 1e-6)
+        var worst = 0.0
+        for i in 1..<36000 {
+            let n = i - 12000
+            let expected = (0..<12000).contains(n) ? 0.5 * 0.5 * sin(2 * Double.pi * 1000 * Double(n) / 48000) : 0
+            worst = max(worst, abs(Double(r[i]) - expected))
+        }
+        #expect(worst < 1e-6)
+    }
+
+    /// The alignment above only means something if the latent inserts are really in the graph:
+    /// the golden engine reports a graph latency of 1000 (delay) + 500 (Master FX compressor).
+    @Test("MIX-020/023: pdc_alignment_null renders with a graph latency of 1500 frames")
+    @MainActor func pdcGraphLatency() async throws {
+        let fixture = try GoldenFixture(name: "pdc_alignment_null", contentsOf:
+            GoldenHarness.fixturesDirectory.appending(path: "pdc_alignment_null.jsonl"))
+        let run = await GoldenHarness.run(fixture, reference: nil)
+        #expect(run.failures == [])
+        #expect(run.telemetry?["graphLatency"]?.int64Value == 1500)
+        if run.failures.isEmpty { try? FileManager.default.removeItem(at: run.workDirectory) }
+    }
+
     /// The reference is `[(left, right)]` gains × the 1 kHz tone at 0.5 (`assets/tone_1k_48k.wav`),
     /// one 12000-frame segment per factor pair, with the tone restarting in each segment.
     private func expectToneSegments(_ name: String, _ factors: [(Double, Double)],

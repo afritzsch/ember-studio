@@ -1,0 +1,39 @@
+# pdc_alignment_null (M2, MIX-021, MIX-023, DW-093): latency compensation lines paths up to the
+# sample, and clips play graph-latency early so the output stays on the timeline.
+# Test nodes (TEST-004): every `delay` insert is a FakeLatencyNode(1000), `eq` 300 and
+# `compressor` 500 (the real engine has no delay factory yet, DW-135, so this renders only here).
+# No command places a master insert yet, so bus "Master FX" (compressor insert, 500) stands in
+# for one: every track outputs to it, and the graph latency is 1000 + 500 = 1500.
+# Inserts can only be placed with RestoreTrack/RestoreBus (no InsertDevice yet), so the IDs are
+# written out: master 1, Master FX 2 (insert 3), Dry 4, Latent 5 (insert 6), Latent R 7
+# (insert 8), Click 9, tone asset 10, click asset 11.
+# Track pans send L-only or R-only (× 1); Master FX's and the master's centre pans give × 0.5.
+#   L: "Dry" and "Latent" (delay 1000, phase inverted) both play the tone at tick 480. MIX-021
+#      delays Dry by 1000 at the bus input, so they null: L is silent throughout.
+#   R: "Click" plays a 1.0 click at tick 0 and "Latent R" (eq 300) the tone at tick 480. With
+#      MIX-023 pre-roll the click is at frame 0 (0.5 = -6.02 dBFS) and the tone starts at
+#      frame 12000 exactly (peak 0.25 = -12.04), despite 1500 frames of graph latency.
+# GoldenReferenceTests checks every sample.
+# @node {"kind": "delay", "type": "fakeLatency", "samples": 1000}
+# @node {"kind": "eq", "type": "fakeLatency", "samples": 300}
+# @node {"kind": "compressor", "type": "fakeLatency", "samples": 500}
+# @expect {"field": "frames", "value": 36000}
+# @expect {"field": "peakDb", "value": -240, "channel": 0}
+# @expect {"field": "peakDb", "value": -6.021, "tolerance": 0.001, "channel": 1, "range": {"start": 0, "end": 1}}
+# @expect {"field": "peakDb", "value": -240, "channel": 1, "range": {"start": 1, "end": 12001}}
+# @expect {"field": "peakDb", "value": -12.041, "tolerance": 0.001, "channel": 1, "range": {"start": 12000, "end": 24000}}
+# @expect {"field": "rmsDb", "value": -15.051, "tolerance": 0.001, "channel": 1, "range": {"start": 12000, "end": 24000}}
+# @expect {"field": "peakDb", "value": -240, "channel": 1, "range": {"start": 24000, "end": 36000}}
+project.new {"name": "pdc_alignment_null", "sampleRate": 48000}
+command.apply {"command": {"type": "RestoreBus", "index": 0, "bus": {"id": 2, "name": "Master FX", "color": {"red": 0.5, "green": 0.5, "blue": 0.5}, "inserts": [{"id": 3, "kind": {"format": "builtin", "node": "compressor"}, "params": [], "bypass": false}], "strip": {"gain": 1, "pan": 0, "mute": false, "solo": false, "phaseInvert": false}, "sends": [], "output": {"kind": "master"}, "automation": []}}}
+command.apply {"command": {"type": "RestoreTrack", "index": 0, "track": {"id": 4, "name": "Dry", "kind": "audio", "color": {"red": 0.5, "green": 0.5, "blue": 0.5}, "clips": [], "takeFolders": [], "inserts": [], "strip": {"gain": 1, "pan": -1, "mute": false, "solo": false, "phaseInvert": false}, "sends": [], "output": {"kind": "bus", "id": 2}, "armed": false, "monitoring": "auto", "automation": []}}}
+command.apply {"command": {"type": "RestoreTrack", "index": 1, "track": {"id": 5, "name": "Latent", "kind": "audio", "color": {"red": 0.5, "green": 0.5, "blue": 0.5}, "clips": [], "takeFolders": [], "inserts": [{"id": 6, "kind": {"format": "builtin", "node": "delay"}, "params": [], "bypass": false}], "strip": {"gain": 1, "pan": -1, "mute": false, "solo": false, "phaseInvert": true}, "sends": [], "output": {"kind": "bus", "id": 2}, "armed": false, "monitoring": "auto", "automation": []}}}
+command.apply {"command": {"type": "RestoreTrack", "index": 2, "track": {"id": 7, "name": "Latent R", "kind": "audio", "color": {"red": 0.5, "green": 0.5, "blue": 0.5}, "clips": [], "takeFolders": [], "inserts": [{"id": 8, "kind": {"format": "builtin", "node": "eq"}, "params": [], "bypass": false}], "strip": {"gain": 1, "pan": 1, "mute": false, "solo": false, "phaseInvert": false}, "sends": [], "output": {"kind": "bus", "id": 2}, "armed": false, "monitoring": "auto", "automation": []}}}
+command.apply {"command": {"type": "RestoreTrack", "index": 3, "track": {"id": 9, "name": "Click", "kind": "audio", "color": {"red": 0.5, "green": 0.5, "blue": 0.5}, "clips": [], "takeFolders": [], "inserts": [], "strip": {"gain": 1, "pan": 1, "mute": false, "solo": false, "phaseInvert": false}, "sends": [], "output": {"kind": "bus", "id": 2}, "armed": false, "monitoring": "auto", "automation": []}}}
+asset.import {"path": "assets/tone_1k_48k.wav"}
+asset.import {"path": "assets/click_48k.wav"}
+command.apply {"command": {"type": "AddClip", "trackID": 4, "start": 480, "assetID": 10}}
+command.apply {"command": {"type": "AddClip", "trackID": 5, "start": 480, "assetID": 10}}
+command.apply {"command": {"type": "AddClip", "trackID": 7, "start": 480, "assetID": 10}}
+command.apply {"command": {"type": "AddClip", "trackID": 9, "start": 0, "assetID": 11}}
+render.offline {"from": 0, "to": 1440, "path": "pdc_alignment_null.wav", "tail": false}
