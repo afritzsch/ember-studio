@@ -46,6 +46,8 @@ public final class EngineSync {
     private var retired: [RuntimeIDs.ParamRange] = []
     private var pendingApply: Task<Void, Never>?
     private var isInvalidated = false
+    /// DW-123: the loop last given to the transport.
+    private var pushedLoop: LoopRange?
 
     private static let log = Logger(subsystem: "dev.emberstudio", category: "model")
 
@@ -61,6 +63,7 @@ public final class EngineSync {
         try allocateParams()
         writeParams()
         flush()
+        pushLoop()
     }
 
     /// Whether a structural change is waiting for its debounce window.
@@ -81,9 +84,24 @@ public final class EngineSync {
             lastError = error
         }
         writeParams()
+        pushLoop()
         let graph = GraphDescriptionBuilder.build(project, runtime: runtime)
         candidate = graph
         if graph != appliedGraph || hasUnusedParams() { scheduleApply() }
+    }
+
+    /// DW-097: starts loading `assets` into the engine, resolving relative paths against
+    /// `folder` (MODEL-040). An asset whose file can't be found gets no job: it is offline
+    /// (MODEL-046) and its clips render silence. Clip players pick a loaded asset up through its
+    /// `assetLoaded` event (`handle(_:)`).
+    public func loadAssets(_ assets: [AssetRef], folder: URL?) -> [(asset: ModelID, job: JobID?)] {
+        assets.map { asset in
+            guard let file = ProjectFolder.resolve(asset, in: folder),
+                FileManager.default.isReadableFile(atPath: file.path)
+            else { return (asset.id, nil) }
+            let job = engine.loadAsset(asset.id, path: file.path)
+            return (asset.id, job == 0 ? nil : job)
+        }
     }
 
     /// Applies a waiting structural change now (the CLI does this before rendering).
@@ -154,6 +172,19 @@ public final class EngineSync {
     }
 
     // MARK: Private
+
+    /// DW-123: the transport follows `project.loop` on attach (a project just opened), after
+    /// commands and after undo/redo. Only a change is pushed, so a loop set on the transport
+    /// alone stays until the project's loop changes. Cleared means disabled at the old range.
+    private func pushLoop() {
+        guard project.loop != pushedLoop else { return }
+        if let loop = project.loop {
+            engine.setLoop(enabled: loop.isEnabled, start: loop.start, end: loop.end)
+        } else if let old = pushedLoop {
+            engine.setLoop(enabled: false, start: old.start, end: old.end)
+        }
+        pushedLoop = project.loop
+    }
 
     private func scheduleApply() {
         if debounce <= .zero {

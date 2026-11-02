@@ -23,6 +23,28 @@ public final class ProjectStore {
     /// MODEL-021: the engine this store keeps in step, if any (`attachEngine`).
     @ObservationIgnored public private(set) var engineSync: EngineSync?
 
+    /// MODEL-040: the project folder, once opened or saved. Nil for a new project.
+    public private(set) var folderURL: URL?
+    /// What open found (MODEL-042/045/046, DW-111); `loadAssets` updates the offline assets.
+    public private(set) var loadReport = ProjectLoadReport()
+    /// MODEL-043: captures plugin state at save and autosave time and restores it after open.
+    /// Nil keeps the states stored in the project.
+    @ObservationIgnored public var pluginStateProvider: (any PluginStateProvider)?
+    /// MODEL-044: when to autosave; nil turns autosaving off. It runs only while the project has
+    /// a folder.
+    @ObservationIgnored public var autosavePolicy: AutosavePolicy? = .standard {
+        didSet { restartAutosave() }
+    }
+
+    /// Counts published changes, so autosave can tell whether anything changed since it last ran.
+    @ObservationIgnored private var editSerial: UInt64 = 0
+    @ObservationIgnored private var autosavedSerial: UInt64 = 0
+    /// This store wrote the autosave that is in the folder now.
+    @ObservationIgnored private var wroteAutosave = false
+    @ObservationIgnored private var lastWrite: Task<Void, Never>?
+    @ObservationIgnored private var autosaveTimer: Task<Void, Never>?
+    @ObservationIgnored private var autosaveDebounce: Task<Void, Never>?
+
     @ObservationIgnored private var subscribers: [Int: AsyncStream<ProjectChange>.Continuation] = [:]
     @ObservationIgnored private var nextSubscriber = 0
 
@@ -128,22 +150,192 @@ public final class ProjectStore {
         engineSync = nil
     }
 
-    // MARK: Persistence (MODEL-040..046, T-031)
+    // MARK: Persistence (MODEL-040..046)
 
-    /// Not implemented yet: the project folder format is T-031.
+    /// Saves the project as a folder (MODEL-040) at `url`, or where it was opened or last saved
+    /// when `url` is nil. Assets outside the folder are copied into `Audio/` and their paths made
+    /// relative (DW-124); plugin states come from `pluginStateProvider` (MODEL-043). `project.json`
+    /// is replaced atomically (MODEL-041). The file I/O runs off the main actor; edits made while
+    /// it runs leave the project dirty. The autosave is removed: the main file is newer.
     public func save(to url: URL?) async throws(DAWError) {
-        throw .notImplemented("ProjectStore.save (MODEL-040/041, T-031)")
+        guard let target = url ?? folderURL else {
+            throw .invalidArgument("the project has no folder yet; save needs a path")
+        }
+        let snapshot = project
+        let marker = history.stateMarker
+        let serial = editSerial
+        let states = capturePluginStates(snapshot)
+        let source = folderURL
+        let moved = try await serialized { () throws(DAWError) in
+            try ProjectFolder(url: target).save(snapshot, pluginStates: states, sourceFolder: source)
+        }
+        // DW-124: the copied assets' new paths. Not an edit (no undo entry, no change event): the
+        // file is the same, only where the project finds it changed.
+        let oldPaths = Dictionary(snapshot.assets.map { ($0.id, $0.path) }, uniquingKeysWith: { a, _ in a })
+        for i in project.assets.indices {
+            let asset = project.assets[i]
+            if let path = moved[asset.id], oldPaths[asset.id] == asset.path { project.assets[i].path = path }
+        }
+        if let source, source.standardizedFileURL != target.standardizedFileURL, wroteAutosave {
+            ProjectFolder(url: source).removeAutosave()
+        }
+        folderURL = target
+        wroteAutosave = false
+        autosavedSerial = serial
+        cleanMarker = marker
+        updateDirty()
+        restartAutosave()
     }
 
-    /// Not implemented yet: the project folder format is T-031.
+    /// Opens a project folder (MODEL-040). With `recover`, a newer `autosave/project.json` is
+    /// opened instead and the store starts dirty (MODEL-045); without it, `loadReport` says
+    /// whether one exists. Older formats are migrated (MODEL-042), the project is checked and
+    /// safely repaired (DW-111), and missing audio files are reported, not fatal (MODEL-046).
+    /// Attach an engine and call `loadAssets()` to load the audio.
     public static func open(_ url: URL, recover: Bool) async throws(DAWError) -> ProjectStore {
-        throw .notImplemented("ProjectStore.open (MODEL-040/045, T-031)")
+        let folder = ProjectFolder(url: url)
+        let (project, report) = try await Task.detached { () -> Result<(Project, ProjectLoadReport), DAWError> in
+            Result { () throws(DAWError) in try folder.load(recover: recover) }
+        }.value.get()
+        let store = ProjectStore(project: project)
+        store.folderURL = url
+        store.loadReport = report
+        if report.recovered {
+            // The project differs from project.json until it is saved.
+            store.cleanMarker = .max
+            store.updateDirty()
+            store.autosavedSerial = store.editSerial
+        }
+        store.restartAutosave()
+        return store
     }
 
-    /// Records the current state as saved. For save/open (T-031).
+    /// DW-097, MODEL-046: loads every asset into the attached engine, resolving relative paths
+    /// against the project folder, and waits for the jobs. Assets whose file is missing or fails
+    /// to load are `offlineAssets` in the returned (and stored) report; their clips render
+    /// silence. Without an engine, only the files' presence is checked.
+    @discardableResult
+    public func loadAssets(timeout: Duration = .seconds(60)) async -> ProjectLoadReport {
+        var offline = Set<ModelID>()
+        if let engineSync {
+            let jobs = engineSync.loadAssets(project.assets, folder: folderURL)
+            for (asset, job) in jobs {
+                guard let job else {
+                    offline.insert(asset)
+                    continue
+                }
+                let status = await engineSync.engine.waitForJob(job, timeout: timeout)
+                if status.state != .succeeded { offline.insert(asset) }
+            }
+        } else {
+            for asset in project.assets {
+                let file = ProjectFolder.resolve(asset, in: folderURL)
+                if !(file.map { FileManager.default.isReadableFile(atPath: $0.path) } ?? false) { offline.insert(asset.id) }
+            }
+        }
+        loadReport.offlineAssets = offline.sorted()
+        return loadReport
+    }
+
+    /// MODEL-043: hands every stored plugin state to `pluginStateProvider`. Call it once the
+    /// plugins are instantiated (plugin hosting, 10).
+    public func restorePluginStates() {
+        let states = project.pluginStates
+        guard !states.isEmpty else { return }
+        pluginStateProvider?.restorePluginStates(states)
+    }
+
+    /// MODEL-044: writes `autosave/` now if the project has a folder and changed since the last
+    /// autosave or save. Never touches `project.json`. When the project is back at its saved
+    /// state, an autosave this store wrote is removed instead.
+    public func autosave() async throws(DAWError) {
+        guard let folderURL, !history.isGestureActive else { return }
+        let folder = ProjectFolder(url: folderURL)
+        guard isDirty else {
+            if wroteAutosave {
+                try await serialized { () throws(DAWError) in folder.removeAutosave() }
+                wroteAutosave = false
+            }
+            autosavedSerial = editSerial
+            return
+        }
+        let serial = editSerial
+        guard serial != autosavedSerial else { return }
+        let snapshot = project
+        let states = capturePluginStates(snapshot)
+        try await serialized { () throws(DAWError) in try folder.autosave(snapshot, pluginStates: states) }
+        wroteAutosave = true
+        autosavedSerial = serial
+    }
+
+    /// MODEL-045: a clean quit. Stops autosaving, waits for writes in flight and deletes the
+    /// autosave, so the next open offers no recovery. Unsaved changes are the caller's to ask
+    /// about first.
+    public func close() async {
+        autosavePolicy = nil
+        await lastWrite?.value
+        if let folderURL { ProjectFolder(url: folderURL).removeAutosave() }
+        wroteAutosave = false
+    }
+
+    /// Records the current state as saved.
     func markClean() {
         cleanMarker = history.stateMarker
         updateDirty()
+    }
+
+    private func capturePluginStates(_ project: Project) -> [NodeIDValue: Data] {
+        let captured = pluginStateProvider?.capturePluginStates(of: project) ?? [:]
+        return project.pluginStates.merging(captured) { _, current in current }
+    }
+
+    /// Runs file I/O off the main actor, one write after another (a save and an autosave never
+    /// interleave, and an autosave never lands after the save that made it stale).
+    private func serialized<T: Sendable>(
+        _ body: @escaping @Sendable () throws(DAWError) -> T
+    ) async throws(DAWError) -> T {
+        let previous = lastWrite
+        let task = Task.detached { () async -> Result<T, DAWError> in
+            await previous?.value
+            return Result { () throws(DAWError) -> T in try body() }
+        }
+        lastWrite = Task { _ = await task.value }
+        return try await task.value.get()
+    }
+
+    /// MODEL-044: the periodic autosave, while the project has a folder and a policy.
+    private func restartAutosave() {
+        autosaveTimer?.cancel()
+        autosaveTimer = nil
+        autosaveDebounce?.cancel()
+        autosaveDebounce = nil
+        guard let policy = autosavePolicy, folderURL != nil else { return }
+        autosaveTimer = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: policy.interval)
+                guard !Task.isCancelled, let self else { return }
+                await self.autosaveLogged()
+            }
+        }
+    }
+
+    /// MODEL-044: an autosave `debounce` after the latest edit.
+    private func scheduleDebouncedAutosave() {
+        guard let policy = autosavePolicy, folderURL != nil else { return }
+        autosaveDebounce?.cancel()
+        autosaveDebounce = Task { [weak self] in
+            try? await Task.sleep(for: policy.debounce)
+            guard !Task.isCancelled, let self else { return }
+            await self.autosaveLogged()
+        }
+    }
+
+    private func autosaveLogged() async {
+        do {
+            try await autosave()
+        } catch {
+            Self.log.error("autosave failed: \(error)")
+        }
     }
 
     // MARK: Private
@@ -185,6 +377,9 @@ public final class ProjectStore {
 
     private func publish(_ change: ProjectChange) {
         updateDirty()
+        editSerial &+= 1
+        // MODEL-044: every edit counts, not only structural ones (07, T-031 clarification).
+        if change.cause != .gestureUpdate { scheduleDebouncedAutosave() }
         if !change.isEmpty { engineSync?.update(to: project) }
         for continuation in subscribers.values {
             continuation.yield(change)
@@ -195,4 +390,20 @@ public final class ProjectStore {
         let dirty = history.gestureHasChanges || history.stateMarker != cleanMarker
         if dirty != isDirty { isDirty = dirty }
     }
+}
+
+/// MODEL-044: autosave timing.
+public struct AutosavePolicy: Hashable, Sendable {
+    /// A periodic autosave while the project is dirty.
+    public var interval: Duration
+    /// The quiet time after an edit before it is autosaved.
+    public var debounce: Duration
+
+    public init(interval: Duration, debounce: Duration) {
+        self.interval = interval
+        self.debounce = debounce
+    }
+
+    /// Every 60 s, and 2 s after the latest edit (MODEL-044).
+    public static let standard = AutosavePolicy(interval: .seconds(60), debounce: .seconds(2))
 }

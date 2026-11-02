@@ -283,18 +283,13 @@ public final class Dispatcher {
     }
 
     private func projectOpen(_ p: ProjectOpenParams) async throws -> ProjectOpenResult {
-        let folder = resolve(p.path)
-        let store = try await ProjectStore.open(folder, recover: p.recover ?? false)
-        let engine = try install(store, engine: p.engine)
-        // MODEL-046: a missing file leaves its asset offline; its clips render silence.
-        var offline: [ModelID] = []
-        for asset in store.project.assets {
-            let path = asset.path.hasPrefix("/") ? asset.path : folder.appending(path: asset.path).path
-            let status = await engine.waitForJob(engine.loadAsset(asset.id, path: path), timeout: configuration.jobTimeout)
-            if status.state != .succeeded { offline.append(asset.id) }
-        }
+        let store = try await ProjectStore.open(resolve(p.path), recover: p.recover ?? false)
+        try install(store, engine: p.engine)
+        // DW-097, MODEL-046: relative paths resolve against the folder; a missing or unloadable
+        // file leaves its asset offline and its clips render silence.
+        let report = await store.loadAssets(timeout: configuration.jobTimeout)
         drainEvents()
-        return ProjectOpenResult(loadReport: .init(offlineAssets: offline))
+        return ProjectOpenResult(loadReport: report)
     }
 
     /// Makes `store` current with a new engine at its session rate. The previous store and
@@ -313,6 +308,9 @@ public final class Dispatcher {
                 driver: params?.driver ?? .fake))
         }
         try store.attachEngine(engine, debounce: configuration.engineDebounce)
+        // MODEL-044: a headless run (dawctl, dawmcp) doesn't autosave, so it leaves no autosave/
+        // behind in the folders it opens or saves. In attach mode the app's store keeps its policy.
+        if configuration.mode == .headless { store.autosavePolicy = nil }
         drainEvents()
         self.store?.detachEngine()
         self.store = store

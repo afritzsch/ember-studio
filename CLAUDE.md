@@ -4,7 +4,7 @@ This repo is **spec-driven**. The spec is the source of truth; code implements i
 
 ## Orchestration: Patchbay
 Multi-agent work runs through **Patchbay** (the terminal app this session may be running in). Its MCP tools are `new_session`, `wait_for`, `read_output`, `send_input`, `close_session` and `list_sessions`. Don't use the Agent/subagent tool for task work.
-- **Lead:** runs in the main checkout on `main`. Follow *Orchestrating with Patchbay* in `specs/90-tasks.md`.
+- **Lead:** runs in the main checkout on `main`. Follow *Orchestrating with Patchbay* in `specs/90-tasks.md`. If `docs/handover/HANDOVER.md` exists, read it first: it's the previous lead's handover.
 - **Worker:** runs in a Patchbay worktree on branch `t-xxx-<slug>`. Follow the briefing you were given and the rules below.
 
 To check your role, run `git branch --show-current`: `main` means lead, `t-…` means worker.
