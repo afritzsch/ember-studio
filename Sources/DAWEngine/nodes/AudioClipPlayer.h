@@ -19,9 +19,18 @@
 // Fades are clamped to the clip's length; where they overlap, both apply.
 //
 // TIME-006: each TransportSegment is rendered from its own startSample, so wraps and locates
-// need no cursor. Clips are sorted by start tick with a running maximum of end ticks, so the
-// clips overlapping a range are found by binary search. Overlapping clips are summed for now;
-// "later clip wins" with a crossfade is DSP-002 (T-035).
+// need no cursor. Clips are sorted by (start tick, clip ID) with a running maximum of end ticks,
+// so the clips overlapping a range are found by binary search.
+//
+// Overlaps (DSP-002, 06 "later clip wins"): the latest clip in (start, ID) order covering a
+// sample wins, with a 64-sample equal-power crossfade where it starts over a clip that was
+// already sounding and where it ends over one that goes on. Each clip has a cover weight
+// sin(f·π/2) and passes cos(f·π/2) to the clips under it (f = 1 outside its crossfades), so
+// renderRange composites the clips from the latest down, keeping a per-frame transmission that
+// starts at 1, and stops once a clip hides the whole range. Which clips are underneath at a
+// clip's start and end is fixed per instance, so create() precomputes it in ticks (underStart,
+// underEnd) and the audio thread only converts to samples. Coverage ignores assets: a clip with
+// a missing asset hides what is under it with silence.
 //
 // Loop wraps (TIME-005, TIME-006 step 4): when a segment doesn't continue the previous one
 // (SegmentContinuity), the old pass keeps sounding from where it stopped for kDeclickFrames and
@@ -33,6 +42,7 @@
 // drops one on the audio thread; refs go when the node is destroyed on daw.reclaim.
 
 #include <array>
+#include <climits>
 #include <cstdint>
 #include <memory>
 #include <span>
@@ -53,6 +63,11 @@ namespace daw {
 class AudioClipPlayer final : public Node {
 public:
     static constexpr uint32_t kDeclickFrames = 64;
+    // DSP-002: longest equal-power crossfade at an overlap boundary.
+    static constexpr int64_t kOverlapCrossfadeFrames = 64;
+    // renderRange composites at most this many frames at a time (the transmission buffer).
+    static constexpr uint32_t kChunkFrames = 256;
+    static constexpr Tick kNoClip = INT64_MIN;
 
     struct Clip {
         Tick start = 0;
@@ -61,6 +76,12 @@ public:
         Tick fadeOutStart = 0;  // end − fadeOut
         int64_t sourceOffset = 0;
         float gain = 1.0f;
+        uint64_t id = 0;        // ClipDesc::clipID: the tie-break for equal starts (DSP-002)
+        // Set by the constructor (DSP-002): the largest end tick of the earlier clips that start
+        // strictly before this one (underStart), and of all earlier clips (underEnd), in
+        // (start, id) order; kNoClip if there are none.
+        Tick underStart = kNoClip;
+        Tick underEnd = kNoClip;
         AudioAssetRef asset;    // empty: silent
         bool playable = false;  // set by prepare(): an asset at the session rate
     };
@@ -68,7 +89,7 @@ public:
     // Non-RT. Resolves every clip's asset through `lookup` and drops clips with length <= 0.
     static std::unique_ptr<AudioClipPlayer> create(std::span<const ClipDesc> clips,
                                                    const AssetLookup& lookup);
-    // Non-RT. Takes the clips in any order.
+    // Non-RT. Takes the clips in any order and sorts them by (start, id) (DSP-002).
     explicit AudioClipPlayer(std::vector<Clip> clips);
 
     void prepare(const PrepareInfo& info) override;
@@ -79,13 +100,20 @@ public:
     std::span<const Clip> clips() const { return clips_; }
 
 private:
-    // Adds the clips sounding on samples [from, from + numFrames) into left/right.
+    // Adds the clips sounding on samples [from, from + numFrames) into left/right, later clips
+    // winning over earlier ones (DSP-002). Works through the range in kChunkFrames pieces.
     void renderRange(const TempoMap& tempo, SamplePos from, uint32_t numFrames, float* left,
-                     float* right) const DAW_RT;
-    void renderClip(const TempoMap& tempo, const Clip& clip, SamplePos from, uint32_t numFrames,
-                    float* left, float* right) const DAW_RT;
+                     float* right) DAW_RT;
+    void renderChunk(const TempoMap& tempo, SamplePos from, uint32_t numFrames, float* left,
+                     float* right) DAW_RT;
+    // Adds `clip` weighted by its cover and the transmission of the later clips, then lets
+    // `trans` through only what the clip passes. Returns true if the clip hides the whole range.
+    bool renderClip(const TempoMap& tempo, const Clip& clip, SamplePos from, uint32_t numFrames,
+                    float* left, float* right, float* trans) const DAW_RT;
     // Index of the first clip whose running maximum end tick is >= `tick`.
     size_t firstEndingAtOrAfter(Tick tick) const DAW_RT;
+    // Index of the first clip whose start tick is >= `tick`.
+    size_t firstStartingAtOrAfter(Tick tick) const DAW_RT;
     void forgetPass() DAW_RT;
 
     std::vector<Clip> clips_;    // sorted by start
@@ -99,6 +127,7 @@ private:
     uint32_t tailLeft_ = 0;        // frames of old-pass tail still to play
     uint32_t fadeInDone_ = kDeclickFrames;  // frames of the new pass's fade-in already played
     std::array<float, 2 * kDeclickFrames> tail_{};
+    std::array<float, kChunkFrames> trans_{};  // renderChunk's per-frame transmission (DSP-002)
 };
 
 } // namespace daw

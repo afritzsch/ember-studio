@@ -68,8 +68,8 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 | T-032 | U+B | App shell, window, view-model pattern, toasts, ControlSocketServer, attach mode, UI dump/snapshot | UI-001, 003, 004, 050..052, CTL-011, 023, 030, 031 | T-018 | wip(t-032-app-shell-r2) |
 | T-033 | U | Arrange canvas: tiles, waveforms (Metal), grid/snap, clip gestures, playhead layer | UI-010..014 | T-032, T-030 | todo |
 | T-034 | U | Toolbar, transport, keyboard shortcuts | UI-002 | T-032 | todo |
-| T-035 | D | Overlapping-clip crossfades | DSP-002 | T-013 | wip(t-035-crossfades) |
-| T-036 | E | M3 goldens: clips/fades/tempo change, loop wrap mid-block | TEST (M3 set) | T-030, T-035 | todo |
+| T-035 | D | Overlapping-clip crossfades | DSP-002 | T-013 | done |
+| T-036 | E | M3 goldens: clips/fades/tempo change, loop wrap mid-block | TEST (M3 set) | T-030, T-035 | ready |
 
 ### M4 — MIDI & Sampler
 | Task | Lane | Title | Requirements | Depends on | Status |
@@ -340,3 +340,6 @@ Recorded by the lead from worker reports.
 | DW-143 | T-031 | MODEL-043 rest: instantiate hosted plugins on open, then `store.restorePluginStates()` with `store.pluginStateProvider = EnginePluginStates(engine:)`; real facade `getPluginState` and a round trip through a real plugin | P | todo |
 | DW-144 | T-031 | App: offer recovery when `loadReport.recoveryAvailable` (reopen with `recover: true`), call `close()` on a clean quit, show `offlineAssets` and `repairs` | U (T-032 / T-083) | todo |
 | DW-145 | T-031 | A project that was never saved has no folder and isn't autosaved; crash safety for it needs an autosave location such as Application Support | M | todo |
+| DW-146 | T-035, T-025 | dawmcp/dawctl `test.fixture` resolves a fixture's relative `asset.import` paths against the server's cwd, not the fixture's folder, so every fixture that imports an asset (`wav_playback_resampled`, `pan_law`, `bus_send_sum`, `pdc_alignment_null`, `clip_overlap_crossfade`) fails in dawmcp unless an `assets` symlink exists | B (T-032 or later) | todo |
+| DW-147 | T-035 | A dawmcp server started by the MCP client keeps the engine it was built with; `scripts/dawmcp.sh` rebuilds only at launch, so an agent can't verify engine changes through `daw_render_offline` without a client restart. Add a `--rebuild`/restart hint to the CTL-025 tooling | B | todo |
+| DW-148 | T-035, T-025, lead | Flake: `PersistenceTests` "MODEL-044: an edit is autosaved after the debounce…" times out (30 s `eventually`, 30 ms debounce) under full-suite load; seen 3× on 2026-11-02. Likely cooperative-pool starvation or a race in `ProjectStore.scheduleDebouncedAutosave`/`serialized`, not plain slowness | M | todo |
