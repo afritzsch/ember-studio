@@ -33,7 +33,7 @@ struct GoldenRenderTests {
     }
 }
 
-@Suite("Golden references (ENG-022)")
+@Suite("Golden references (ENG-022, MIX-004/005/007/021/023)")
 struct GoldenReferenceTests {
     /// The reference itself shows the spec's ramp, so a regenerated reference can't hide a
     /// broken smoother: block 0 is 0.5 · (i + 1) / 512, everything after is 0.5.
@@ -83,6 +83,24 @@ struct GoldenReferenceTests {
     func busSendSumSamples() throws {
         // Gains from the clip to the output (the fixture's levels ÷ the tone's 0.5).
         try expectToneSegments("bus_send_sum", [(0.25, 0), (0.25, 0.25), (0.5, 0.25), (0, 0)])
+    }
+
+    /// MIX-007/ENG-022: a send level step 0 → 1 (L) and an unmute written into a pre-fader
+    /// send's mute slot (R) both ramp linearly over block 0, then hold.
+    @Test("MIX-007: send_ramps' send level and send mute changes ramp linearly over one block")
+    func sendRampsAreLinearOverOneBlock() throws {
+        let audio = try AudioData(contentsOf: GoldenHarness.reference("send_ramps"))
+        #expect(audio.channels.count == 2)
+        #expect(audio.frameCount == 24000)
+        guard audio.channels.count == 2 else { return }
+        for (channel, full) in zip(audio.channels, [0.5, 0.5.squareRoot()]) {
+            var worst = 0.0
+            for (i, x) in channel.enumerated() {
+                let expected = i < 512 ? full * Double(i + 1) / 512 : full
+                worst = max(worst, abs(Double(x) - expected))
+            }
+            #expect(worst < 1e-6)
+        }
     }
 
     /// MIX-021/023, exact to the sample: L (dry + phase-inverted 1000-frame latent copy) is 0
