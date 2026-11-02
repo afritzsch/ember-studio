@@ -80,6 +80,20 @@ public final class ControlSocketClient: @unchecked Sendable {
         try await call(method.rawValue, params, progress: progress)
     }
 
+    /// False once this side closed or the app hung up (it quit or crashed).
+    public var isConnected: Bool {
+        queue.sync {
+            guard !closed else { return false }
+            var poller = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
+            guard poll(&poller, 1, 0) >= 0 else { return false }
+            if poller.revents & Int16(POLLHUP | POLLERR | POLLNVAL) != 0 { return false }
+            guard poller.revents & Int16(POLLIN) != 0 else { return true }
+            // Readable: a pending line, or end of file when the peer is gone.
+            var byte: UInt8 = 0
+            return recv(fd, &byte, 1, MSG_PEEK | MSG_DONTWAIT) != 0
+        }
+    }
+
     public func close() {
         queue.sync {
             guard !closed else { return }

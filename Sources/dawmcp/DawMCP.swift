@@ -4,7 +4,9 @@ import MCP
 import System
 
 // CTL-020: the control protocol as an MCP server over stdio, headless (in-process model + offline
-// engine, like dawctl). Launched by scripts/dawmcp.sh through the repo's .mcp.json (CTL-025).
+// engine, like dawctl) by default; `daw_session_mode` switches to attach mode, which drives this
+// checkout's running app over its socket (CTL-023). Launched by scripts/dawmcp.sh through the
+// repo's .mcp.json (CTL-025).
 //
 //   dawmcp [--fixtures <dir>]…
 //
@@ -47,8 +49,12 @@ struct DawMCP {
         let tools = DawTools(dispatcher: dispatcher)
         let server = Server(name: "dawmcp", version: "1.0.0", capabilities: .init(tools: .init(listChanged: false)))
         await server.withMethodHandler(ListTools.self) { _ in ListTools.Result(tools: DawTools.tools) }
+        // CTL-031 / DW-133: progress of long calls as MCP notifications/progress.
+        tools.sendProgress = { [weak server] progress in
+            try? await server?.notify(ProgressNotification.message(progress))
+        }
         await server.withMethodHandler(CallTool.self) { params in
-            await tools.call(params.name, arguments: params.arguments)
+            await tools.call(params.name, arguments: params.arguments, meta: params._meta)
         }
         do {
             let transport = StdioTransport(input: .standardInput, output: FileDescriptor(rawValue: protocolOut))
@@ -56,8 +62,10 @@ struct DawMCP {
         } catch {
             fail("cannot start the MCP server: \(error)")
         }
-        // Until the client closes stdin.
+        // Until the client closes stdin. CTL-023: then the app attach mode launched is stopped too
+        // (should dawmcp be killed instead, the app's --parent-pid watch ends it).
         await server.waitUntilCompleted()
+        tools.shutdown()
         await server.stop()
         exit(0)
     }
