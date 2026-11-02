@@ -1,0 +1,33 @@
+# send_ramps (M2, MIX-007, ENG-022, DW-093): a send's level and mute slots ramp over one block.
+# The source is a constant 1.0 on both channels (an ImpulseNode firing every frame, TEST-004).
+# Both tracks output to bus "Dry", which is muted, so only the sends are heard:
+#   "Level" (5): post-fader send (7) at level 0 → bus "FX-L" (2, pan -1, passes L only).
+#   "Mute"  (6): muted; pre-fader send (8) at level 1 → bus "FX-R" (3, pan +1, passes R only).
+# A first render primes the smoothers. Then the send level steps 0 → 1 and the track unmutes,
+# which the model writes into its send's mute slot (MIX-006/007). In the golden render the
+# first 512-frame block ramps linearly 0 → 1 on both sends, then holds:
+#   L = 1 · √½ (Level's centre pan) · 1 (FX-L) · √½ (master) · ramp = 0.5 · (i + 1) / 512
+#   R = 1 (pre-fader) · 1 (FX-R) · √½ (master) · ramp           = √½ · (i + 1) / 512
+# GoldenReferenceTests checks the samples too.
+# @node {"kind": "audioClipPlayer", "type": "impulse", "samples": 1, "level": 1}
+# @expect {"field": "frames", "value": 24000}
+# @expect {"field": "peakDb", "value": -12.041, "tolerance": 0.001, "channel": 0, "range": {"start": 255, "end": 256}}
+# @expect {"field": "peakDb", "value": -9.031, "tolerance": 0.001, "channel": 1, "range": {"start": 255, "end": 256}}
+# @expect {"field": "rmsDb", "value": -6.021, "tolerance": 0.001, "channel": 0, "range": {"start": 511, "end": 24000}}
+# @expect {"field": "rmsDb", "value": -3.010, "tolerance": 0.001, "channel": 1, "range": {"start": 511, "end": 24000}}
+project.new {"name": "send_ramps", "sampleRate": 48000}
+command.apply {"command": {"type": "AddBus", "name": "FX-L"}}
+command.apply {"command": {"type": "AddBus", "name": "FX-R"}}
+command.apply {"command": {"type": "AddBus", "name": "Dry"}}
+command.apply {"command": {"type": "AddTrack", "name": "Level", "kind": "audio", "output": {"kind": "bus", "id": 4}}}
+command.apply {"command": {"type": "AddTrack", "name": "Mute", "kind": "audio", "output": {"kind": "bus", "id": 4}}}
+command.apply {"command": {"type": "AddSend", "channelID": 5, "busID": 2, "level": 0, "tap": "postFader"}}
+command.apply {"command": {"type": "AddSend", "channelID": 6, "busID": 3, "level": 1, "tap": "preFader"}}
+command.apply {"command": {"type": "SetParam", "target": {"kind": "strip", "channel": 2, "param": "pan"}, "value": -1}}
+command.apply {"command": {"type": "SetParam", "target": {"kind": "strip", "channel": 3, "param": "pan"}, "value": 1}}
+command.apply {"command": {"type": "SetParam", "target": {"kind": "strip", "channel": 4, "param": "mute"}, "value": 1}}
+command.apply {"command": {"type": "SetParam", "target": {"kind": "strip", "channel": 6, "param": "mute"}, "value": 1}}
+render.offline {"from": 0, "to": 96, "path": "primed.wav", "tail": false, "blockSize": 512}
+command.apply {"command": {"type": "SetSendLevel", "sendID": 7, "level": 1}}
+command.apply {"command": {"type": "SetParam", "target": {"kind": "strip", "channel": 6, "param": "mute"}, "value": 0}}
+render.offline {"from": 0, "to": 960, "path": "send_ramps.wav", "tail": false, "blockSize": 512}
