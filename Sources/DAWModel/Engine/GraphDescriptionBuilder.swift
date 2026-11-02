@@ -1,3 +1,5 @@
+import Foundation
+
 /// MODEL-020: turns a `Project` into the `EngineGraph` the engine compiles (05 Interfaces,
 /// `GraphDescription`). Pure: the same project and runtime IDs always give the same graph, in the
 /// same order, so it can be snapshot-tested and compared to decide whether a change is structural
@@ -50,7 +52,7 @@ public enum GraphDescriptionBuilder {
                 if let instrument = track.instrument, !instrument.bypass {
                     b.node(source, .midiClipPlayer)
                     for case .midi(let clip) in track.clips { b.appendNotes(of: clip, player: source) }
-                    b.node(instrument.id, instrument.nodeKind)
+                    b.node(instrument.id, instrument.nodeKind, config: instrument.configJSON)
                     b.edge(source, instrument.id, .midi)
                     head = instrument.id
                 }
@@ -205,10 +207,10 @@ private struct Emitter {
         self.runtime = runtime
     }
 
-    mutating func node(_ id: NodeIDValue, _ kind: NodeKind) {
+    mutating func node(_ id: NodeIDValue, _ kind: NodeKind, config: String = "") {
         let range = runtime.params[id]
         graph.nodes.append(.init(id: id, kind: kind, configVersion: runtime.configVersions[id] ?? 0,
-                                 firstParam: range?.first ?? 0, numParams: range?.count ?? 0))
+                                 firstParam: range?.first ?? 0, numParams: range?.count ?? 0, configJSON: config))
         emitted.insert(id)
     }
 
@@ -223,7 +225,7 @@ private struct Emitter {
     mutating func chain(_ inserts: [DeviceSlot], after head: NodeIDValue?) -> NodeIDValue? {
         var head = head
         for slot in inserts where !slot.bypass {
-            node(slot.id, slot.nodeKind)
+            node(slot.id, slot.nodeKind, config: slot.configJSON)
             if let head { edge(head, slot.id) }
             head = slot.id
         }
@@ -243,6 +245,20 @@ private struct Emitter {
             graph.notes.append(.init(player: player, start: Tick(clip.start.raw + start), length: Tick(end - start),
                                      pitch: note.pitch, velocity: note.velocity, channel: note.channel))
         }
+    }
+}
+
+extension DeviceSlot {
+    /// DW-140: the node's `configJSON`. A sampler with zones gets `{"zones": [...]}` in the
+    /// format of 06 "Sampler semantics", keys sorted so equal zones give equal strings (MODEL-021
+    /// compares graphs); every other slot gets "" (no config).
+    var configJSON: String {
+        guard isSampler, !zones.isEmpty else { return "" }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        // Plain integers, floats and optionals: encoding can't fail.
+        guard let data = try? encoder.encode(["zones": zones]) else { return "" }
+        return String(decoding: data, as: UTF8.self)
     }
 }
 

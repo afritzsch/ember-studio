@@ -24,7 +24,8 @@ struct Track { id: NodeIDValue; name; kind: .audio | .midi; color
                automation: [AutomationLane] (11) }
 enum Clip { case audio(AudioClip), midi(MidiClip) }    // ticks
 struct DeviceSlot { id; kind: .builtin(NodeKind) | .au(AUDescriptor) | .vst3(VST3Descriptor)
-                    params: [ParamValue]; pluginState: Data?; bypass: Bool; sidechainSource: SidechainRef? }
+                    params: [ParamValue]; pluginState: Data?; bypass: Bool; sidechainSource: SidechainRef?
+                    zones: [SamplerZone] /* built-in sampler only (T-042, DW-140) */ }
 ```
 IDs are `UInt64`, allocated by `IDAllocator` stored in the project (never reused).
 
@@ -81,6 +82,13 @@ IDs are `UInt64`, allocated by `IDAllocator` stored in the project (never reused
 - *Timeline bound*: clips, tempo and signature events and the loop lie in 0…`Tick.timelineEnd` (2^40 ticks), and `sourceOffsetSamples` ≤ 2^48, so tick→sample conversions can't overflow at any valid tempo and rate.
 - *Tempo* (`SetTempoEvent {tick, bpm}`, `RemoveTempoEvent {tick}`) and *signatures* (`SetTimeSignature {tick, numerator, denominator}`, `RemoveTimeSignature {tick}`) add an event or change the one at `tick`; the events at tick 0 can be changed, not removed. Map errors are `invalidTempoMap` (DW-021). Clips keep their ticks and offsets (D-06). The playhead is left to the engine (DW-061 open).
 - *SetLoop* `{loop: {start, end, isEnabled}?}`; `nil` clears it. An enabled loop must be at least 4096 samples (`daw::kMaxBlock`) at the tempo when it is set (DW-060). A later tempo edit may shrink it; that isn't an invariant, so `RestoreLoop` checks only the range.
+
+**Note commands and the instrument slot (clarified in T-042).**
+- *Notes* are relative to their clip and sorted by `(start, id)` (MODEL-032); like clips (DW-110), the ID tie-break makes the order a function of the notes, so undo restores the project exactly. A note's start may be negative or past the clip's end (DW-127: a left trim keeps the notes it uncovers); only the part inside the window plays. The invariant is start within ±`Tick.timelineEnd`, length 1…`Tick.timelineEnd`, pitch 0…127, velocity 1…127 (velocity 0 would be a note-off), channel 0…15.
+- Note commands are per clip and name notes by ID; an empty list, a repeated ID or a note of another clip is rejected, and nothing is clamped. *AddNotes* `{clipID, notes: [{start, length, pitch, velocity? = 100, channel? = 0}]}` gives the notes consecutive new IDs in the order given. *RemoveNotes* `{clipID, noteIDs}`. *MoveNotes* `{clipID, noteIDs, ticks, semitones}` moves them all by the same amount (a piano-roll drag); a note leaving pitch 0…127 or the start bound rejects the move, so the inverse is the opposite move. *SetNoteProps* `{clipID, notes: [{id, start?, length?, pitch?, velocity?, channel?}]}` sets each note's own values (velocity lane, quantize, length); its inverse sets the old values of the fields given.
+- *Inverses keep IDs*: `AddNotes` ↔ `RemoveNotes` ↔ `RestoreNotes {clipID, notes}` (notes with their IDs, checked like any input).
+- *Instrument slot*: only a MIDI track has one (an invariant), and a built-in instrument is the sampler (D-19); AU and VST3 slots are taken as they are. *SetInstrument* `{trackID, device: {format, …}, zones?}` puts a new slot (new ID) on the track, replacing any; *RemoveInstrument* `{trackID}` removes it. Both invert to *RestoreInstrument* `{trackID, instrument: DeviceSlot?}`, which sets the slot to exactly that (with its ID, params, state, zones) or to none, and inverts to itself. A track with an active instrument gets its clip player, the instrument and the MIDI edge between them in the graph; without one, neither (see *Left out of the graph*).
+- *Sampler zones* (DW-140): a built-in sampler slot holds `zones: [SamplerZone]` in the format of 06 *Sampler semantics* (only `assetID` required in JSON; ranges as the sampler accepts them, plus |tune| ≤ 120 semitones and gain 0…+12 dB, loop both or neither within 0…2^48). Zones name existing assets (an invariant; `RemoveAsset` refuses an asset a zone uses). *SetSamplerZones* `{slotID, zones}` replaces them; its inverse sets the old ones. `GraphDescriptionBuilder` sends them as the node's `configJSON` (`{"zones": [...]}`, sorted keys; "" without zones), and `EngineSync` bumps a node's `configVersion` when its `configJSON` changes or an asset one of its zones uses finishes loading (DW-051/072). `project.json` stores `zones` only for slots that have some.
 
 ### Persistence
 | ID | Requirement | Acceptance |

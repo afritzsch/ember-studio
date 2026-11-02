@@ -78,9 +78,9 @@ struct ProjectValidationTests {
         let notes = [Note(id: 901, start: 480, length: 10, pitch: 60), Note(id: 902, start: 0, length: 10, pitch: 62)]
         let midi = MidiClip(id: 900, start: 0, length: 960, notes: notes)
         expectInvalid(.brokenInvariant("MIDI clip 900 on audio track \(p.kick.id)"), withClip(.midi(midi)))
-        expectInvalid(.brokenInvariant("notes of clip 900 are not sorted by start"), withClip(.midi(midi), kind: .midi))
+        expectInvalid(.brokenInvariant("notes of clip 900 are not sorted by start (then id)"), withClip(.midi(midi), kind: .midi))
         let loud = MidiClip(id: 900, start: 0, length: 960, notes: [Note(id: 901, start: 0, length: 10, pitch: 128)])
-        expectInvalid(.brokenInvariant("note 901 has length 10, pitch 128, velocity 100, channel 0"), withClip(.midi(loud), kind: .midi))
+        expectInvalid(.brokenInvariant("note 901 has start 0, length 10, pitch 128, velocity 100, channel 0"), withClip(.midi(loud), kind: .midi))
     }
 
     @Test("MODEL-032: strip, send and device param values are in range")
