@@ -1,6 +1,6 @@
 # Ember Studio
 
-A linear-timeline DAW for macOS with audio and MIDI tracks. It's a **learning project**, so a correct, clean real-time architecture matters more than feature count.
+A linear-timeline DAW for macOS with audio and MIDI tracks.
 
 - **Engine:** C++20, single audio thread, immutable render-graph snapshots swapped atomically, shared atomic parameter slots, plugin delay compensation.
 - **Model:** UI-free Swift package (`DAWModel`) with command-pattern undo and a JSON project folder.
