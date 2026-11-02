@@ -43,6 +43,7 @@ public final class FakeEngine: EngineProtocol {
         var failingAssetPaths: Set<String> = []
         var pluginStates: [NodeIDValue: Data] = [:]
         var telemetry = EngineTelemetry()
+        var loadedAssets: Set<ModelID> = []
     }
 
     private let state = Mutex(State())
@@ -180,11 +181,33 @@ public final class FakeEngine: EngineProtocol {
             } else {
                 s.jobs[job] = EngineJobStatus(job: job, kind: .loadAsset, state: .succeeded, progress: 1, asset: info)
                 s.telemetry.assetsLoaded += 1
+                s.loadedAssets.insert(assetID)
                 s.events.append(EngineEvent(kind: .jobFinished, subject: 1, job: job))
                 s.events.append(EngineEvent(kind: .assetLoaded, subject: assetID, job: job))
             }
             return job
         }
+    }
+
+    /// IO-034: made-up peaks for a loaded asset (`assetInfo(for:)`'s stereo second): a 4 Hz
+    /// sine envelope, louder on the left, so a canvas has something deterministic to draw.
+    public func peaks(_ assetID: ModelID, level: Int) -> PeakLevel? {
+        guard level >= 0, level < PeakLevel.blockSizes.count,
+              state.withLock({ $0.loadedAssets.contains(assetID) }) else { return nil }
+        let info = assetInfo(for: assetID)
+        let blockSize = PeakLevel.blockSizes[level]
+        let blocks = Int((info.frames + Int64(blockSize) - 1) / Int64(blockSize))
+        var minMax: [Float] = []
+        minMax.reserveCapacity(Int(info.channels) * blocks * 2)
+        for channel in 0..<Int(info.channels) {
+            for block in 0..<blocks {
+                let t = Double(block * blockSize) / info.sampleRate
+                let level = Float(abs(sin(2 * .pi * 4 * t))) * (channel == 0 ? 0.9 : 0.6)
+                minMax += [-level, level]
+            }
+        }
+        return PeakLevel(assetID: assetID, channels: Int(info.channels), sampleRate: info.sampleRate, frames: info.frames,
+                         blockSize: blockSize, blockCount: blocks, minMax: minMax)
     }
 
     public func pollJob(_ job: JobID) -> EngineJobStatus {

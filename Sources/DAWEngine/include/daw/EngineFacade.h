@@ -118,6 +118,23 @@ struct AssetInfoPOD {
     bool resampled = false;
 };
 
+// IO-034 / UI-011 (autobuild, see DECISIONS.md): one level of a loaded asset's peak mipmap, for the
+// arrange canvas's waveforms. Read-only and non-RT: the facade computes the mipmap on daw.loader
+// when the asset loads (PeakMipmap::compute) and `peaks` copies one level out under its lock.
+using FloatVector = std::vector<float>;
+inline constexpr uint32_t kPeakLevelCount = 4;  // PeakMipmap::kBlockSizes: 256, 1024, 4096, 16384
+
+struct PeakLevelPOD {
+    bool found = false;      // false: the asset hasn't loaded (yet), or `level` is out of range
+    uint64_t assetID = 0;
+    uint32_t channels = 0;
+    double sampleRate = 0;   // the asset's rate in RAM (the session rate)
+    int64_t frames = 0;      // at sampleRate
+    uint32_t blockSize = 0;  // frames per min/max pair
+    int64_t blockCount = 0;  // ceil(frames / blockSize); the last block may be partial
+    FloatVector minMax;      // channel-major pairs: [(c × blockCount + b) × 2] = min, [… + 1] = max
+};
+
 // renderOffline's result (IO-010..013, OfflineRenderStats).
 struct OfflineResultPOD {
     double sampleRate = 0;
@@ -399,6 +416,9 @@ public:
     // replaces the asset once it has loaded.
     JobID loadAsset(uint64_t assetID, const std::string& path);
     JobStatus pollJob(JobID job) const;
+    // IO-034 / UI-011 (autobuild, see DECISIONS.md): `level` (0…kPeakLevelCount-1, finest
+    // first) of the asset's peaks, as loaded. Non-RT, any thread; found == false until it loads.
+    PeakLevelPOD peaks(uint64_t assetID, uint32_t level) const;
 
     // MARK: Recording (09) and plugins (10): later tasks
 
