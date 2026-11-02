@@ -8,7 +8,7 @@ import Testing
 // Swift mirror of the engine's (TIME-011), never from the render itself; source audio comes from
 // the fixture's asset file.
 
-@Suite("Golden references, M3 (TIME-001, TIME-007, TIME-008, DSP-001)")
+@Suite("Golden references, M3 (TIME-001, TIME-005..008, DSP-001)")
 struct M3GoldenReferenceTests {
     /// Both strips are centre-panned (MIX-005): √½ · √½.
     static let centre = 0.5
@@ -187,5 +187,74 @@ struct M3GoldenReferenceTests {
         }
         #expect(worst < Self.tolerance)
         if run.failures.isEmpty { try? FileManager.default.removeItem(at: run.workDirectory) }
+    }
+
+    // MARK: loop_wrap_midblock
+
+    /// The fixture's loop, ticks [86, 319) at 120 bpm (25 frames per tick), and where its wraps
+    /// fall in the 24000-frame render that starts at tick 0.
+    static let loopStart = 2150, loopEnd = 7975
+    static let wraps = [7975, 13800, 19625]
+
+    /// TIME-005: the wraps sit where the tempo map puts the loop, inside blocks, and the second
+    /// one's 64-frame crossfade runs over a block boundary.
+    @Test("TIME-005: loop_wrap_midblock's loop points and wraps come from the tempo map and fall mid-block")
+    func loopWrapPositions() {
+        let map = TempoMap()
+        #expect(Int(map.tickToSample(Tick(86))) == Self.loopStart)
+        #expect(Int(map.tickToSample(Tick(319))) == Self.loopEnd)
+        let length = Self.loopEnd - Self.loopStart
+        #expect(Self.wraps == [Self.loopEnd, Self.loopEnd + length, Self.loopEnd + 2 * length])
+        #expect(Self.wraps.allSatisfy { $0 % 512 != 0 })
+        #expect(Self.wraps[1] % 512 > 512 - 64)  // 488: 24 frames in this block, 40 in the next
+    }
+
+    /// TIME-005/006, DSP-001 per sample: straight playback up to the first wrap; after a wrap at
+    /// W, frame W + d is the loop from 2150 + d, and for d < 64 the new pass fades in at
+    /// (d + 1)/64 while the old pass goes on from 7975 + d at (63 − d)/64.
+    @Test("TIME-005/006: loop_wrap_midblock matches the looped clip sample by sample, with 64-frame wrap crossfades")
+    func loopWrapSamples() throws {
+        let audio = try AudioData(contentsOf: GoldenHarness.reference("loop_wrap_midblock"))
+        let tone = try Self.asset("tone_441_48k.wav")
+        #expect(audio.channels.count == 2)
+        #expect(audio.frameCount == 24000)
+        guard audio.channels.count == 2, audio.frameCount == 24000 else { return }
+
+        func expected(_ i: Int) -> Double {
+            guard let w = Self.wraps.last(where: { $0 <= i }) else { return Self.centre * Double(tone[i]) }
+            let d = i - w
+            let new = Double(tone[Self.loopStart + d])
+            guard d < 64 else { return Self.centre * new }
+            let old = Double(tone[Self.loopEnd + d])
+            return Self.centre * (Double(d + 1) / 64 * new + Double(63 - d) / 64 * old)
+        }
+        for (c, channel) in audio.channels.enumerated() {
+            var worst = 0.0, worstAt = 0
+            for (i, x) in channel.enumerated() {
+                let diff = abs(Double(x) - expected(i))
+                if diff > worst { (worst, worstAt) = (diff, i) }
+            }
+            #expect(worst < Self.tolerance, "channel \(c): off by \(worst) at frame \(worstAt)")
+        }
+    }
+
+    /// TIME-005 "click-free": no frame-to-frame step anywhere is larger than the tone's own
+    /// steepest step plus 1/64 of the jump across the wrap. A hard cut would step by ~0.5.
+    @Test("TIME-005: loop_wrap_midblock is click-free across every wrap")
+    func loopWrapIsClickFree() throws {
+        let audio = try AudioData(contentsOf: GoldenHarness.reference("loop_wrap_midblock"))
+        let tone = try Self.asset("tone_441_48k.wav")
+        guard let left = audio.channels.first, left.count == 24000 else {
+            Issue.record("unexpected reference shape")
+            return
+        }
+        let hardCut = Self.centre * abs(Double(tone[Self.loopStart]) - Double(tone[Self.loopEnd - 1]))
+        #expect(hardCut > 0.49)
+        let sineStep = Self.centre * 0.5 * 2 * Double.pi * 441 / 48000  // 0.0144
+        let jump = Self.centre * 2 * 0.5                                  // the two passes at most a full swing apart
+        var largest = 0.0
+        for i in 1..<left.count { largest = max(largest, abs(Double(left[i]) - Double(left[i - 1]))) }
+        #expect(largest <= sineStep + jump / 64 + 1e-6, "largest step \(largest)")
+        #expect(largest < hardCut / 10)
     }
 }
