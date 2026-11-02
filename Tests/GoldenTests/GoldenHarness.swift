@@ -55,6 +55,8 @@ enum GoldenHarness {
         var golden: URL? { renders.last.map { URL(fileURLWithPath: $0.path) } }
         /// Against the reference, when one was compared.
         var comparison: AudioComparison?
+        /// `engine.telemetry` after the script ran (graph latency, node latencies, RT violations).
+        var telemetry: JSONValue?
     }
 
     /// Runs the fixture `name` from the bundle and checks it against its reference, or replaces
@@ -125,6 +127,7 @@ enum GoldenHarness {
         // CONV §5.3: nothing the fixture did counted an RT violation.
         do {
             let telemetry = try await dispatcher.call(ControlMethod.engineTelemetry.rawValue)
+            run.telemetry = telemetry
             let violations = telemetry["rtViolations"]?.int64Value
             if violations != 0 { run.failures.append("\(fixture.name): engine.telemetry rtViolations = \(violations.map(String.init) ?? "missing")") }
         } catch {
@@ -218,11 +221,17 @@ enum GoldenHarness {
         case let value?: value.doubleValue.map { [$0] }
         case nil: nil
         }
-        guard let values, !values.isEmpty else { return "audio.analyze has no numeric field \(e.field)" }
+        guard var values, !values.isEmpty else { return "audio.analyze has no numeric field \(e.field)" }
+        if let channel = e.channel {
+            guard case .array? = result[e.field] else { return "\(e.field) is not a per-channel field" }
+            guard values.indices.contains(channel) else { return "no channel \(channel) (\(values.count) channels)" }
+            values = [values[channel]]
+        }
         let tolerance = e.tolerance ?? 0
         let off = values.filter { abs($0 - e.value) > tolerance }
         guard off.isEmpty else {
             return "\(list(values)) is not \(format(e.value)) ± \(format(tolerance))" +
+                (e.channel.map { " on channel \($0)" } ?? "") +
                 (e.range.map { " in frames \($0.start)..<\($0.end)" } ?? "")
         }
         return nil

@@ -53,6 +53,19 @@ struct CommandRegistryTests {
         SetLoop(loop: nil),
         RestoreLoop(loop: LoopRange(start: 960, end: 1920, isEnabled: false)),
         RestoreLoop(loop: nil),
+        AddNotes(clipID: 5, notes: [.init(start: -480, length: 480, pitch: 60, velocity: 90, channel: 1), .init(start: 0, length: 1, pitch: 0)]),
+        RemoveNotes(clipID: 5, noteIDs: [6, 7]),
+        RestoreNotes(clipID: 5, notes: [Note(id: 6, start: -10, length: 480, pitch: 60, velocity: 1, channel: 15)]),
+        MoveNotes(clipID: 5, noteIDs: [6], ticks: -960, semitones: -12),
+        SetNoteProps(clipID: 5, notes: [.init(id: 6, start: 3, length: 4, pitch: 5, velocity: 6, channel: 7), .init(id: 8, velocity: 9)]),
+        SetInstrument(trackID: 2, device: .builtin(.sampler), zones: [SamplerZone(assetID: 1, rootKey: 69, tune: 0.5, loopStart: 0, loopEnd: 9)]),
+        SetInstrument(trackID: 2, device: .vst3(VST3Descriptor(identifier: "/s.vst3#1", name: "Synth"))),
+        RemoveInstrument(trackID: 2),
+        RestoreInstrument(trackID: 2, instrument: DeviceSlot(id: 4, kind: .builtin(.sampler), params: [ParamValue(index: 0, value: 0.5)],
+                                                             zones: [SamplerZone(assetID: 1)])),
+        RestoreInstrument(trackID: 2, instrument: nil),
+        SetSamplerZones(slotID: 4, zones: [SamplerZone(assetID: 1, lowKey: 10, highKey: 20, lowVel: 30, highVel: 40, gain: 0.5)]),
+        SetSamplerZones(slotID: 4, zones: []),
     ]
 
     @Test("MODEL-006: built-in type strings are stable and unique")
@@ -65,6 +78,8 @@ struct CommandRegistryTests {
             "ImportAsset", "RemoveAsset", "AddClip", "RemoveClip", "RestoreClip", "MoveClip", "ResizeClip", "SplitClip",
             "SetClip", "SetClipGain", "SetClipFades", "SetTempoEvent", "RemoveTempoEvent", "SetTimeSignature",
             "RemoveTimeSignature", "SetLoop", "RestoreLoop",
+            "AddNotes", "RemoveNotes", "RestoreNotes", "MoveNotes", "SetNoteProps", "SetInstrument", "RemoveInstrument",
+            "RestoreInstrument", "SetSamplerZones",
         ])
         let all = CommandRegistry.registered.map { $0.type }
         #expect(Set(all).count == all.count)

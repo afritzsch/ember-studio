@@ -42,6 +42,16 @@ public enum CommandRegistry {
         RemoveTimeSignature.self,
         SetLoop.self,
         RestoreLoop.self,
+        // T-042: notes, instrument slot, sampler zones (MODEL-005 note subset, DW-140)
+        AddNotes.self,
+        RemoveNotes.self,
+        RestoreNotes.self,
+        MoveNotes.self,
+        SetNoteProps.self,
+        SetInstrument.self,
+        RemoveInstrument.self,
+        RestoreInstrument.self,
+        SetSamplerZones.self,
     ]
 
     private static let table = Mutex<[String: any Command.Type]>(

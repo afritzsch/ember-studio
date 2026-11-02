@@ -1,0 +1,40 @@
+# pan_law (M2, MIX-005, DW-073): the -3 dB constant-power pan law, hard left / centre / right.
+# assets/tone_1k_48k.wav (gen_m2_assets.py) is a 1 kHz sine at 0.5, 12000 frames, at the
+# session rate. Five tracks play it one after another, 480 ticks (12000 frames) each, panned
+# -1, -0.5, 0, +0.5, +1. The track strip scales L by cos θ and R by sin θ, θ = (pan + 1)·π/4;
+# the master strip's centre pan adds √½ on both sides. So per segment (peak, dBFS):
+#   -1: L 0.5·1·√½ = -9.03, R silent         -0.5: L 0.5·cos(π/8)·√½ = -9.72, R 0.5·sin(π/8)·√½ = -17.37
+#    0: L = R = 0.5·√½·√½ = -12.04 (-3 dB per side, the law's point)
+#  +0.5 and +1 mirror -0.5 and -1. RMS is 3.01 dB below each peak.
+# GoldenReferenceTests also checks L² + R² stays constant across all five positions.
+# @expect {"field": "frames", "value": 60000}
+# @expect {"field": "spectrumPeakHz", "value": 1000, "tolerance": 1}
+# @expect {"field": "peakDb", "value": -9.031, "tolerance": 0.001, "channel": 0, "range": {"start": 0, "end": 12000}}
+# @expect {"field": "rmsDb", "value": -12.041, "tolerance": 0.001, "channel": 0, "range": {"start": 0, "end": 12000}}
+# @expect {"field": "peakDb", "value": -240, "channel": 1, "range": {"start": 0, "end": 12000}}
+# @expect {"field": "peakDb", "value": -9.719, "tolerance": 0.001, "channel": 0, "range": {"start": 12000, "end": 24000}}
+# @expect {"field": "peakDb", "value": -17.374, "tolerance": 0.001, "channel": 1, "range": {"start": 12000, "end": 24000}}
+# @expect {"field": "peakDb", "value": -12.041, "tolerance": 0.001, "range": {"start": 24000, "end": 36000}}
+# @expect {"field": "rmsDb", "value": -15.051, "tolerance": 0.001, "range": {"start": 24000, "end": 36000}}
+# @expect {"field": "peakDb", "value": -17.374, "tolerance": 0.001, "channel": 0, "range": {"start": 36000, "end": 48000}}
+# @expect {"field": "peakDb", "value": -9.719, "tolerance": 0.001, "channel": 1, "range": {"start": 36000, "end": 48000}}
+# @expect {"field": "peakDb", "value": -240, "channel": 0, "range": {"start": 48000, "end": 60000}}
+# @expect {"field": "peakDb", "value": -9.031, "tolerance": 0.001, "channel": 1, "range": {"start": 48000, "end": 60000}}
+# @expect {"field": "rmsDb", "value": -12.041, "tolerance": 0.001, "channel": 1, "range": {"start": 48000, "end": 60000}}
+project.new {"name": "pan_law", "sampleRate": 48000}
+command.apply {"command": {"type": "AddTrack", "name": "Hard left", "kind": "audio"}}
+command.apply {"command": {"type": "AddTrack", "name": "Half left", "kind": "audio"}}
+command.apply {"command": {"type": "AddTrack", "name": "Centre", "kind": "audio"}}
+command.apply {"command": {"type": "AddTrack", "name": "Half right", "kind": "audio"}}
+command.apply {"command": {"type": "AddTrack", "name": "Hard right", "kind": "audio"}}
+asset.import {"path": "assets/tone_1k_48k.wav"}
+command.apply {"command": {"type": "AddClip", "trackID": 2, "start": 0, "assetID": 7}}
+command.apply {"command": {"type": "AddClip", "trackID": 3, "start": 480, "assetID": 7}}
+command.apply {"command": {"type": "AddClip", "trackID": 4, "start": 960, "assetID": 7}}
+command.apply {"command": {"type": "AddClip", "trackID": 5, "start": 1440, "assetID": 7}}
+command.apply {"command": {"type": "AddClip", "trackID": 6, "start": 1920, "assetID": 7}}
+command.apply {"command": {"type": "SetParam", "target": {"kind": "strip", "channel": 2, "param": "pan"}, "value": -1}}
+command.apply {"command": {"type": "SetParam", "target": {"kind": "strip", "channel": 3, "param": "pan"}, "value": -0.5}}
+command.apply {"command": {"type": "SetParam", "target": {"kind": "strip", "channel": 5, "param": "pan"}, "value": 0.5}}
+command.apply {"command": {"type": "SetParam", "target": {"kind": "strip", "channel": 6, "param": "pan"}, "value": 1}}
+render.offline {"from": 0, "to": 2400, "path": "pan_law.wav", "tail": false}

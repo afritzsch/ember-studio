@@ -24,6 +24,12 @@ extension Project {
                 throw .invariant("audio clip \(clip.id) uses missing asset \(clip.assetID)")
             }
         }
+        // DW-140: sampler zones name existing assets too.
+        try forEachDeviceSlot { (slot, _) throws(DAWError) in
+            for zone in slot.zones where !ids.contains(zone.assetID) {
+                throw .invariant("sampler \(slot.id) uses missing asset \(zone.assetID)")
+            }
+        }
     }
 
     /// The loop region is a non-empty range of non-negative ticks. Its minimum length (DW-060) is
@@ -144,6 +150,18 @@ extension DeviceSlot {
             }
             guard param.value.isFinite else { throw .invariant("device slot \(id) param \(param.index) is not finite") }
         }
+        // DW-140
+        guard zones.isEmpty || isSampler else { throw .invariant("device slot \(id) has zones but is no sampler") }
+        for zone in zones { try zone.validate(slot: id) }
+    }
+
+    /// T-042: what may sit in an instrument slot. The only built-in instrument is the sampler
+    /// (D-19); hosted plugins are taken as they are (the descriptor doesn't say whether it is an
+    /// instrument).
+    func checkInstrumentKind() throws(DAWError) {
+        if case .builtin(let node) = kind, node != .sampler {
+            throw .invariant("device slot \(id) is a built-in \(node), which is no instrument")
+        }
     }
 
     func forEachID(_ body: (ModelID, String) -> Void) {
@@ -166,7 +184,12 @@ extension Track {
     func validateContents() throws(DAWError) {
         try strip.validate(id)
         for send in sends { try send.validate() }
-        try instrument?.validate()
+        if let instrument {
+            // T-042: the instrument slot is a MIDI track's; a built-in one is the sampler (D-19).
+            guard kind == .midi else { throw .invariant("audio track \(id) has an instrument") }
+            try instrument.checkInstrumentKind()
+            try instrument.validate()
+        }
         for slot in inserts { try slot.validate() }
         for (i, clip) in clips.enumerated() {
             switch clip {
@@ -185,15 +208,13 @@ extension Track {
 }
 
 extension MidiClip {
-    /// Notes are sorted by start, have a length, and fit MIDI's ranges.
+    /// Notes are sorted by (start, id) and each is in range (`Note.validate`, T-042).
     func validateNotes() throws(DAWError) {
-        var previous = Tick(Int64.min)
-        for note in notes {
-            guard note.start >= previous else { throw .invariant("notes of clip \(id) are not sorted by start") }
-            previous = note.start
-            guard note.length.raw > 0, note.pitch <= 127, note.velocity <= 127, note.channel <= 15 else {
-                throw .invariant("note \(note.id) has length \(note.length.raw), pitch \(note.pitch), velocity \(note.velocity), channel \(note.channel)")
+        for (i, note) in notes.enumerated() {
+            if i > 0, !Note.clipOrder(notes[i - 1], note) {
+                throw .invariant("notes of clip \(id) are not sorted by start (then id)")
             }
+            try note.validate()
         }
     }
 }

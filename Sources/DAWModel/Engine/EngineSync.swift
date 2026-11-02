@@ -18,7 +18,8 @@ import os
 ///
 /// DW-072 (DW-051): a clip player's clips are fixed per node instance, so whenever a player's clips
 /// or notes differ from the graph last applied, or an asset its clips use finishes loading
-/// (`assetLoaded`, see `handle(_:)`), its `configVersion` is bumped.
+/// (`assetLoaded`, see `handle(_:)`), its `configVersion` is bumped. The same holds for any node's
+/// `configJSON` (a sampler's zones, DW-140) and for a sampler whose zone asset finishes loading.
 @MainActor
 public final class EngineSync {
     public static let defaultDebounce: Duration = .milliseconds(10)
@@ -138,6 +139,11 @@ public final class EngineSync {
                 runtime.configVersions[GraphNodeID.source(of: track.id), default: 0] &+= 1
                 bumped = true
             }
+            // DW-140: a sampler resolves its zones' assets when it is created, too.
+            for slot in project.allDeviceSlots where slot.zones.contains(where: { $0.assetID == event.subject }) {
+                runtime.configVersions[slot.id, default: 0] &+= 1
+                bumped = true
+            }
             if bumped {
                 candidate = nil
                 scheduleApply()
@@ -239,8 +245,8 @@ public final class EngineSync {
         }
     }
 
-    /// DW-072: a player whose clips or notes differ from the applied graph's gets the next
-    /// version, unless an asset load already bumped it.
+    /// DW-072: a player whose clips or notes differ from the applied graph's, or any node whose
+    /// `configJSON` does (DW-140), gets the next version, unless an asset load already bumped it.
     private func bumpChangedPlayers(_ graph: inout EngineGraph) {
         guard let applied = appliedGraph else { return }
         let oldNodes = Dictionary(applied.nodes.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
@@ -251,15 +257,16 @@ public final class EngineSync {
         var live = Set<NodeIDValue>()
         for i in graph.nodes.indices {
             let node = graph.nodes[i]
-            guard node.kind == .audioClipPlayer || node.kind == .midiClipPlayer else { continue }
             live.insert(node.id)
+            let isPlayer = node.kind == .audioClipPlayer || node.kind == .midiClipPlayer
             guard let old = oldNodes[node.id], old.kind == node.kind, old.configVersion == node.configVersion,
-                oldClips[node.id] != newClips[node.id] || oldNotes[node.id] != newNotes[node.id]
+                old.configJSON != node.configJSON
+                    || isPlayer && (oldClips[node.id] != newClips[node.id] || oldNotes[node.id] != newNotes[node.id])
             else { continue }
             graph.nodes[i].configVersion = node.configVersion &+ 1
             runtime.configVersions[node.id] = graph.nodes[i].configVersion
         }
-        // A player that left the graph starts over as a new instance if it comes back.
+        // A node that left the graph starts over as a new instance if it comes back.
         for id in runtime.configVersions.keys where !live.contains(id) { runtime.configVersions[id] = nil }
     }
 }

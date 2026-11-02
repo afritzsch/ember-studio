@@ -14,8 +14,11 @@ struct ClipPlayerTests {
     @Test("DSP-001: linear fades in ticks → samples, clamped; adjacent clips with fades")
     func fades() { expectPasses(daw.testing.clipPlayerFades()) }
 
-    @Test("DSP-001, ENG-004: random clips over a tempo map in random block sizes match an oracle")
+    @Test("DSP-001, DSP-002, ENG-004: random overlapping clips over a tempo map in random block sizes match an oracle")
     func matchesOracle() { expectPasses(daw.testing.clipPlayerMatchesOracle()) }
+
+    @Test("DSP-002: later clip wins with 64-sample equal-power crossfades at both overlap boundaries")
+    func overlapCrossfades() { expectPasses(daw.testing.clipPlayerOverlapCrossfades()) }
 
     @Test("TIME-005, TIME-006: a loop wrap mid-block crossfades old and new pass, click-free")
     func loopWrapCrossfade() { expectPasses(daw.testing.clipPlayerLoopWrapCrossfade()) }

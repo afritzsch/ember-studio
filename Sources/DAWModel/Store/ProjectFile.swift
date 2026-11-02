@@ -62,11 +62,11 @@ public enum ProjectFile {
             let track = repaired.tracks[t].id
             for c in repaired.tracks[t].clips.indices {
                 guard case .midi(var clip) = repaired.tracks[t].clips[c] else { continue }
-                let sorted = clip.notes.sorted { ($0.start, $0.id) < ($1.start, $1.id) }
-                guard sorted.map(\.start) != clip.notes.map(\.start) else { continue }
+                let sorted = clip.notes.sorted(by: Note.clipOrder)
+                guard sorted.map(\.id) != clip.notes.map(\.id) else { continue }
                 clip.notes = sorted
                 repaired.tracks[t].clips[c] = .midi(clip)
-                repairs.append("sorted the notes of clip \(clip.id) by start")
+                repairs.append("sorted the notes of clip \(clip.id) by start (then id)")
             }
             let clips = repaired.tracks[t].clips.sorted(by: Clip.timelineOrder)
             if clips.map(\.id) != repaired.tracks[t].clips.map(\.id) {

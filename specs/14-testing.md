@@ -32,6 +32,7 @@
 | `pan_law` | M2 | MIX-005 |
 | `bus_send_sum` | M2 | MIX-004/007 |
 | `pdc_alignment_null` | M2 | MIX-021/023 (with FakeLatencyNode) |
+| `send_ramps` | M2 | MIX-007, ENG-022 (send level/mute ramps) |
 | `clips_fades_tempo_change` | M3 | TIME-001, DSP-001 |
 | `loop_wrap_midblock` | M3 | TIME-005 |
 | `sampler_pitch` | M4 | DSP-021 |
@@ -78,7 +79,7 @@ Engine tests are Swift Testing suites in `Tests/DAWEngineTests` that call engine
 |---|---|---|
 | TEST-005 | done (T-050) | `FakeDeviceDriverTests` (exact cycle counts in buffer-size blocks, latency published, stop/restart; real-time pacing vs as-fast-as-possible; loopback N frames; scripted rate change / overload / device loss on exact frames via the `io/DeviceNotification.h` seam for T-051; a realtime EngineFacade on `FakeDeviceDriverAdapter`; 0 RT violations) |
 | TEST-001 | done (T-019) | `GoldenRenderTests` (one case per `fixtures/*.jsonl`, run in-process through `ControlScript` + `Dispatcher.handle(_:)`); `GoldenHarnessTests` (directives, script failures). Fixture directives `# @node` (test-only node under a real kind) and `# @expect` (audio.analyze assertions) |
-| TEST-002 | done (T-019) | `GoldenRenderTests` (audio.compare ≤ −100 dBFS, equal length); "referencesMatchFixtures"; `GoldenHarnessTests` "mismatchFails". M1 goldens: `sine_through_graph`, `gain_ramp_smoothing`, `wav_playback_resampled` |
+| TEST-002 | done (T-019) | `GoldenRenderTests` (audio.compare ≤ −100 dBFS, equal length); "referencesMatchFixtures"; `GoldenHarnessTests` "mismatchFails". M1 goldens: `sine_through_graph`, `gain_ramp_smoothing`, `wav_playback_resampled`. M2 (T-025): `pan_law`, `bus_send_sum`, `pdc_alignment_null`, `send_ramps`, each with a `GoldenReferenceTests` check of the reference against the spec numbers; `@expect` takes `"channel"` |
 | TEST-003 | done (T-019) | `scripts/update-goldens.sh` (prints the audio.analyze before/after summary; refuses fixtures that fail or miss their `@expect`s); `GoldenHarnessTests` "missingReferenceFails" |
 | TEST-004 | done (T-019) | `TestNodeTests` (SineNode, ImpulseNode, FakeLatencyNode, NaNNode, registration); `AllocatingNodeTests`; registered only through `FacadeOptions::registerNodes` in test builds |
 | TEST-* (rest) | todo | |

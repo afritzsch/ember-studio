@@ -17,10 +17,17 @@ CheckResult clipPlayerPlacesClips();
 // clips with fades join without a gap or overlap.
 CheckResult clipPlayerFades();
 
-// DSP-001, ENG-004: random clips (overlapping, past the asset, negative offsets, missing assets)
-// over a tempo map with changes, rendered in random block sizes including 0, match a brute-force
-// per-sample oracle, so the binary search finds every clip and placement follows the tempo map.
+// DSP-001, DSP-002, ENG-004: random clips (overlapping, equal starts, shuffled, past the asset,
+// negative offsets, missing assets) over a tempo map with changes, rendered in random block sizes
+// including 0, match a brute-force per-sample oracle of "later clip wins" with equal-power
+// crossfades, so the binary search finds every clip and placement follows the tempo map.
 CheckResult clipPlayerMatchesOracle();
+
+// DSP-002 (06 "later clip wins"): the latest clip in (start, clipID) order wins; 64-sample
+// equal-power crossfades where a clip starts over one already sounding (shortened to the overlap)
+// and where it ends over one that goes on; equal starts, nesting, three layers, short clips,
+// clip fades/gain and missing assets don't change the geometry; adjacent clips don't crossfade.
+CheckResult clipPlayerOverlapCrossfades();
 
 // TIME-005/006: a loop wrap mid-block crossfades the old pass out and the new one in over
 // kDeclickFrames; a signal that is the same on both sides of the wrap passes unchanged.

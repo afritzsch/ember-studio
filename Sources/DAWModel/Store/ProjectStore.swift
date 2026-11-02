@@ -38,9 +38,15 @@ public final class ProjectStore {
 
     /// Counts published changes, so autosave can tell whether anything changed since it last ran.
     @ObservationIgnored private var editSerial: UInt64 = 0
-    @ObservationIgnored private var autosavedSerial: UInt64 = 0
-    /// This store wrote the autosave that is in the folder now.
+    /// The `editSerial` the autosave in the folder holds once the queued file operations are
+    /// done; nil when unknown (a failed write), so the next autosave writes.
+    @ObservationIgnored private var autosavedSerial: UInt64? = 0
+    /// This store wrote the autosave that is in the folder once the queued file operations are
+    /// done.
     @ObservationIgnored private var wroteAutosave = false
+    /// DW-148: counts operations on the autosave (writes, removals, saves), so one finishing after
+    /// a later one has started knows it no longer has the last word.
+    @ObservationIgnored private var autosaveTicket: UInt64 = 0
     @ObservationIgnored private var lastWrite: Task<Void, Never>?
     @ObservationIgnored private var autosaveTimer: Task<Void, Never>?
     @ObservationIgnored private var autosaveDebounce: Task<Void, Never>?
@@ -166,6 +172,8 @@ public final class ProjectStore {
         let serial = editSerial
         let states = capturePluginStates(snapshot)
         let source = folderURL
+        autosaveTicket &+= 1
+        let ticket = autosaveTicket
         let moved = try await serialized { () throws(DAWError) in
             try ProjectFolder(url: target).save(snapshot, pluginStates: states, sourceFolder: source)
         }
@@ -180,11 +188,17 @@ public final class ProjectStore {
             ProjectFolder(url: source).removeAutosave()
         }
         folderURL = target
-        wroteAutosave = false
-        autosavedSerial = serial
+        // DW-148: an autosave started while saving was queued after the save and describes the
+        // folder as it ends up; only without one does the save's removal stand.
+        if ticket == autosaveTicket {
+            wroteAutosave = false
+            autosavedSerial = serial
+        }
         cleanMarker = marker
         updateDirty()
         restartAutosave()
+        // restartAutosave cancelled the debounce of edits made while saving; they still get it.
+        if editSerial != serial { scheduleDebouncedAutosave() }
     }
 
     /// Opens a project folder (MODEL-040). With `recover`, a newer `autosave/project.json` is
@@ -248,24 +262,47 @@ public final class ProjectStore {
     /// MODEL-044: writes `autosave/` now if the project has a folder and changed since the last
     /// autosave or save. Never touches `project.json`. When the project is back at its saved
     /// state, an autosave this store wrote is removed instead.
+    ///
+    /// DW-148: the bookkeeping (`wroteAutosave`, `autosavedSerial`) describes the folder as the
+    /// queued file operations leave it, and is updated when an operation is queued, not when it
+    /// finishes. File operations run in the order they are queued (`serialized`), but the
+    /// continuations after them may resume on the main actor after later edits and autosaves.
+    /// Recording state there let an edit made in between count as autosaved (never written), or
+    /// let a removal be skipped because the write before it hadn't resumed yet.
     public func autosave() async throws(DAWError) {
         guard let folderURL, !history.isGestureActive else { return }
         let folder = ProjectFolder(url: folderURL)
-        guard isDirty else {
-            if wroteAutosave {
-                try await serialized { () throws(DAWError) in folder.removeAutosave() }
-                wroteAutosave = false
-            }
-            autosavedSerial = editSerial
+        let serial = editSerial
+        if !isDirty {
+            autosavedSerial = serial
+            guard wroteAutosave else { return }
+            wroteAutosave = false
+            try await autosaveIO(onFailure: { $0.wroteAutosave = true }) { () throws(DAWError) in folder.removeAutosave() }
             return
         }
-        let serial = editSerial
         guard serial != autosavedSerial else { return }
         let snapshot = project
         let states = capturePluginStates(snapshot)
-        try await serialized { () throws(DAWError) in try folder.autosave(snapshot, pluginStates: states) }
         wroteAutosave = true
         autosavedSerial = serial
+        try await autosaveIO(onFailure: { $0.autosavedSerial = nil }) { () throws(DAWError) in
+            try folder.autosave(snapshot, pluginStates: states)
+        }
+    }
+
+    /// Queues an autosave file operation. If it fails and no later one has started, `onFailure`
+    /// corrects the bookkeeping recorded for it.
+    private func autosaveIO(
+        onFailure: (ProjectStore) -> Void, _ body: @escaping @Sendable () throws(DAWError) -> Void
+    ) async throws(DAWError) {
+        autosaveTicket &+= 1
+        let ticket = autosaveTicket
+        do {
+            try await serialized(body)
+        } catch {
+            if ticket == autosaveTicket { onFailure(self) }
+            throw error
+        }
     }
 
     /// MODEL-045: a clean quit. Stops autosaving, waits for writes in flight and deletes the
