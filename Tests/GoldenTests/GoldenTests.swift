@@ -75,6 +75,35 @@ struct GoldenReferenceTests {
             #expect(worst < 1e-6, "segment \(segment)")
         }
     }
+
+    /// MIX-004/007: each 12000-frame segment of bus_send_sum is the tone times the factors its
+    /// fixture derives: post-fader follows gain 0.5 and pan −1, pre-fader ignores them, both
+    /// sum in FX, and a muted track's pre- and post-fader sends are silent.
+    @Test("MIX-004/007: bus_send_sum's sends tap pre/post fader, sum in the bus, and mute with the track")
+    func busSendSumSamples() throws {
+        // Gains from the clip to the output (the fixture's levels ÷ the tone's 0.5).
+        try expectToneSegments("bus_send_sum", [(0.25, 0), (0.25, 0.25), (0.5, 0.25), (0, 0)])
+    }
+
+    /// The reference is `[(left, right)]` gains × the 1 kHz tone at 0.5 (`assets/tone_1k_48k.wav`),
+    /// one 12000-frame segment per factor pair, with the tone restarting in each segment.
+    private func expectToneSegments(_ name: String, _ factors: [(Double, Double)],
+                                    sourceLocation: SourceLocation = #_sourceLocation) throws {
+        let audio = try AudioData(contentsOf: GoldenHarness.reference(name))
+        #expect(audio.channels.count == 2, sourceLocation: sourceLocation)
+        #expect(audio.frameCount == factors.count * 12000, sourceLocation: sourceLocation)
+        guard audio.channels.count == 2, audio.frameCount == factors.count * 12000 else { return }
+        for (segment, (left, right)) in factors.enumerated() {
+            var worst = 0.0
+            for n in 0..<12000 {
+                let tone = 0.5 * sin(2 * Double.pi * 1000 * Double(n) / 48000)
+                let i = segment * 12000 + n
+                worst = max(worst, abs(Double(audio.channels[0][i]) - left * tone),
+                            abs(Double(audio.channels[1][i]) - right * tone))
+            }
+            #expect(worst < 1e-6, "segment \(segment)", sourceLocation: sourceLocation)
+        }
+    }
 }
 
 @Suite("Golden harness (TEST-001..003)")

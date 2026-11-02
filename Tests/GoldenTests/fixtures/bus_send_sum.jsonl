@@ -1,0 +1,46 @@
+# bus_send_sum (M2, MIX-004, MIX-007, DW-084): sends tap pre/post fader, a muted track silences
+# all its sends, and a bus sums its inputs.
+# Every track outputs to bus "Dry", which is muted, so only the send paths into bus "FX" are
+# heard. FX goes to the master at unity; its centre pan and the master's each give √½ per side,
+# so FX → output is × 0.5. The tone (assets/tone_1k_48k.wav) is a 1 kHz sine at 0.5, mono,
+# duplicated to L/R at the clip player. Four 480-tick (12000-frame) segments (peak, dBFS):
+#   0  "Post" (gain 0.5, pan -1, post-fader send at 1): follows the fader and pan.
+#      L 0.5·0.5·1·0.5 = 0.125 = -18.06, R silent.
+#   1  "Pre" (gain 0.25, pan -1, pre-fader send at 0.5): ignores the fader and pan.
+#      L = R = 0.5·0.5·0.5 = 0.125 = -18.06.
+#   2  both clips at once, summed in FX (MIX-004): L 0.25 = -12.04, R 0.125 = -18.06.
+#   3  "Muted" (muted, a pre- and a post-fader send at 1): silent, pre-fader included.
+# IDs: master 1, FX 2, Dry 3, Post 4, Pre 5, Muted 6, sends 7..10, asset 11.
+# GoldenReferenceTests checks every sample against these factors × the tone.
+# @expect {"field": "frames", "value": 48000}
+# @expect {"field": "spectrumPeakHz", "value": 1000, "tolerance": 1}
+# @expect {"field": "peakDb", "value": -18.062, "tolerance": 0.001, "channel": 0, "range": {"start": 0, "end": 12000}}
+# @expect {"field": "rmsDb", "value": -21.072, "tolerance": 0.001, "channel": 0, "range": {"start": 0, "end": 12000}}
+# @expect {"field": "peakDb", "value": -240, "channel": 1, "range": {"start": 0, "end": 12000}}
+# @expect {"field": "peakDb", "value": -18.062, "tolerance": 0.001, "range": {"start": 12000, "end": 24000}}
+# @expect {"field": "peakDb", "value": -12.041, "tolerance": 0.001, "channel": 0, "range": {"start": 24000, "end": 36000}}
+# @expect {"field": "peakDb", "value": -18.062, "tolerance": 0.001, "channel": 1, "range": {"start": 24000, "end": 36000}}
+# @expect {"field": "peakDb", "value": -240, "range": {"start": 36000, "end": 48000}}
+project.new {"name": "bus_send_sum", "sampleRate": 48000}
+command.apply {"command": {"type": "AddBus", "name": "FX"}}
+command.apply {"command": {"type": "AddBus", "name": "Dry"}}
+command.apply {"command": {"type": "AddTrack", "name": "Post", "kind": "audio", "output": {"kind": "bus", "id": 3}}}
+command.apply {"command": {"type": "AddTrack", "name": "Pre", "kind": "audio", "output": {"kind": "bus", "id": 3}}}
+command.apply {"command": {"type": "AddTrack", "name": "Muted", "kind": "audio", "output": {"kind": "bus", "id": 3}}}
+command.apply {"command": {"type": "AddSend", "channelID": 4, "busID": 2, "level": 1, "tap": "postFader"}}
+command.apply {"command": {"type": "AddSend", "channelID": 5, "busID": 2, "level": 0.5, "tap": "preFader"}}
+command.apply {"command": {"type": "AddSend", "channelID": 6, "busID": 2, "level": 1, "tap": "preFader"}}
+command.apply {"command": {"type": "AddSend", "channelID": 6, "busID": 2, "level": 1, "tap": "postFader"}}
+command.apply {"command": {"type": "SetParam", "target": {"kind": "strip", "channel": 3, "param": "mute"}, "value": 1}}
+command.apply {"command": {"type": "SetParam", "target": {"kind": "strip", "channel": 4, "param": "gain"}, "value": 0.5}}
+command.apply {"command": {"type": "SetParam", "target": {"kind": "strip", "channel": 4, "param": "pan"}, "value": -1}}
+command.apply {"command": {"type": "SetParam", "target": {"kind": "strip", "channel": 5, "param": "gain"}, "value": 0.25}}
+command.apply {"command": {"type": "SetParam", "target": {"kind": "strip", "channel": 5, "param": "pan"}, "value": -1}}
+command.apply {"command": {"type": "SetParam", "target": {"kind": "strip", "channel": 6, "param": "mute"}, "value": 1}}
+asset.import {"path": "assets/tone_1k_48k.wav"}
+command.apply {"command": {"type": "AddClip", "trackID": 4, "start": 0, "assetID": 11}}
+command.apply {"command": {"type": "AddClip", "trackID": 5, "start": 480, "assetID": 11}}
+command.apply {"command": {"type": "AddClip", "trackID": 4, "start": 960, "assetID": 11}}
+command.apply {"command": {"type": "AddClip", "trackID": 5, "start": 960, "assetID": 11}}
+command.apply {"command": {"type": "AddClip", "trackID": 6, "start": 1440, "assetID": 11}}
+render.offline {"from": 0, "to": 1920, "path": "bus_send_sum.wav", "tail": false}
