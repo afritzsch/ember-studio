@@ -93,6 +93,17 @@ IDs are `UInt64`, allocated by `IDAllocator` stored in the project (never reused
 | MODEL-045 | **Recovery**: on open, if `autosave/project.json` is newer than `project.json`, offer recovery (UI) or `--recover` flag (CLI). A clean quit deletes the autosave. | Test via `dawctl open --recover` |
 | MODEL-046 | Missing audio file on load: mark the asset `offline`, keep clips, render silence, report through `ProjectLoadReport`. | Test |
 
+**Persistence (clarified in T-031).**
+- *Folder* (MODEL-040): `save(to: url)` writes into `url` as given (naming it `Name.dawproject` is the caller's); `save(to: nil)` uses `folderURL`, where the project was opened or last saved, and throws `invalidArgument` for a project that has neither. `project.json` is pretty-printed with sorted keys and unescaped slashes. Plugin state isn't stored inline: each slot's state is `Plugins/<slotID>.state` and is read back into `DeviceSlot.pluginState` on open.
+- *Atomic save* (MODEL-041): `project.json.tmp`, `F_FULLFSYNC` (falling back to `fsync`), `rename`, then `fsync` of the folder. The order is audio copies → plugin states → `project.json` (the commit point) → removal of stale state files and of the autosave. Plugin state files aren't part of that commit, so a kill between them and the rename can leave newer states next to the older `project.json`. File errors are `DAWError.fileIO(path, detail)`.
+- *Migrations* (MODEL-042): `Migrations.steps[v]` turns v into v+1 and `migrate` stamps `formatVersion` after each step. A file newer than the build, or a version without a step, is `DAWError.invalidProject`.
+- *Validation on open* (DW-111): `validate()` runs on the decoded project. Only orderings are repaired (clips by (start, id), notes by (start, id)), because their order is a function of the data. They are listed in `ProjectLoadReport.repairs`. Any other broken invariant is `invalidProject` and the file isn't opened.
+- *Autosave* (MODEL-044): any edit counts, not only structural ones: every perform, undo, redo and gesture end restarts the 2 s debounce. A param change is as much work to lose as a structural one, and the debounce bounds the cost. Autosave runs only while the project has a folder and `autosavePolicy` isn't nil, never mid-gesture, and doesn't change the dirty flag. It copies no audio, so relative asset paths in `autosave/project.json` resolve against the project folder. An autosave the store wrote is removed when the project is back at its saved state, and by `save` and `close()`.
+- *Recovery* (MODEL-045): "newer" compares modification times. A recovered store keeps `folderURL` and starts dirty. A folder with an autosave but no `project.json` opens only with `recover`. Without `recover`, `ProjectLoadReport.recoveryAvailable` says that an autosave is waiting. `close()` is the clean quit: it stops autosaving and deletes `autosave/`.
+- *Offline assets* (MODEL-046, DW-097): open reports assets whose file isn't readable. Once an engine is attached, `loadAssets()` loads the others (relative paths resolve against the folder) and replaces `offlineAssets` with those that are missing or fail to load. "Offline" is runtime state and isn't saved. An offline asset's clips have no loaded asset, so they render silence.
+- *Assets on save* (DW-124): files outside the folder are copied into `Audio/` (`name-2.ext` on a name clash; a file with the same contents already there is reused), and `AssetRef.path` becomes project-relative. On Save As, relative paths resolve against the old folder. A missing file keeps an absolute path to where it was expected. Copying is plain file I/O (an APFS clone), not `AudioImporter`: it needs no decoding, and calling `AudioImporter` from Swift would need a facade method (an 08 Interfaces change). Rewriting the path isn't an edit (no undo entry, no change event).
+- *Loop* (DW-123, model part): `EngineSync` gives the transport `project.loop` on attach and after any change to it (commands, undo, redo); `nil` disables the loop. An unchanged loop isn't pushed again, so a loop set on the transport alone stays until the project's loop changes.
+
 ## Interfaces (contract)
 ```swift
 public protocol Command: Codable, Sendable { static var type: String { get }; var label: String { get }
@@ -115,7 +126,7 @@ In headless tools, `ProjectStore` runs on `@MainActor` too (the CLI has a main r
 | MODEL-003 | done (T-015) | `UndoStackTests`, `ProjectStoreTests` (100-step drag → 1 undo entry); param-slot path is a seam for T-016 |
 | MODEL-004 | done (T-015) | `UndoStackTests` (`CompositeCommand`) |
 | MODEL-006 | done (T-015) | `CommandRegistryTests` (JSON round trip, stable `type`); only real command so far is `RenameTrack` |
-| MODEL-007 | done (T-015) | `ProjectStoreTests`; `save`/`open` throw `.notImplemented` until T-031 |
+| MODEL-007 | done (T-015, T-031) | `ProjectStoreTests`; `save`/`open` implemented by T-031 (`PersistenceTests`) |
 | MODEL-020 | done (T-016) | `GraphDescriptionBuilderTests` (snapshots of 4 fixture projects in `Tests/Fixtures/graph_snapshots/`; well-formed; pure; send/sidechain taps; stable edge IDs; role-tagged NodeIDs); real engine accepts the graphs (`EngineSyncIntegrationTests`) |
 | MODEL-021 | done (T-016) | `EngineSyncTests` (param-only → setParam, never applyGraph; structural → one apply per 10 ms window from the latest project; 100-step fader drag rebuilds nothing; clip drag coalesces); end to end in `EngineSyncIntegrationTests`. Cost measured in `SyncCostTests` (DW-032) |
 | MODEL-022 | done (T-016) | `EngineSyncTests` (slots allocated on attach, freed after the apply that drops a node, runtime-only and reallocated on open; counts/defaults from ParamInfo) |
@@ -123,4 +134,11 @@ In headless tools, `ProjectStore` runs on `@MainActor` too (the CLI has a main r
 | MODEL-030 | done (T-022) | `RoutingCommandTests` (A → B then B → A rejected with `routingCycle([B, A, B])`; self-routing, longer cycles through sends and sidechains; bypassed devices count) |
 | MODEL-031 | done (T-022) | `RoutingCommandTests` "unknown IDs and bad arguments throw and change nothing" (35 cases); routing fuzz (150 runs × 40 commands, undo-all restores) |
 | MODEL-032 | done (T-022) | `ProjectValidationTests` (unique IDs in 1…maxModelID below the allocator; references; acyclic; clip/note/param ranges; Debug `UndoStack` hook rejects an invalidating command; decoding reserves IDs). Clips sorted by (start, id), asset refs, clip ranges, loop checked since T-030 |
+| MODEL-040 | done (T-031) | `PersistenceTests` (folder layout, pretty sorted `project.json`; never-saved project needs a path; every fixture project opens unchanged) |
+| MODEL-041 | done (T-031) | `ProjectCrashTests` (child process SIGKILLed mid-save, 8 runs, always reopens); `PersistenceTests` (tmp + rename, leftover tmp ignored, failed write keeps old file) |
+| MODEL-042 | done (T-031) | `PersistenceTests` (v1 → v2 fixture migration; newer/missing/failing step rejected; 64-bit ints exact) |
+| MODEL-043 | partial (T-031 seam) | `PersistenceTests` (state goes to `Plugins/<slotID>.state` and back through the provider, FakeEngine); real plugins → DW-143 |
+| MODEL-044 | done (T-031) | `PersistenceTests` (debounced and periodic autosave into `autosave/`, `project.json` untouched); `ProjectCrashTests` |
+| MODEL-045 | done (T-031) | `PersistenceTests`; `ProjectCrashTests` (real crash); `DawctlTests` "MODEL-045: `dawctl project.open` reports a newer autosave, and with recover opens it" |
+| MODEL-046 | done (T-031) | `PersistenceTests` (missing file → offline asset, clips kept; real engine renders silence) |
 | MODEL-* (rest) | todo | |
