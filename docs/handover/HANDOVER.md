@@ -6,7 +6,7 @@ You are AUTOBUILD phase lead 2. You run in the main checkout /Users/artem/dev/ma
   - **T-025** M2 goldens: `pan_law`, `bus_send_sum`, `pdc_alignment_null`, `send_ramps`, each with per-sample reference checks.
   - **T-042** note commands + MIDI instrument slot + sampler zones (DW-127, DW-140), plus the MODEL-044 autosave race fix (DW-148).
   - **T-032** app shell + attach mode: AppKit windows, File menu, view models in a new `EmberStudioShell` SwiftPM target, toasts, ui.state/perform/snapshot, ControlSocketServer/Client, `dawctl --attach`, `daw_session_mode`, progress notifications. It also fixed DW-146.
-- Done & merged (38): T-001..T-022, T-025, T-030..T-032, T-035, T-040..T-042, T-050, T-051, T-060, T-085..T-087.
+- Done & merged (36): T-001..T-022, T-025, T-030..T-032, T-035, T-040..T-042, T-050, T-051, T-060, T-085..T-087.
 - No `wip` tasks.
 - **Ready (12):** T-023 sidechain (E), T-024 metronome (D), T-033 arrange canvas (U), T-034 toolbar/transport (U), T-036 M3 goldens (E, test-only files), **T-045 MIDI edge routing (E, new: DW-099; makes MIDI + sampler audible; T-044 depends on it)**, T-056 session-rate change (E+M), T-070 EQ, T-072 delay, T-073 reverb (D), T-076 mixer view (U), T-082 export dialog (U).
 - Discovered work runs DW-001..DW-157. New this phase: DW-146..157 (most are closed or small; see the table).
