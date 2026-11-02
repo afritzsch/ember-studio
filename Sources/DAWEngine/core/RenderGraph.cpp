@@ -193,7 +193,7 @@ void RenderGraph::process(ProcessContext& ctx, ProcessContext& timeline) const D
     for (const Step& step : steps_) {
         NodeIO io;
         io.audioIn = input(step.input, numFrames);
-        io.sidechain = input(step.sidechain, numFrames);
+        io.sidechain = input(step.sidechain, numFrames);  // MIX-008, ENG-003: empty when unrouted
         if (step.output != kNoBuffer) io.audioOut = buffers_.view(step.output, numFrames);
         step.node->process(step.timeline ? timeline : ctx, io);
         if (step.numFeeds > 0) feed(step, numFrames);

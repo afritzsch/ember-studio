@@ -104,7 +104,9 @@ Result<std::unique_ptr<RenderGraph>> GraphBuilder::build(const GraphDescription&
         if (from == index.end() || to == index.end()) return invalid(name + " connects an unknown node");
         if (e.kind != EdgeKind::audio && e.kind != EdgeKind::midi && e.kind != EdgeKind::sidechain)
             return invalid(name + " has an unknown kind");
-        // MIX-004: one main input and one sidechain input per node in v1.
+        // MIX-004: one main input and one sidechain input per node in v1. MIX-008: a sidechain
+        // edge feeds the target's sidechain port; its tap (pre/post-fader) is simply where the
+        // model starts it (MODEL-020), so the builder treats it like any audio edge otherwise.
         if (e.toPort != 0) return invalid(name + ": toPort must be 0");
         if (from->second == master) return invalid(name + " leaves the master, which is the final node");
         if (e.kind != EdgeKind::midi && !kinds[from->second]->audioOutput)
