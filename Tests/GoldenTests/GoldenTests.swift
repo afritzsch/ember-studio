@@ -139,4 +139,42 @@ struct GoldenReferenceTests {
         #expect(missedRun.failures.first?.contains("@expect peakDb") == true)
         for run in [badRun, missedRun] { try? FileManager.default.removeItem(at: run.workDirectory) }
     }
+
+    /// A hard-left pan (MIX-005) is loud on L and silent on R: `"channel"` checks one channel only.
+    static let hardLeft = Self.sine.replacingOccurrences(of: "render.offline", with: """
+        command.apply {"command": {"type": "SetParam", "target": {"kind": "strip", "channel": 2, "param": "pan"}, "value": -1}}
+        render.offline
+        """)
+
+    @Test("TEST-001: @expect \"channel\" checks one channel; out of range or on a scalar field fails")
+    func expectChannel() async throws {
+        // L = sin · cos 0 · √½ → −3.01 dBFS; R silent (−240, the analyzer's floor).
+        let pass = try GoldenFixture(name: "t", text: Self.hardLeft + """
+
+            # @expect {"field": "peakDb", "value": -3.01, "tolerance": 0.01, "channel": 0}
+            # @expect {"field": "peakDb", "value": -240, "tolerance": 1, "channel": 1}
+            """)
+        #expect(pass.expectations.map(\.channel) == [0, 1])
+        let passRun = await GoldenHarness.run(pass, reference: nil)
+        #expect(passRun.failures == [])
+
+        // Without "channel" the same value must hold on both channels, so R fails it.
+        let both = try GoldenFixture(name: "t", text: Self.hardLeft + """
+
+            # @expect {"field": "peakDb", "value": -3.01, "tolerance": 0.01}
+            """)
+        let bothRun = await GoldenHarness.run(both, reference: nil)
+        #expect(bothRun.failures.count == 1)
+
+        let bad = try GoldenFixture(name: "t", text: Self.hardLeft + """
+
+            # @expect {"field": "peakDb", "value": -3.01, "tolerance": 0.01, "channel": 2}
+            # @expect {"field": "frames", "value": 12000, "channel": 0}
+            """)
+        let badRun = await GoldenHarness.run(bad, reference: nil)
+        #expect(badRun.failures.count == 2)
+        #expect(badRun.failures.first?.contains("no channel 2 (2 channels)") == true)
+        #expect(badRun.failures.last?.contains("frames is not a per-channel field") == true)
+        for run in [passRun, bothRun, badRun] { try? FileManager.default.removeItem(at: run.workDirectory) }
+    }
 }
