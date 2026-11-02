@@ -67,7 +67,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         for window in app.windows { windows.setTitle(window) }
     }
 
+    /// DW-144: set once every project is closed; the next terminate goes through.
+    private var readyToQuit = false
+    private var quitting = false
+
+    /// Never `.terminateLater`: AppKit would then spin a nested run loop until a reply, and a quit
+    /// that starts inside a main-queue callback (SIGTERM, the parent watch) could never get one,
+    /// because the main-actor task that closes the projects runs on that same queue. Instead the
+    /// first terminate is cancelled, the projects close asynchronously, and then terminate again.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        if readyToQuit { return .terminateNow }
+        guard !quitting else { return .terminateCancel }
         let dirty = app.windows.filter { $0.store.isDirty }
         if !options.isAutomated, !dirty.isEmpty {
             let alert = NSAlert()
@@ -78,14 +88,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             alert.addButton(withTitle: "Quit Anyway")
             guard alert.runModal() == .alertSecondButtonReturn else { return .terminateCancel }
         }
+        quitting = true
         // DW-144: close every project (removes autosaves, so nothing offers recovery next time).
         Task { @MainActor in
             pumpTimer?.invalidate()
             await app.quit()
             server?.stop()
-            NSApp.reply(toApplicationShouldTerminate: true)
+            readyToQuit = true
+            NSApp.terminate(nil)
         }
-        return .terminateLater
+        return .terminateCancel
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
