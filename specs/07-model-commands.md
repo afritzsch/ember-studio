@@ -126,7 +126,7 @@ In headless tools, `ProjectStore` runs on `@MainActor` too (the CLI has a main r
 | MODEL-003 | done (T-015) | `UndoStackTests`, `ProjectStoreTests` (100-step drag → 1 undo entry); param-slot path is a seam for T-016 |
 | MODEL-004 | done (T-015) | `UndoStackTests` (`CompositeCommand`) |
 | MODEL-006 | done (T-015) | `CommandRegistryTests` (JSON round trip, stable `type`); only real command so far is `RenameTrack` |
-| MODEL-007 | done (T-015) | `ProjectStoreTests`; `save`/`open` throw `.notImplemented` until T-031 |
+| MODEL-007 | done (T-015, T-031) | `ProjectStoreTests`; `save`/`open` implemented by T-031 (`PersistenceTests`) |
 | MODEL-020 | done (T-016) | `GraphDescriptionBuilderTests` (snapshots of 4 fixture projects in `Tests/Fixtures/graph_snapshots/`; well-formed; pure; send/sidechain taps; stable edge IDs; role-tagged NodeIDs); real engine accepts the graphs (`EngineSyncIntegrationTests`) |
 | MODEL-021 | done (T-016) | `EngineSyncTests` (param-only → setParam, never applyGraph; structural → one apply per 10 ms window from the latest project; 100-step fader drag rebuilds nothing; clip drag coalesces); end to end in `EngineSyncIntegrationTests`. Cost measured in `SyncCostTests` (DW-032) |
 | MODEL-022 | done (T-016) | `EngineSyncTests` (slots allocated on attach, freed after the apply that drops a node, runtime-only and reallocated on open; counts/defaults from ParamInfo) |
@@ -134,4 +134,11 @@ In headless tools, `ProjectStore` runs on `@MainActor` too (the CLI has a main r
 | MODEL-030 | done (T-022) | `RoutingCommandTests` (A → B then B → A rejected with `routingCycle([B, A, B])`; self-routing, longer cycles through sends and sidechains; bypassed devices count) |
 | MODEL-031 | done (T-022) | `RoutingCommandTests` "unknown IDs and bad arguments throw and change nothing" (35 cases); routing fuzz (150 runs × 40 commands, undo-all restores) |
 | MODEL-032 | done (T-022) | `ProjectValidationTests` (unique IDs in 1…maxModelID below the allocator; references; acyclic; clip/note/param ranges; Debug `UndoStack` hook rejects an invalidating command; decoding reserves IDs). Clips sorted by (start, id), asset refs, clip ranges, loop checked since T-030 |
+| MODEL-040 | done (T-031) | `PersistenceTests` (folder layout, pretty sorted `project.json`; never-saved project needs a path; every fixture project opens unchanged) |
+| MODEL-041 | done (T-031) | `ProjectCrashTests` (child process SIGKILLed mid-save, 8 runs, always reopens); `PersistenceTests` (tmp + rename, leftover tmp ignored, failed write keeps old file) |
+| MODEL-042 | done (T-031) | `PersistenceTests` (v1 → v2 fixture migration; newer/missing/failing step rejected; 64-bit ints exact) |
+| MODEL-043 | partial (T-031 seam) | `PersistenceTests` (state goes to `Plugins/<slotID>.state` and back through the provider, FakeEngine); real plugins → DW-143 |
+| MODEL-044 | done (T-031) | `PersistenceTests` (debounced and periodic autosave into `autosave/`, `project.json` untouched); `ProjectCrashTests` |
+| MODEL-045 | done (T-031) | `PersistenceTests`; `ProjectCrashTests` (real crash); `DawctlTests` "MODEL-045: `dawctl project.open` reports a newer autosave, and with recover opens it" |
+| MODEL-046 | done (T-031) | `PersistenceTests` (missing file → offline asset, clips kept; real engine renders silence) |
 | MODEL-* (rest) | todo | |
