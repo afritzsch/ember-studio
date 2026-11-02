@@ -366,6 +366,30 @@ struct PersistenceTests {
         }
     }
 
+    @Test("DW-148: an edit made while a save runs still gets its debounced autosave")
+    func editDuringSave() async throws {
+        let temp = try TempFolder("persist")
+        defer { temp.remove() }
+        let folder = temp.url.appending(path: "A.dawproject")
+        let store = ProjectStore(project: Project(name: "p"))
+        store.autosavePolicy = AutosavePolicy(interval: .seconds(3600), debounce: .milliseconds(50))
+        try await store.save(to: folder)
+        for round in 0..<20 {
+            try store.perform(AddTrack(name: "saved \(round)", kind: .audio))
+            let saving = Task { try await store.save(to: nil) }
+            await Task.yield()  // the save runs up to its file I/O
+            try store.perform(AddTrack(name: "during \(round)", kind: .audio))
+            try await saving.value
+            #expect(store.isDirty)
+            guard await eventually(timeout: .seconds(10), { exists(folder.appending(path: "autosave/project.json")) }) else {
+                Issue.record("round \(round): the edit made while saving is never autosaved")
+                return
+            }
+            let autosaved = try ProjectFile.decode(Data(contentsOf: folder.appending(path: "autosave/project.json"))).project
+            #expect(autosaved.tracks.last?.name == "during \(round)")
+        }
+    }
+
     @Test("MODEL-044: the periodic autosave writes while dirty, and nothing is written for a project without a folder")
     func periodicAutosave() async throws {
         let temp = try TempFolder("persist")
