@@ -52,6 +52,29 @@ struct GoldenReferenceTests {
             #expect(worst < 1e-6)
         }
     }
+
+    /// MIX-005 constant power: whatever the pan, L² + R² of the tone through both strips is
+    /// ½ · tone² (track law cos²θ + sin²θ = 1, master centre √½ per side). Checked per sample in
+    /// all five 12000-frame segments (pan −1, −0.5, 0, +0.5, +1).
+    @Test("MIX-005: pan_law's L² + R² is the same at every pan position")
+    func panLawIsConstantPower() throws {
+        let audio = try AudioData(contentsOf: GoldenHarness.reference("pan_law"))
+        #expect(audio.sampleRate == 48000)
+        #expect(audio.channels.count == 2)
+        #expect(audio.frameCount == 60000)
+        guard audio.channels.count == 2, audio.frameCount == 60000 else { return }
+        let (l, r) = (audio.channels[0], audio.channels[1])
+        for segment in 0..<5 {
+            var worst = 0.0
+            for n in 0..<12000 {
+                let i = segment * 12000 + n
+                let tone = 0.5 * sin(2 * Double.pi * 1000 * Double(n) / 48000)
+                let power = Double(l[i]) * Double(l[i]) + Double(r[i]) * Double(r[i])
+                worst = max(worst, abs(power - 0.5 * tone * tone))
+            }
+            #expect(worst < 1e-6, "segment \(segment)")
+        }
+    }
 }
 
 @Suite("Golden harness (TEST-001..003)")
