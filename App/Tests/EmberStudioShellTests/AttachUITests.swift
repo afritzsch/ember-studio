@@ -29,8 +29,8 @@ struct AttachUITests {
         #expect(w["project"]?["name"] == "Untitled" && w["project"]?["dirty"] == true && w["project"]?["path"] == .null)
         #expect(w["panes"] == ["browser": true, "inspector": true, "bottom": "mixer"])
         #expect(w["selection"] == ["tracks": [.int(Int64(track))], "clips": []])
-        #expect(w["zoom"]?["pixelsPerBeat"] == 64)
-        #expect(w["scroll"]?["y"] == 0 && w["visibleTracks"] == [.int(Int64(track))])
+        #expect(w["zoom"]?["pixelsPerBeat"]?.doubleValue == 64)
+        #expect(w["scroll"]?["y"]?.doubleValue == 0 && w["visibleTracks"] == [.int(Int64(track))])
         #expect(w["tracks"]?[0] == ["id": .int(Int64(track)), "name": "Gtr", "kind": "audio", "mute": false, "solo": false,
                                     "selected": true])
         #expect(w["transport"]?["playing"] == false)
