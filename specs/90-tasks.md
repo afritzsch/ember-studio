@@ -65,9 +65,9 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 |---|---|---|---|---|---|
 | T-030 | M | Clip + tempo/signature + loop commands | MODEL-005 (clip/tempo subset) | T-022 | done |
 | T-031 | M | Persistence: folder format, atomic save, migrations, autosave, recovery, offline assets | MODEL-040..046 | T-030 | done |
-| T-032 | U+B | App shell, window, view-model pattern, toasts, ControlSocketServer, attach mode, UI dump/snapshot | UI-001, 003, 004, 050..052, CTL-011, 023, 030, 031 | T-018 | wip(t-032-app-shell-r2) |
-| T-033 | U | Arrange canvas: tiles, waveforms (Metal), grid/snap, clip gestures, playhead layer | UI-010..014 | T-032, T-030 | todo |
-| T-034 | U | Toolbar, transport, keyboard shortcuts | UI-002 | T-032 | todo |
+| T-032 | U+B | App shell, window, view-model pattern, toasts, ControlSocketServer, attach mode, UI dump/snapshot | UI-001, 003, 004, 050..052, CTL-011, 023, 030, 031 | T-018 | done |
+| T-033 | U | Arrange canvas: tiles, waveforms (Metal), grid/snap, clip gestures, playhead layer | UI-010..014 | T-032, T-030 | ready |
+| T-034 | U | Toolbar, transport, keyboard shortcuts | UI-002 | T-032 | ready |
 | T-035 | D | Overlapping-clip crossfades | DSP-002 | T-013 | done |
 | T-036 | E | M3 goldens: clips/fades/tempo change, loop wrap mid-block | TEST (M3 set) | T-030, T-035 | ready |
 
@@ -113,7 +113,7 @@ DSP effects (T-070..073) depend only on the Node API and can be **pulled forward
 | T-073 | D | Reverb (FDN, deterministic) | DSP-033, 040, 041 | T-004, T-005 | ready |
 | T-074 | E+M | Automation lanes model + AutomationPlayer + plugin param path | AUTO-001..005, 008..010 | T-030, T-061/T-062 (for AUTO-009) | todo |
 | T-075 | U+M | Automation recording (touch/latch/write) + lane UI | AUTO-006, 007, UI-015 | T-074, T-033 | todo |
-| T-076 | U | Mixer view + meters + routing pickers | UI-030, 031, 033 | T-022, T-032 | todo |
+| T-076 | U | Mixer view + meters + routing pickers | UI-030, 031, 033 | T-022, T-032 | ready |
 | T-077 | D | M7 goldens | TEST (M7 set) | T-071, T-073, T-074 | todo |
 
 ### M8 — Comping, export, hardening
@@ -121,7 +121,7 @@ DSP effects (T-070..073) depend only on the Node API and can be **pulled forward
 |---|---|---|---|---|---|
 | T-080 | E+M | Loop recording takes, TakeFolder, comp model, flattening | REC-030..034 | T-052, T-035 | todo |
 | T-081 | U | Take folder / comp editing UI | UI-016 | T-080, T-033 | todo |
-| T-082 | U | Export dialog | UI-042 | T-009, T-032 | todo |
+| T-082 | U | Export dialog | UI-042 | T-009, T-032 | ready |
 | T-083 | U | Crash recovery dialog | UI-043 | T-031, T-064 | todo |
 | T-084 | E | Sanitizer CI jobs, perf smoke, GitHub Actions | TEST-007, 008, BUILD-009 | T-077 | todo |
 
@@ -241,7 +241,7 @@ Recorded by the lead from worker reports.
 | DW-043 | T-010 | ImportAsset command should call `AudioImporter::importFile` and persist `projectRelativePath` | M (T-030) | done (T-030: import stays outside the command; facade `importFile` → DW-124) |
 | DW-044 | T-010 | IO-033 (T-056): per-request progress events still needed; the peak cache already handles stale rates | E (T-056) | todo |
 | DW-045 | T-086 | Product-name leftovers in files that wave-4 workers own: `core/Denormals.h:16` (`#error "macDAW targets arm64 only"`), `io/AudioFileLoader.cpp:24` (`os_log_create("dev.macdaw", "io")` → `dev.emberstudio`), `Tests/DAWEngineTestSupport/TestAudio.cpp:22` (temp prefix `macdaw-t010-`). Fix after T-006/T-008/T-009/T-012 merge | E (lead, small) | done (T-087) |
-| DW-046 | T-086 | The built app is now `Ember Studio.app` (path contains a space); CTL-023's attach-mode launcher must quote it. The Swift package name stays `macDAW` (01 doesn't constrain it); the repo folder `/Users/artem/dev/macDAW` is unchanged. Plugin cache moved to `~/Library/Application Support/Ember Studio/` (no migration; a rescan) | B (T-018/T-032), lead | todo |
+| DW-046 | T-086 | The built app is now `Ember Studio.app` (path contains a space); CTL-023's attach-mode launcher must quote it. The Swift package name stays `macDAW` (01 doesn't constrain it); the repo folder `/Users/artem/dev/macDAW` is unchanged. Plugin cache moved to `~/Library/Application Support/Ember Studio/` (no migration; a rescan) | B (T-018/T-032), lead | done (T-032: launcher uses Process with an argument array; tested at a path with spaces) |
 | DW-047 | T-006 | RenderGraph should carry a per-node latency table + total PDC latency for `Telemetry::publishNodeLatencies` (audio thread copies on graph change), and the `GraphDescription.version` so telemetry can report which applyGraph version is rendering (natural thing for dawmcp to wait on) | E (T-012 / T-021), B (T-014) | done (T-014) |
 | DW-048 | T-006 | GraphBuilder hands out MeterIDs (≤ `Telemetry::kMaxMeters` = 4096) to channel strips, which call `writeMeter(id, peak, rms)` from `process()`; the 300 ms window is the strip's job | E/D (T-012 follow-up, T-013/T-020) | done (T-013: `NodeKindInfo::meters`, `NodeCreateInfo::meter`, `GraphBuilder::meterOf`); facade NodeID→MeterID map in DW-071 |
 | DW-049 | T-006 | Driver calls `Telemetry::countXrun()` (IO-023) and `setDeviceOutputLatency()` (IO-005); overruns are detectable from `lastBlockLoadPercent > 100`. Facade copies `TelemetrySnapshot` field by field into `TelemetryPOD`; `firstViolation()` is non-RT and allocates | E (T-011/T-051), B (T-014) | done (T-011 driver, T-014 TelemetryPOD + `overload` event on xrun growth) |
@@ -328,7 +328,7 @@ Recorded by the lead from worker reports.
 | DW-130 | T-018 | After a device fallback or `device.set` changes the engine's session rate (Fake Device B is 44.1 kHz only), `project.sessionSampleRate` still says 48000: nothing makes the document follow an engine-side rate change | M (T-055/T-056) | todo |
 | DW-131 | T-018 | Schema probe can't see through tagged unions with a private `Kind` enum or non-`CaseIterable` string enums; new ones need a `JSONSchemaDescribing` entry in `Sources/DAWControl/Schema/ModelSchemas.swift` or the enum made `CaseIterable` (`SchemaTests` fails naming the type). Suggest `CaseIterable` on DAWModel wire enums (`SignalTap`, `Track.Kind`/`Monitoring`, `ParamTarget.StripParam`, `ExportSpec.FileType`/`SampleFormat`, `DeviceDriverKind`, `DeviceEvent.Kind`) | M (small) | todo |
 | DW-132 | T-018 | `dawctl` keeps its own copy of the fixture-folder lookup; use `ControlFixtures.defaultDirectories()` (DAWControl) | B (small) | todo |
-| DW-133 | T-018 | CTL-031 progress notifications for long renders aren't sent over MCP yet; `daw_session_mode` (CTL-023) and attach stay with T-032 | B (T-032) | todo |
+| DW-133 | T-018 | CTL-031 progress notifications for long renders aren't sent over MCP yet; `daw_session_mode` (CTL-023) and attach stay with T-032 | B (T-032) | done (T-032) |
 | DW-134 | T-019 | `EngineClient` can't take a facade built elsewhere, so GoldenTests has `GoldenEngine` (an `EngineProtocol` copy of EngineClient using its `description(for:)`/`error(_:)` via `@testable`). Add `@_spi(Testing) init(facade:mode:)` to EngineClient and delete the copy; until then every `EngineProtocol` change must update `Tests/GoldenTests/GoldenEngine.swift` | M/B (small) | todo |
 | DW-135 | T-019 | dawctl/dawmcp run golden fixtures but lack the test-only nodes, so `@node` fixtures render silence there. Document in 14's recipe, or offer a test-node engine in a test-only dawmcp build | B / lead (14) | todo |
 | DW-136 | T-019 | Drop `DAWEngineTestSupport`'s no-op `swiftSettings: cxxInterop` (and comment) now that the BUILD-002 check skips C-family targets | E (small, Package.swift) | todo |
@@ -339,12 +339,17 @@ Recorded by the lead from worker reports.
 | DW-141 | T-041 | `EngineFacade::paramInfoJSON` publishes only channelStrip, so the model gives the sampler `numParams` 0 (default ADSR). Publish `Sampler::kParamInfo` (and GainNode's), ideally via `NodeRegistry::paramInfo` (DSP-041) | E/B | todo |
 | DW-142 | T-041 | DSP-040 NaN guard: Telemetry has no NaN counter for processors; the sampler doesn't guard against a NaN asset yet | E (core), then D | todo |
 | DW-143 | T-031 | MODEL-043 rest: instantiate hosted plugins on open, then `store.restorePluginStates()` with `store.pluginStateProvider = EnginePluginStates(engine:)`; real facade `getPluginState` and a round trip through a real plugin | P | todo |
-| DW-144 | T-031 | App: offer recovery when `loadReport.recoveryAvailable` (reopen with `recover: true`), call `close()` on a clean quit, show `offlineAssets` and `repairs` | U (T-032 / T-083) | todo |
+| DW-144 | T-031 | App: offer recovery when `loadReport.recoveryAvailable` (reopen with `recover: true`), call `close()` on a clean quit, show `offlineAssets` and `repairs` | U (T-032 / T-083) | done (T-032 app part: recovery toast, close() on window close/quit; T-083 dialog still todo) |
 | DW-145 | T-031 | A project that was never saved has no folder and isn't autosaved; crash safety for it needs an autosave location such as Application Support | M | todo |
-| DW-146 | T-035, T-025 | dawmcp/dawctl `test.fixture` resolves a fixture's relative `asset.import` paths against the server's cwd, not the fixture's folder, so every fixture that imports an asset (`wav_playback_resampled`, `pan_law`, `bus_send_sum`, `pdc_alignment_null`, `clip_overlap_crossfade`) fails in dawmcp unless an `assets` symlink exists | B (T-032 or later) | todo |
+| DW-146 | T-035, T-025 | dawmcp/dawctl `test.fixture` resolves a fixture's relative `asset.import` paths against the server's cwd, not the fixture's folder, so every fixture that imports an asset (`wav_playback_resampled`, `pan_law`, `bus_send_sum`, `pdc_alignment_null`, `clip_overlap_crossfade`) fails in dawmcp unless an `assets` symlink exists | B (T-032 or later) | done (T-032: fixture-relative inputs resolve against the fixture folder) |
 | DW-147 | T-035 | A dawmcp server started by the MCP client keeps the engine it was built with; `scripts/dawmcp.sh` rebuilds only at launch, so an agent can't verify engine changes through `daw_render_offline` without a client restart. Add a `--rebuild`/restart hint to the CTL-025 tooling | B | todo |
 | DW-148 | T-035, T-025, lead | Flake: `PersistenceTests` "MODEL-044: an edit is autosaved after the debounce…" times out (30 s `eventually`, 30 ms debounce) under full-suite load; seen 3× on 2026-11-02. Likely cooperative-pool starvation or a race in `ProjectStore.scheduleDebouncedAutosave`/`serialized`, not plain slowness | M | done (T-042: race in `ProjectStore.autosave()` bookkeeping, fixed; stress tests) |
 | DW-149 | T-025, T-042 | Insert-chain commands `InsertDevice`/`RemoveDevice`/`MoveDevice`/`SetDeviceBypass` (MODEL-005) have no task, and nothing places a master insert (no `RestoreMaster`). Fixtures place inserts through `RestoreTrack`/`RestoreBus` with hand-written IDs; MIX-023's golden uses a bus as the "latent master insert". Could share helpers with T-042's `SetInstrument` | M | todo |
 | DW-150 | T-042 | `validate()` now rejects note velocity 0 (06 clamps to 1…127), so an old `project.json` with a velocity-0 note fails to open with `invalidProject`. If such files ever exist, add an open-time repair 0 → 1 (autobuild decision, see docs/autobuild/DECISIONS.md) | M | todo |
 | DW-151 | T-042 | dawmcp started at worktree setup doesn't know commands the worker adds (`unknownCommandType`); same root as DW-147. Note it in 14's *Agent verification recipe* or let dawmcp restart when its binary is stale | B / lead (14) | todo |
 | DW-152 | T-042 | 07 *Persistence*: say that autosave bookkeeping follows the queue order of file operations and that an edit made during a save still gets its debounced autosave (DW-148 fix) | lead (07) | todo |
+| DW-153 | T-032 | `EmberStudioShell` is a SwiftPM target with no product; the Xcode app compiles the same files through its synchronized group, so they build twice. A library product the app links would change 01's product list (Interfaces) | lead/user (01) | todo |
+| DW-154 | T-032 | UI-051: once the arrange canvas has its `CAMetalLayer`, `WindowSnapshotter` needs the offscreen Metal path (`cacheDisplay` doesn't capture Metal layers) | U (T-033) | todo |
+| DW-155 | T-032 | `project.open` through the app's socket swaps the document but doesn't toast its load report (recovery available, offline assets); File > Open does | U | todo |
+| DW-156 | T-032 | Every project window gets its own engine; with `--engine coreAudio` several windows each open the device. Needs a policy (one live engine for the main window, others offline?) | lead/user | todo |
+| DW-157 | T-032 | Quitting the real app (SIGTERM, parent exit, menu) is verified by hand only; an automated test needs the built app, e.g. a `scripts/test.sh` stage after xcodebuild | B / test | todo |

@@ -13,9 +13,11 @@ import Testing
 struct DawToolsTests {
     @Test("CTL-021: one tool per control method, named daw_<method>, with the params' JSON Schema")
     func toolList() throws {
-        let tools = DawTools.tools
-        #expect(tools.count == ControlMethod.allCases.count)
-        #expect(Set(tools.map(\.name)).count == tools.count)
+        let all = DawTools.tools
+        // CTL-023: plus daw_session_mode, last.
+        #expect(all.count == ControlMethod.allCases.count + 1 && all.last?.name == "daw_session_mode")
+        #expect(Set(all.map(\.name)).count == all.count)
+        let tools = Array(all.dropLast())
         for name in ["daw_project_new", "daw_command_apply", "daw_command_schema", "daw_render_offline", "daw_audio_analyze",
                      "daw_audio_compare", "daw_engine_telemetry", "daw_ui_snapshot", "daw_ui_state", "daw_ui_perform",
                      "daw_test_fixture", "daw_transport_set_loop", "daw_engine_param_info", "daw_undo", "daw_device_list",

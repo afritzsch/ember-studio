@@ -260,6 +260,24 @@ let package = Package(
             resources: [.copy("fixtures"), .copy("references")],
             swiftSettings: cxxInterop
         ),
+
+        // MARK: App shell (12-ui, T-032)
+
+        // UI-003: the app's view models and views as a target of their own, so they are unit-tested
+        // without the app. The Xcode app compiles the same files through its synchronized group
+        // (App/EmberStudio); no product, so 01's product list is unchanged.
+        .target(
+            name: "EmberStudioShell",
+            dependencies: ["DAWModel", "DAWControl"],
+            path: "App/EmberStudio/Shell",
+            swiftSettings: cxxInterop
+        ),
+        .testTarget(
+            name: "EmberStudioShellTests",
+            dependencies: ["EmberStudioShell", "DAWModel", "DAWControl"],
+            path: "App/Tests/EmberStudioShellTests",
+            swiftSettings: cxxInterop
+        ),
     ],
     cxxLanguageStandard: .cxx20
 )

@@ -56,6 +56,16 @@ struct DawmcpServerTests {
         #expect(analysis["firstNonSilentSample"] == -1)
         let (telemetry, _) = try await call("daw_engine_telemetry")
         #expect(telemetry["rtViolations"] == 0)
+        // CTL-031, DW-133: a call with a progressToken gets notifications/progress over stdio.
+        let progress = ProgressBox()
+        await client.onNotification(ProgressNotification.self) { message in progress.add(message.params) }
+        let (_, progressFailed) = try await client.callTool(
+            name: "daw_render_offline", arguments: ["from": 0, "to": 9600, "path": "out/b.wav"],
+            meta: Metadata(progressToken: .string("render-b")))
+        #expect(progressFailed != true)
+        let deadline = ContinuousClock.now + .seconds(5)
+        while progress.values.last?.progress != 1 && ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(progress.values.last?.progress == 1 && progress.values.allSatisfy { $0.progressToken == .string("render-b") })
         let (error, failed) = try await call("daw_command_apply", ["command": ["type": "Nope"]])
         #expect(failed && error["data"]?["dawError"] == "unknownCommandType")
 
@@ -69,11 +79,18 @@ struct DawmcpServerTests {
     }
 }
 
-/// The tool names a client should see, in method order.
+private final class ProgressBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var items: [ProgressNotification.Parameters] = []
+    func add(_ item: ProgressNotification.Parameters) { lock.withLock { items.append(item) } }
+    var values: [ProgressNotification.Parameters] { lock.withLock { items } }
+}
+
+/// The tool names a client should see, in method order, then daw_session_mode (CTL-023).
 enum DawToolsNames {
     static var all: [String] {
         ControlMethod.allCases.map { method in
             "daw_" + method.rawValue.replacing(".", with: "_").replacing(/[A-Z]/) { "_" + $0.output.lowercased() }
-        }
+        } + ["daw_session_mode"]
     }
 }

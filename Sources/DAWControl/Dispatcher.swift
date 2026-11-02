@@ -73,6 +73,9 @@ public final class Dispatcher {
     public private(set) var engine: (any EngineProtocol)?
     /// Called after `project.new`/`project.open` replaced the store (the app swaps its document).
     public var storeDidChange: (@MainActor (ProjectStore) -> Void)?
+    /// Called with the engine events of each drain, after they are logged for `engine.events`. The
+    /// app's toasts (UI-004) read them here, so each engine has one drain.
+    public var engineEventsDidArrive: (@MainActor ([EngineEventRecord]) -> Void)?
 
     /// The `ImportAsset` command `asset.import` performs: `{"type": "ImportAsset", "asset": AssetRef}`
     /// (MODEL-005, not in DAWModel yet).
@@ -92,6 +95,10 @@ public final class Dispatcher {
     private var renderRtViolations: UInt64 = 0
     private var busy = false
     private var waiting: [CheckedContinuation<Void, Never>] = []
+    /// CTL-031: where the running request reports progress (requests run one at a time).
+    private var progressHandler: ControlProgressHandler?
+    /// DW-146: the folder of the `test.fixture` script running now; its input paths resolve there.
+    private var fixtureDirectory: URL?
 
     /// With `store`, controls that project and the engine attached to it (attach mode).
     public init(configuration: Configuration = Configuration(), store: ProjectStore? = nil) {
@@ -103,29 +110,32 @@ public final class Dispatcher {
     // MARK: Entry points
 
     /// One line of newline-delimited JSON in, one line out (nil for a notification). A JSON array
-    /// is a JSON-RPC batch.
-    public func handle(line: String) async -> String? {
+    /// is a JSON-RPC batch. CTL-031: requests with an `id` report progress to `notify` as
+    /// `progress` notifications (`ControlProgress.notification(for:)`), before their response.
+    public func handle(line: String, notify: (@MainActor (RPCRequest) -> Void)? = nil) async -> String? {
         let json: JSONValue
         do {
             json = try JSONValue(parsing: Data(line.utf8))
         } catch {
             return RPCResponse(id: nil, error: ControlError.parseError("not JSON").rpcError).line()
         }
-        guard case .array(let items) = json else { return await handle(json: json)?.line() }
+        guard case .array(let items) = json else { return await handle(json: json, notify: notify)?.line() }
         guard !items.isEmpty else {
             return RPCResponse(id: nil, error: ControlError.invalidRequest("empty batch").rpcError).line()
         }
         var lines: [String] = []
         for item in items {
-            if let response = await handle(json: item) { lines.append(response.line()) }
+            if let response = await handle(json: item, notify: notify) { lines.append(response.line()) }
         }
         return lines.isEmpty ? nil : "[" + lines.joined(separator: ",") + "]"
     }
 
-    /// Runs `request`; nil if it is a notification (no `id`).
-    public func handle(_ request: RPCRequest) async -> RPCResponse? {
+    /// Runs `request`; nil if it is a notification (no `id`). `progress` hears how a long job is
+    /// going (CTL-031).
+    public func handle(_ request: RPCRequest, progress: ControlProgressHandler? = nil) async -> RPCResponse? {
         await acquire()
         defer { release() }
+        progressHandler = progress
         let response: RPCResponse
         do {
             response = RPCResponse(id: request.id, result: try await perform(request.method, request.params))
@@ -136,9 +146,12 @@ public final class Dispatcher {
     }
 
     /// In-process call (dawmcp headless, tests): the result, or the error the wire would carry.
-    public func call(_ method: String, _ params: JSONValue? = nil) async throws(ControlError) -> JSONValue {
+    public func call(
+        _ method: String, _ params: JSONValue? = nil, progress: ControlProgressHandler? = nil
+    ) async throws(ControlError) -> JSONValue {
         await acquire()
         defer { release() }
+        progressHandler = progress
         do {
             return try await perform(method, params)
         } catch {
@@ -146,11 +159,27 @@ public final class Dispatcher {
         }
     }
 
-    public func call(_ method: ControlMethod, _ params: JSONValue? = nil) async throws(ControlError) -> JSONValue {
-        try await call(method.rawValue, params)
+    public func call(
+        _ method: ControlMethod, _ params: JSONValue? = nil, progress: ControlProgressHandler? = nil
+    ) async throws(ControlError) -> JSONValue {
+        try await call(method.rawValue, params, progress: progress)
     }
 
-    private func handle(json: JSONValue) async -> RPCResponse? {
+    /// Attach mode: controls `store` and the engine attached to it from now on (the app's main
+    /// window changed), without detaching the store controlled before, which another window still
+    /// shows. Pending events of the old engine are drained first. nil: no project.
+    public func bind(_ store: ProjectStore?) {
+        drainEvents()
+        self.store = store
+        self.engine = store?.engineSync?.engine
+    }
+
+    /// Drains the engine's events now (the app polls this between requests).
+    public func drainEngineEvents() {
+        drainEvents()
+    }
+
+    private func handle(json: JSONValue, notify: (@MainActor (RPCRequest) -> Void)?) async -> RPCResponse? {
         let request: RPCRequest
         do {
             request = try RPCRequest(validating: json)
@@ -158,7 +187,8 @@ public final class Dispatcher {
             let id = json["id"].flatMap { try? $0.decode(RPCID.self) }
             return RPCResponse(id: id, error: error.rpcError)
         }
-        return await handle(request)
+        guard let notify, let id = request.id else { return await handle(request) }
+        return await handle(request) { notify($0.notification(for: id)) }
     }
 
     /// CTL-031: one request at a time, first come first served, even across awaits.
@@ -171,6 +201,7 @@ public final class Dispatcher {
     }
 
     private func release() {
+        progressHandler = nil
         if waiting.isEmpty {
             busy = false
         } else {
@@ -254,7 +285,7 @@ public final class Dispatcher {
     }
 
     private func projectOpen(_ p: ProjectOpenParams) async throws -> ProjectOpenResult {
-        let store = try await ProjectStore.open(resolve(p.path), recover: p.recover ?? false)
+        let store = try await ProjectStore.open(resolveInput(p.path), recover: p.recover ?? false)
         try install(store, engine: p.engine)
         // DW-097, MODEL-046: relative paths resolve against the folder; a missing or unloadable
         // file leaves its asset offline and its clips render silence.
@@ -448,7 +479,7 @@ public final class Dispatcher {
     private func assetImport(_ p: AssetImportParams) async throws -> AssetImportResult {
         let store = try requireStore()
         let engine = try requireEngine()
-        let url = resolve(p.path)
+        let url = resolveInput(p.path)
         guard FileManager.default.fileExists(atPath: url.path) else {
             throw DAWError.invalidArgument("no file at \(url.path)")
         }
@@ -521,13 +552,38 @@ public final class Dispatcher {
     private func finish(_ job: JobID, _ what: String) async throws -> EngineJobStatus {
         let engine = try requireEngine()
         guard job != 0 else { throw DAWError.engine(code: .internal, detail: "\(what): the engine refused the job") }
-        let status = await engine.waitForJob(job, timeout: configuration.jobTimeout)
+        let status = await waitForJob(job, on: engine, reportingAs: what)
         drainEvents()
         switch status.state {
         case .succeeded: return status
         case .failed: throw Self.modelError(status.error ?? .engine(code: .internal, detail: "\(what) failed"))
         case .unknown: throw DAWError.engine(code: .notFound, detail: "\(what): the engine lost job \(job)")
         case .queued, .running: throw ControlError.timeout("\(what) didn't finish within \(configuration.jobTimeout)")
+        }
+    }
+
+    /// `waitForJob`, reporting the job's progress (CTL-031) in steps of at least 1 %, at most every
+    /// 50 ms, and 1 when it succeeds.
+    private func waitForJob(_ job: JobID, on engine: any EngineProtocol, reportingAs method: String) async -> EngineJobStatus {
+        guard let report = progressHandler else { return await engine.waitForJob(job, timeout: configuration.jobTimeout) }
+        let clock = ContinuousClock()
+        let deadline = clock.now + configuration.jobTimeout
+        var reported: Double?
+        var reportedAt = clock.now
+        while true {
+            let status = engine.pollJob(job)
+            if status.state == .succeeded {
+                if reported != 1 { report(ControlProgress(method: method, progress: 1)) }
+                return status
+            }
+            if status.state.isFinished || status.state == .unknown || clock.now >= deadline { return status }
+            let progress = min(max(status.progress, 0), 1)
+            if reported == nil || (progress >= reported! + 0.01 && clock.now - reportedAt >= .milliseconds(50)) {
+                report(ControlProgress(method: method, progress: progress))
+                reported = progress
+                reportedAt = clock.now
+            }
+            try? await Task.sleep(for: .milliseconds(1))
         }
     }
 
@@ -581,11 +637,15 @@ public final class Dispatcher {
     private func drainEvents() {
         guard let engine else { return }
         let events = store?.engineSync?.pollEvents() ?? engine.pollEvents()
+        guard !events.isEmpty else { return }
+        var records: [EngineEventRecord] = []
         for event in events {
-            eventLog.append(EngineEventRecord(seq: nextEventSeq, event: event))
+            records.append(EngineEventRecord(seq: nextEventSeq, event: event))
             nextEventSeq += 1
         }
+        eventLog += records
         if eventLog.count > Self.eventLogCapacity { eventLog.removeFirst(eventLog.count - Self.eventLogCapacity) }
+        engineEventsDidArrive?(records)
     }
 
     // MARK: device.* (DW-115)
@@ -641,6 +701,9 @@ public final class Dispatcher {
             throw ControlError.invalidParams("no fixture \"\(p.name)\" in [\(searched)]")
         }
         let script = try ControlScript(contentsOf: url)
+        // DW-146: a fixture's relative inputs (`assets/…`) live next to it, wherever the server runs.
+        fixtureDirectory = url.deletingLastPathComponent()
+        defer { fixtureDirectory = nil }
         var ran = 0
         var skipped = 0
         for line in script.lines {
@@ -676,6 +739,14 @@ public final class Dispatcher {
         return expanded.hasPrefix("/")
             ? URL(fileURLWithPath: expanded).standardizedFileURL
             : configuration.workingDirectory.appending(path: expanded).standardizedFileURL
+    }
+
+    /// An input file (`asset.import`, `project.open`): inside a `test.fixture`, relative to the
+    /// fixture's folder (DW-146); otherwise as `resolve`.
+    func resolveInput(_ path: String) -> URL {
+        guard let fixtureDirectory else { return resolve(path) }
+        let expanded = (path as NSString).expandingTildeInPath
+        return expanded.hasPrefix("/") ? resolve(path) : fixtureDirectory.appending(path: expanded).standardizedFileURL
     }
 
     /// Params decode from the request's object; missing params are `{}`.
