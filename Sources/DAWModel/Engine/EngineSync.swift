@@ -50,6 +50,15 @@ public final class EngineSync {
     /// DW-123: the loop last given to the transport.
     private var pushedLoop: LoopRange?
 
+    /// T-056 (IO-033, DW-130): the session rate the engine runs at, as far as this sync knows: the
+    /// project's at attach, then whatever `setSessionSampleRate` set or an `assetsReloaded` event
+    /// reported.
+    public private(set) var engineSampleRate: Double
+    /// DW-130: called when the engine changed its session rate by itself (a device fallback,
+    /// `device.set`) to one the project doesn't have. `ProjectStore` performs `SetSessionSampleRate`
+    /// with it, so the document follows the engine.
+    public var onEngineSampleRateChange: (@MainActor (Double) -> Void)?
+
     /// T-026 (docs/autobuild/DECISIONS.md Q1): an offline export leaves the click out unless it
     /// asks for it. The exporter sets this for the duration of the render: the metronome's `on`
     /// slot is written 0 at once and stays 0 through any edit, then follows
@@ -71,6 +80,7 @@ public final class EngineSync {
         self.debounce = debounce
         self.catalog = catalog ?? ParamCatalog(engine: engine)
         self.project = project
+        engineSampleRate = project.sessionSampleRate
         required = GraphDescriptionBuilder.paramRequirements(project, catalog: self.catalog)
         try allocateParams()
         writeParams()
@@ -85,6 +95,7 @@ public final class EngineSync {
     public func update(to project: Project) {
         guard !isInvalidated else { return }
         self.project = project
+        pushSessionSampleRate()
         required = GraphDescriptionBuilder.paramRequirements(project, catalog: catalog)
         candidate = nil
         do {
@@ -111,7 +122,13 @@ public final class EngineSync {
             guard let file = ProjectFolder.resolve(asset, in: folder),
                 FileManager.default.isReadableFile(atPath: file.path)
             else { return (asset.id, nil) }
-            let job = engine.loadAsset(asset.id, path: file.path)
+            // DW-077 (T-056): IO-034's peak cache lives in the project's disposable Cache/ (MODEL-040).
+            let job = if let folder {
+                engine.loadAsset(asset.id, path: file.path,
+                                 peakCacheDirectory: folder.appendingPathComponent("Cache", isDirectory: true).path)
+            } else {
+                engine.loadAsset(asset.id, path: file.path)
+            }
             return (asset.id, job == 0 ? nil : job)
         }
     }
@@ -161,9 +178,26 @@ public final class EngineSync {
             }
         case .graphRejected:
             lastError = event.error
+        case .assetsReloaded where event.reload != nil:
+            // DW-130 (T-056): the engine's session rate changed. Events can be older than the
+            // engine's state (two changes before a poll), so its rate now is what counts.
+            let rate = engine.telemetry().sampleRate
+            guard rate > 0 else { return }
+            engineSampleRate = rate
+            if rate != project.sessionSampleRate { onEngineSampleRateChange?(rate) }
         default:
             break
         }
+    }
+
+    /// MODEL-005 `SetSessionSampleRate` (T-056): changes the engine's session rate to `rate` (the
+    /// engine stops, rebuilds and re-converts the assets, IO-033). Throws, changing nothing, if
+    /// the engine refuses (a device that can't run it). `ProjectStore.perform` calls it before it
+    /// changes the document.
+    public func setSessionSampleRate(_ rate: Double) throws(DAWError) {
+        guard !isInvalidated, rate != engineSampleRate else { return }
+        try engine.setSessionSampleRate(rate)
+        engineSampleRate = rate
     }
 
     /// Drains the engine's events, handles them and returns them for the caller to act on too
@@ -189,6 +223,18 @@ public final class EngineSync {
     }
 
     // MARK: Private
+
+    /// T-056: a project whose rate the engine doesn't run yet (normally the store has already
+    /// changed it, see `setSessionSampleRate`). A refusal is kept in `lastError`.
+    private func pushSessionSampleRate() {
+        guard project.sessionSampleRate != engineSampleRate else { return }
+        do {
+            try setSessionSampleRate(project.sessionSampleRate)
+        } catch {
+            Self.log.error("session rate \(self.project.sessionSampleRate) refused: \(error)")
+            lastError = error
+        }
+    }
 
     /// DW-123: the transport follows `project.loop` on attach (a project just opened), after
     /// commands and after undo/redo. Only a change is pushed, so a loop set on the transport

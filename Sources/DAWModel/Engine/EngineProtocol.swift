@@ -260,6 +260,9 @@ public struct EngineTelemetry: Hashable, Sendable, Codable {
     /// IO-023: `xruns` by source (DW-068): device overload notifications and render overruns.
     public var processorOverloads: UInt64 = 0
     public var renderOverruns: UInt64 = 0
+    /// IO-033 (T-056): assets of a running session-rate re-conversion still to come; 0 when none
+    /// runs. `play` is refused until then.
+    public var assetsReloadPending: UInt32 = 0
 
     public init() {}
 }
@@ -360,6 +363,8 @@ public struct EngineEvent: Hashable, Sendable, Codable {
     public var error: DAWError?
     /// `deviceChanged` (T-051).
     public var device: DeviceChange?
+    /// `assetsReloaded` (T-056, IO-033): where the session-rate change's re-conversion is.
+    public var reload: AssetsReload? = nil
 
     public init(kind: Kind, subject: UInt64 = 0, job: JobID = 0, count: UInt64 = 0, error: DAWError? = nil,
                 device: DeviceChange? = nil) {
@@ -585,6 +590,8 @@ public protocol EngineProtocol: AnyObject, Sendable {
 
     // Assets (IO-031)
     func loadAsset(_ assetID: ModelID, path: String) -> JobID
+    /// DW-077 (T-056): see the extension at the end of this file (default: no peak cache).
+    func loadAsset(_ assetID: ModelID, path: String, peakCacheDirectory: String) -> JobID
     func pollJob(_ job: JobID) -> EngineJobStatus
     /// IO-034 / UI-011: `level` (an index into `PeakLevel.blockSizes`) of the asset's peaks; nil
     /// until it has loaded. Read-only, non-RT; copies the level, so callers cache it.
@@ -607,6 +614,8 @@ public protocol EngineProtocol: AnyObject, Sendable {
     /// DW-089: plays `event` on the fake device; returns once the engine has reacted (IO-021;
     /// see the `deviceChanged` event). Throws unless the engine runs `DeviceDriverKind.fake`.
     func simulateDeviceEvent(_ event: DeviceEvent) throws(DAWError)
+    /// T-056 (IO-033, MODEL-005): see the extension at the end of this file (default: refused).
+    func setSessionSampleRate(_ rate: Double) throws(DAWError)
 
     // Observability (BRIDGE-004/005)
     func telemetry() -> EngineTelemetry
@@ -653,5 +662,71 @@ extension EngineProtocol {
             all += batch
             if batch.count < 64 { return all }
         }
+    }
+}
+
+// MARK: Session sample rate (T-056: IO-033, MODEL-005 SetSessionSampleRate, DW-044, DW-077, DW-130)
+
+/// IO-033, DW-044 (`daw::AssetsReloadPOD`): an `assetsReloaded` event's place in a session-rate
+/// change. Every change of the engine's session rate (`setSessionSampleRate`, `setDevice`, a
+/// device fallback) raises `started`, one `progress` per asset re-converted from its original file,
+/// and `finished` once the new assets play through a new graph (its `error` set if some failed).
+/// With nothing loaded, `finished` follows `started` at once. Playback stays stopped in between.
+public struct AssetsReload: Hashable, Sendable, Codable {
+    public enum Phase: String, Hashable, Sendable, Codable {
+        case started, progress, finished
+    }
+
+    public var phase: Phase
+    /// The session rate before the change, and after it (what the assets are converted to).
+    public var previousSampleRate: Double
+    public var sampleRate: Double
+    /// Assets converted (or failed) so far, of `total`.
+    public var done: UInt32
+    public var total: UInt32
+    /// Assets that didn't load again; they are dropped and their clips are silent.
+    public var failed: UInt32
+    /// `progress`: the asset just done.
+    public var assetID: ModelID
+
+    public init(phase: Phase, previousSampleRate: Double, sampleRate: Double, done: UInt32 = 0, total: UInt32 = 0,
+                failed: UInt32 = 0, assetID: ModelID = 0) {
+        self.phase = phase
+        self.previousSampleRate = previousSampleRate
+        self.sampleRate = sampleRate
+        self.done = done
+        self.total = total
+        self.failed = failed
+        self.assetID = assetID
+    }
+
+    /// The fraction done, 0…1 (1 when there is nothing to convert).
+    public var fraction: Double { total == 0 ? 1 : Double(done) / Double(total) }
+}
+
+extension EngineEvent {
+    /// An event with `reload` (T-056).
+    public init(kind: Kind, subject: UInt64 = 0, job: JobID = 0, count: UInt64 = 0, error: DAWError? = nil,
+                device: DeviceChange? = nil, reload: AssetsReload?) {
+        self.init(kind: kind, subject: subject, job: job, count: count, error: error, device: device)
+        self.reload = reload
+    }
+}
+
+/// T-056 additions to `EngineProtocol`, with defaults so test doubles compile unchanged.
+extension EngineProtocol {
+    /// MODEL-005 `SetSessionSampleRate`, IO-033: makes `rate` (44.1/48/88.2/96 kHz) the session
+    /// rate. The transport stops, the graph is rebuilt at the rate and every loaded asset is
+    /// re-converted in the background (`assetsReloaded` events). A realtime engine restarts its
+    /// device at it and throws `notImplemented` (changing nothing) if the device can't run it.
+    /// Engines that can't change rate throw `notImplemented`.
+    public func setSessionSampleRate(_ rate: Double) throws(DAWError) {
+        throw .notImplemented("this engine can't change the session sample rate")
+    }
+
+    /// DW-077: `loadAsset`, with IO-034's peaks read from (or written to) the cache file
+    /// `<peakCacheDirectory>/<assetID>.peaks`. Engines without a peak cache just load.
+    public func loadAsset(_ assetID: ModelID, path: String, peakCacheDirectory: String) -> JobID {
+        loadAsset(assetID, path: path)
     }
 }

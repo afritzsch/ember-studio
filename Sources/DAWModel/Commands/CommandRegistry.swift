@@ -54,6 +54,9 @@ public enum CommandRegistry {
         SetSamplerZones.self,
         // T-026: project metronome (TIME-010, outside undo history)
         SetMetronome.self,
+        // T-056: session sample rate (MODEL-005, DW-126; outside undo history)
+        SetSessionSampleRate.self,
+        RestoreSessionSampleRate.self,
     ]
 
     private static let table = Mutex<[String: any Command.Type]>(
