@@ -39,6 +39,7 @@
 | `metronome_click` | M2 | TIME-010, DSP-011 |
 | `sampler_pitch` | M4 | DSP-021 |
 | `midi_locate_no_stuck_notes` | M4 | DSP-003 |
+| `midi_loop_wrap` | M4 | DSP-003 (loop-wrap note-offs, chase at the loop start: DW-101, DW-103) |
 | `record_loopback_alignment` | M5 | REC-003 |
 | `comp_crossfade` | M8 | REC-032 |
 | `vst3_again_gain` | M6 | PLUG-011 |
@@ -81,7 +82,7 @@ Engine tests are Swift Testing suites in `Tests/DAWEngineTests` that call engine
 |---|---|---|
 | TEST-005 | done (T-050) | `FakeDeviceDriverTests` (exact cycle counts in buffer-size blocks, latency published, stop/restart; real-time pacing vs as-fast-as-possible; loopback N frames; scripted rate change / overload / device loss on exact frames via the `io/DeviceNotification.h` seam for T-051; a realtime EngineFacade on `FakeDeviceDriverAdapter`; 0 RT violations) |
 | TEST-001 | done (T-019) | `GoldenRenderTests` (one case per `fixtures/*.jsonl`, run in-process through `ControlScript` + `Dispatcher.handle(_:)`); `GoldenHarnessTests` (directives, script failures). Fixture directives `# @node` (test-only node under a real kind) and `# @expect` (audio.analyze assertions) |
-| TEST-002 | done (T-019) | `GoldenRenderTests` (audio.compare ≤ −100 dBFS, equal length); "referencesMatchFixtures"; `GoldenHarnessTests` "mismatchFails". M1 goldens: `sine_through_graph`, `gain_ramp_smoothing`, `wav_playback_resampled`. M2 (T-025): `pan_law`, `bus_send_sum`, `pdc_alignment_null`, `send_ramps`, each with a `GoldenReferenceTests` check of the reference against the spec numbers; `@expect` takes `"channel"` |
+| TEST-002 | done (T-019) | `GoldenRenderTests` (audio.compare ≤ −100 dBFS, equal length); "referencesMatchFixtures"; `GoldenHarnessTests` "mismatchFails". M1 goldens: `sine_through_graph`, `gain_ramp_smoothing`, `wav_playback_resampled`. M2 (T-025): `pan_law`, `bus_send_sum`, `pdc_alignment_null`, `send_ramps`, each with a `GoldenReferenceTests` check of the reference against the spec numbers; `@expect` takes `"channel"`. M4 (T-044): `sampler_pitch`, `midi_loop_wrap`, `midi_locate_no_stuck_notes` (`M4GoldenReferenceTests`, per-sample oracle from 06) |
 | TEST-003 | done (T-019) | `scripts/update-goldens.sh` (prints the audio.analyze before/after summary; refuses fixtures that fail or miss their `@expect`s); `GoldenHarnessTests` "missingReferenceFails" |
 | TEST-004 | done (T-019) | `TestNodeTests` (SineNode, ImpulseNode, FakeLatencyNode, NaNNode, registration); `AllocatingNodeTests`; registered only through `FacadeOptions::registerNodes` in test builds |
 | TEST-* (rest) | todo | |

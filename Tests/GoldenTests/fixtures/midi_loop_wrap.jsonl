@@ -1,0 +1,30 @@
+# midi_loop_wrap (M4, DSP-003, DW-101, DW-103, T-044): a loop wrap ends the notes that hang over
+# the loop end and chases the notes that span the loop start, through MidiClipPlayer → sampler.
+# render.offline {"loop": true} (T-036) keeps the transport's loop: ticks 0..2400 (60000 frames) of
+# playback from tick 0, wrapping at the loop end.
+# Same instrument as sampler_pitch: MIDI track "Keys" (ID 2), sampler slot 7 with one zone on
+# assets/a440_48k.wav (440 Hz at 0.5), rootKey 69, looping [0, 48000); default params (attack
+# 96 frames, sustain 1, release 9600 frames), velocity 127; × 0.5 through the centre pans.
+# Loop: ticks [100, 1000) = frames [2500, 25000), 22500 frames. Wraps at frames 25000 (frame 424
+# of block 48) and 47500 (frame 396 of block 92), both mid-block. One MIDI clip from tick 0 (ID 4):
+#   Y: A4 (69) ticks [0, 400)    = frames [0, 10000): spans the loop start (tick 100), so every
+#      wrap chases it (DW-103): a note-on at the wrap frame, sounding the remaining 300 ticks
+#      (7500 frames), the voice reading its zone from frame 0 again.
+#   X: A5 (81) ticks [800, 1200) = frames [20000, 30000): hangs over the loop end (tick 1000), so
+#      every wrap ends it with a note-off on the wrap frame (it releases over 9600 frames while Y
+#      starts again); it is played again from tick 800 on the next pass.
+# So the voices are: Y [0, 10000), X [20000, 25000), Y [25000, 32500), X [42500, 47500),
+# Y [47500, 55000), each with its 9600-frame release after it. M4GoldenTests checks every sample.
+# @expect {"field": "frames", "value": 60000}
+# @expect {"field": "firstNonSilentSample", "value": 1}
+# @expect {"field": "spectrumPeakHz", "value": 440, "tolerance": 1, "range": {"start": 0, "end": 10000}}
+# @expect {"field": "spectrumPeakHz", "value": 880, "tolerance": 1, "range": {"start": 42500, "end": 47500}}
+# @expect {"field": "peakDb", "value": -240, "range": {"start": 19600, "end": 20000}}
+project.new {"name": "midi_loop_wrap", "sampleRate": 48000}
+command.apply {"command": {"type": "AddTrack", "name": "Keys", "kind": "midi"}}
+asset.import {"path": "assets/a440_48k.wav"}
+command.apply {"command": {"type": "AddClip", "trackID": 2, "start": 0, "length": 2400}}
+command.apply {"command": {"type": "AddNotes", "clipID": 4, "notes": [{"start": 0, "length": 400, "pitch": 69, "velocity": 127}, {"start": 800, "length": 400, "pitch": 81, "velocity": 127}]}}
+command.apply {"command": {"type": "SetInstrument", "trackID": 2, "device": {"format": "builtin", "node": "sampler"}, "zones": [{"assetID": 3, "rootKey": 69, "loopStart": 0, "loopEnd": 48000}]}}
+transport.setLoop {"enabled": true, "start": 100, "end": 1000}
+render.offline {"from": 0, "to": 2400, "path": "midi_loop_wrap.wav", "tail": false, "loop": true}

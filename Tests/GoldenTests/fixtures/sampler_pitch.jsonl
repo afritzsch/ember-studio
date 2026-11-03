@@ -1,0 +1,28 @@
+# sampler_pitch (M4, DSP-021, DW-139, T-044): the sampler pitches a zone by resampling at
+# 2^((note − root + tune)/12). A zone rooted at A4 (69) plays an A4 sine; A5 (81) plays it an
+# octave up, at 2× the frequency.
+# MIDI track "Keys" (ID 2) with a built-in sampler (slot 7): one zone on assets/a440_48k.wav
+# (440 Hz at 0.5, 48000 frames = 440 whole periods, gen_m4_assets.py), rootKey 69, looping the
+# whole asset ([0, 48000)) so a held note sustains. Default sampler params (06 "Sampler
+# semantics"): attack 2 ms (96 frames), sustain 1, release 0.2 s (9600 frames), velocity
+# sensitivity 1; velocity 127 gives gain 1. Centre pans on the track and the master give × 0.5.
+# One MIDI clip from tick 0 (ID 4) with two notes (IDs 5, 6), at 120 bpm (25 frames per tick):
+#   A4 (69) ticks [0, 480)    = frames [0, 12000):     rate 1, 440 Hz; released until 21600
+#   A5 (81) ticks [960, 1440) = frames [24000, 36000): rate 2 (exactly: integer source frames,
+#                                                        no interpolation), 880 Hz; released until 45600
+# Between and after the releases the render is silent. M4GoldenTests checks every sample.
+# @expect {"field": "frames", "value": 48000}
+# @expect {"field": "firstNonSilentSample", "value": 1}
+# @expect {"field": "spectrumPeakHz", "value": 440, "tolerance": 1, "range": {"start": 0, "end": 12000}}
+# @expect {"field": "spectrumPeakHz", "value": 880, "tolerance": 1, "range": {"start": 24000, "end": 36000}}
+# @expect {"field": "rmsDb", "value": -15.051, "tolerance": 0.001, "range": {"start": 1200, "end": 12000}}
+# @expect {"field": "rmsDb", "value": -15.051, "tolerance": 0.001, "range": {"start": 25200, "end": 36000}}
+# @expect {"field": "peakDb", "value": -240, "range": {"start": 21600, "end": 24000}}
+# @expect {"field": "peakDb", "value": -240, "range": {"start": 45600, "end": 48000}}
+project.new {"name": "sampler_pitch", "sampleRate": 48000}
+command.apply {"command": {"type": "AddTrack", "name": "Keys", "kind": "midi"}}
+asset.import {"path": "assets/a440_48k.wav"}
+command.apply {"command": {"type": "AddClip", "trackID": 2, "start": 0, "length": 1920}}
+command.apply {"command": {"type": "AddNotes", "clipID": 4, "notes": [{"start": 0, "length": 480, "pitch": 69, "velocity": 127}, {"start": 960, "length": 480, "pitch": 81, "velocity": 127}]}}
+command.apply {"command": {"type": "SetInstrument", "trackID": 2, "device": {"format": "builtin", "node": "sampler"}, "zones": [{"assetID": 3, "rootKey": 69, "loopStart": 0, "loopEnd": 48000}]}}
+render.offline {"from": 0, "to": 1920, "path": "sampler_pitch.wav", "tail": false}
