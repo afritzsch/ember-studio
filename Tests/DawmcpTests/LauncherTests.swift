@@ -39,8 +39,8 @@ private func run(_ executable: String, _ arguments: [String], in directory: URL,
     try process.run()
     let stdout = out.fileHandleForReading.readDataToEndOfFile()
     let stderr = err.fileHandleForReading.readDataToEndOfFile()
-    process.waitUntilExit()
-    return Run(status: process.terminationStatus, stdout: String(decoding: stdout, as: UTF8.self),
+    let exited = waitForExit(process)
+    return Run(status: exited ? process.terminationStatus : -1, stdout: String(decoding: stdout, as: UTF8.self),
                stderr: String(decoding: stderr, as: UTF8.self))
 }
 

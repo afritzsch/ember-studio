@@ -56,7 +56,7 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 | T-020 | E | Full channel strip: mute (slot; solo resolved by the model, T-016), phase, meters; sends pre/post | MIX-005, MIX-007, DSP-010 | T-013 | done |
 | T-021 | E | PDC: path latency, delay insertion, delay-line carry-over, source pre-roll | MIX-020..025 | T-012 | done |
 | T-022 | M | Routing commands (tracks, buses, sends, outputs) + cycle rejection + validation | MODEL-005 (routing subset), MODEL-030..032 | T-016 | done |
-| T-023 | E | Sidechain edges and ports | MIX-008 | T-021 | wip(t-023-sidechain) |
+| T-023 | E | Sidechain edges and ports | MIX-008 | T-021 | done |
 | T-024 | D | Metronome node | TIME-010, DSP-011 | T-008 | done |
 | T-025 | E | M2 goldens: pan law, bus/send sum, PDC null | TEST (M2 set) | T-020, T-021, T-022, T-019 (harness) | done |
 | T-026 | M+B | Project metronome: `Project.metronome {enabled, level, accent}` (persisted), `SetMetronome` command, GraphDescriptionBuilder emits one metronome node straight into the master (not soloed/muted with tracks; toggles are slot writes), `transport.setMetronome` + dawmcp tool, facade `paramInfoJSON` publishes `Metronome::kParamInfo` (and `GainNode`). Open for the user (T-024 Qs): export includes the click? (recommended: no, unless `includeMetronome: true`); toggle undoable? (recommended: a command that doesn't enter undo history). Toolbar button: T-034 | TIME-010 (project part), DW-160 | T-024 | ready |
@@ -109,7 +109,7 @@ DSP effects (T-070..073) depend only on the Node API and can be **pulled forward
 | Task | Lane | Title | Requirements | Depends on | Status |
 |---|---|---|---|---|---|
 | T-070 | D | EQ | DSP-030, 040, 041 | T-004, T-005 | ready |
-| T-071 | D | Compressor (+ sidechain) | DSP-031, 040, 041 | T-005, T-023 | todo |
+| T-071 | D | Compressor (+ sidechain) | DSP-031, 040, 041 | T-005, T-023 | ready |
 | T-072 | D | Delay (tempo sync) | DSP-032, 040, 041 | T-008 | ready |
 | T-073 | D | Reverb (FDN, deterministic) | DSP-033, 040, 041 | T-004, T-005 | ready |
 | T-074 | E+M | Automation lanes model + AutomationPlayer + plugin param path | AUTO-001..005, 008..010 | T-030, T-061/T-062 (for AUTO-009) | todo |
@@ -362,3 +362,7 @@ Recorded by the lead from worker reports.
 | DW-165 | T-033 | Keyboard: ⌫ delete and ⌘E split at the playhead aren't bound yet; bind them to `ArrangeModel.deleteSelection` / `splitSelection(at:)` (controls `edit.delete` / `edit.split`) | U (T-034) | todo |
 | DW-166 | T-033 | UI-010's 60 fps with 1,000 clips on M1 still needs an Instruments run on the real app (only a debug smoke test was measured) | U / user | todo |
 | DW-167 | T-033 | Trimming with snap on can shrink a clip to 1 tick; a minimum of one grid step may feel better (UX choice) | U | todo |
+| DW-158 | T-023 | Golden `@node` doesn't know the `sidechainMix` test node yet (`TestNodeType::sidechainMix` is in GoldenEngineSupport.h); adding it lets a fixture prove MIX-008 through the model before T-071 | E (T-071 / GoldenTests) | todo |
+| DW-159 | T-023 | PLUG-014 says "expose sidechain port 1" while MIX-004 says sidechain edges use `toPort` 0: clarify that "1" is the plugin's aux input bus, fed from the node's NodeIO sidechain (graph `toPort` 0) | spec (lead) | todo |
+| DW-168 | lead (phase 2) | `swift test` hung 4 h+ in AttachTests.dawctlAttach: `waitUntilExit()` after `await`s in async tests waits on a run loop that never gets the exit event | B / test | done (T-023: `waitForExit` polls `isRunning`; no `waitUntilExit()` left in DAWControlTests/DawmcpTests) |
+| DW-169 | lead (phase 2) | EACCES flakes in DAWControlTests ($TMPDIR dirs created without x bit): ControlSocketServer narrowed the process-wide umask while binding; app autosave could hit it too | B | done (T-023: no umask; chmod 0600 + lstat check before listen) |

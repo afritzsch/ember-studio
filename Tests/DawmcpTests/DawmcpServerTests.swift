@@ -72,8 +72,7 @@ struct DawmcpServerTests {
         // Closing stdin ends the session; the server exits cleanly.
         await client.disconnect()
         try toServer.fileHandleForWriting.close()
-        process.waitUntilExit()
-        #expect(process.terminationStatus == 0)
+        #expect(waitForExit(process) && process.terminationStatus == 0)
         let log = String(decoding: stderr.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
         #expect(!log.contains("rror"), "\(log)")
     }

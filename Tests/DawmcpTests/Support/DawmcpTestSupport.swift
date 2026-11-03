@@ -68,3 +68,30 @@ extension DawTools {
         return try result.json
     }
 }
+
+// MARK: Child processes
+
+/// Waits for a child process to exit by polling `isRunning`, as `AttachedApp.terminate` does.
+/// Use this, not `Process.waitUntilExit()`, in tests. An async test can launch the child on one
+/// cooperative thread and wait from another after an `await`. `waitUntilExit()` then spins the
+/// waiting thread's run loop for an exit event that never comes there, and blocks forever (a 4 h
+/// hang in AttachTests even though the child had exited and been reaped). On timeout this records
+/// an issue, SIGKILLs the child, polls a little longer, and returns false. Read
+/// `terminationStatus` only after a true result: reading it while the child runs raises.
+@discardableResult
+func waitForExit(_ process: Process, timeout: Duration = .seconds(10),
+                 sourceLocation: SourceLocation = #_sourceLocation) -> Bool {
+    let clock = ContinuousClock()
+    let deadline = clock.now + timeout
+    while process.isRunning {
+        guard clock.now < deadline else {
+            Issue.record("pid \(process.processIdentifier) still running after \(timeout); SIGKILL", sourceLocation: sourceLocation)
+            kill(process.processIdentifier, SIGKILL)
+            let killed = clock.now + .seconds(5)
+            while process.isRunning && clock.now < killed { usleep(10_000) }
+            return false
+        }
+        usleep(10_000)
+    }
+    return true
+}

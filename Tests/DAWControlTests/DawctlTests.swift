@@ -35,8 +35,8 @@ func dawctl(_ arguments: [String], stdin: String? = nil, in directory: URL) thro
     // Read before waiting, so a full pipe can't stall the child.
     let stdout = out.fileHandleForReading.readDataToEndOfFile()
     let stderr = err.fileHandleForReading.readDataToEndOfFile()
-    process.waitUntilExit()
-    return Run(status: process.terminationStatus, stdout: String(decoding: stdout, as: UTF8.self),
+    let exited = waitForExit(process)
+    return Run(status: exited ? process.terminationStatus : -1, stdout: String(decoding: stdout, as: UTF8.self),
                stderr: String(decoding: stderr, as: UTF8.self))
 }
 

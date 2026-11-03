@@ -4,6 +4,7 @@
 // construct them directly (TestNodeChecks.cpp). All process() bodies are DAW_RT and checked by
 // -Wfunction-effects, except AllocatingNode's deliberate violation.
 
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <vector>
@@ -80,6 +81,27 @@ class NaNNode final : public Node {
 public:
     void prepare(const PrepareInfo&) override {}
     void process(ProcessContext& ctx, NodeIO& io) DAW_RT override;
+};
+
+// MIX-008 (T-023): a node that reads its sidechain input, standing in for the built-in
+// compressor (DSP-031, T-071) until it exists. out = in + level · sidechain per channel; channels
+// the sidechain lacks, and every channel when the sidechain is empty (nothing routed, ENG-003),
+// pass the main input alone (an empty main input counts as silence). It counts the blocks it ran
+// and those with a routed (non-empty) sidechain, so a check can tell an empty port from a silent
+// one; the counters are single-writer atomics (audio thread), readable from any thread.
+class SidechainMixNode final : public Node {
+public:
+    explicit SidechainMixNode(float level) : level_(level) {}
+    void prepare(const PrepareInfo&) override {}
+    void process(ProcessContext& ctx, NodeIO& io) DAW_RT override;
+
+    uint64_t blocks() const { return blocks_.load(std::memory_order_relaxed); }
+    uint64_t routedBlocks() const { return routed_.load(std::memory_order_relaxed); }
+
+private:
+    float level_;
+    std::atomic<uint64_t> blocks_{0};
+    std::atomic<uint64_t> routed_{0};
 };
 
 // An unprepared node for `spec` (its kind is not used here).

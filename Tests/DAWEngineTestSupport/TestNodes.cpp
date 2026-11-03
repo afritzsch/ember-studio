@@ -100,6 +100,24 @@ void NaNNode::process(ProcessContext&, NodeIO& io) DAW_RT {
     fillAll(io.audioOut, std::numeric_limits<float>::quiet_NaN());
 }
 
+// MARK: SidechainMixNode
+
+void SidechainMixNode::process(ProcessContext&, NodeIO& io) DAW_RT {
+    const AudioBufferView& out = io.audioOut;
+    const AudioBufferView& in = io.audioIn;
+    const AudioBufferView& sc = io.sidechain;
+    for (uint32_t c = 0; c < out.numChannels; ++c) {
+        float* dst = out.channels[c];
+        const float* main = c < in.numChannels ? in.channels[c] : nullptr;
+        const float* key = c < sc.numChannels ? sc.channels[c] : nullptr;
+        for (uint32_t f = 0; f < out.numFrames; ++f)
+            dst[f] = (main ? main[f] : 0.0f) + (key ? level_ * key[f] : 0.0f);
+    }
+    // Single writer (the audio thread): load + store, no read-modify-write needed.
+    blocks_.store(blocks_.load(std::memory_order_relaxed) + 1, std::memory_order_relaxed);
+    if (!sc.empty()) routed_.store(routed_.load(std::memory_order_relaxed) + 1, std::memory_order_relaxed);
+}
+
 // MARK: Registration
 
 std::unique_ptr<Node> makeTestNode(const TestNodeSpec& spec) {
@@ -109,6 +127,7 @@ std::unique_ptr<Node> makeTestNode(const TestNodeSpec& spec) {
     case TestNodeType::fakeLatency: return std::make_unique<FakeLatencyNode>(spec.samples);
     case TestNodeType::allocating: return std::make_unique<AllocatingNode>();
     case TestNodeType::nan: return std::make_unique<NaNNode>();
+    case TestNodeType::sidechainMix: return std::make_unique<SidechainMixNode>(spec.level);
     }
     return nullptr;
 }

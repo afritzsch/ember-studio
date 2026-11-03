@@ -6,8 +6,8 @@ import os
 /// (CTL-001), one response line per request, `progress` notifications before the response of a
 /// long request (CTL-031). The app runs one in attach mode; `dawctl serve` runs one headless.
 ///
-/// - Local only: a Unix socket, created 0600 (umask while binding, then chmod), and every peer is
-///   checked with `getpeereid` to be this user.
+/// - Local only: a Unix socket made 0600 (chmod after bind, checked before listen; the process
+///   umask is never touched), and every peer is checked with `getpeereid` to be this user.
 /// - Stale sockets are unlinked on start (CTL-032); a path where another server still answers, or
 ///   that isn't a socket, is refused instead.
 /// - Requests are handled on the main actor (CTL-031), in order per connection; the `Dispatcher`
@@ -117,19 +117,32 @@ final class SocketListener: @unchecked Sendable {
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else { throw posixFailure("cannot create a socket for", path) }
         _ = fcntl(fd, F_SETFD, FD_CLOEXEC)
-        // CTL-030: 0600 from the moment the file exists.
-        let mask = umask(0o177)
+        // CTL-030: 0600 before anyone can connect. No umask here: it is process-wide, so a directory
+        // another thread created while it was narrowed came out without its x bit (EACCES flakes in
+        // parallel tests; app autosave could hit it too). Instead: bind with the caller's umask,
+        // chmod, and lstat-check that the path is our 0600 socket before listen(). connect()
+        // fails until listen(), so the socket is never reachable with wider permissions.
         let bound = withUnsafePointer(to: &address) {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
         }
-        umask(mask)
         guard bound == 0 else {
             let error = posixFailure("cannot bind", path)
             Darwin.close(fd)
             throw error
         }
         var info = stat()
-        guard chmod(path, 0o600) == 0, lstat(path, &info) == 0, listen(fd, 16) == 0 else {
+        guard chmod(path, 0o600) == 0, lstat(path, &info) == 0 else {
+            let error = posixFailure("cannot restrict", path)
+            Darwin.close(fd)
+            unlink(path)
+            throw error
+        }
+        guard info.st_mode & S_IFMT == S_IFSOCK, info.st_mode & 0o777 == 0o600, info.st_uid == getuid() else {
+            // Not the socket we bound (replaced in between): leave the path alone.
+            Darwin.close(fd)
+            throw .attachFailed("\(path) isn't this user's 0600 socket after bind; not listening")
+        }
+        guard listen(fd, 16) == 0 else {
             let error = posixFailure("cannot listen at", path)
             Darwin.close(fd)
             unlink(path)
