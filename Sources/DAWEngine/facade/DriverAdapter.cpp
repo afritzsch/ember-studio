@@ -33,6 +33,7 @@ public:
     }
     bool running() const override { return driver_ && driver_->running(); }
     RunningConfig current() const override { return driver_ ? driver_->current() : RunningConfig{}; }
+    DeviceLatency latency() const override { return driver_ && driver_->running() ? driver_->latency() : DeviceLatency{}; }
 
     bool deviceAlive(AudioDeviceRef device) const override { return CoreAudioDevice(device).isAlive(); }
     AudioDeviceRef defaultOutputDevice() const override {
@@ -163,6 +164,10 @@ std::vector<DeviceInfoPOD> FakeDeviceDriverAdapter::devices() const {
 } // namespace daw
 
 namespace daw {
+
+DeviceLatency FakeDeviceDriverAdapter::latency() const {
+    return owned_ && owned_->running() ? owned_->latency() : DeviceLatency{};
+}
 
 RunningConfig FakeDeviceDriverAdapter::current() const {
     return owned_ && owned_->running() ? owned_->current() : RunningConfig{};

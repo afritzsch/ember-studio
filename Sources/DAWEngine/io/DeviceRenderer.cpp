@@ -7,6 +7,7 @@
 #include "core/Node.h"
 #include "core/RenderTarget.h"
 #include "core/Telemetry.h"
+#include "io/InputCapture.h"
 
 namespace daw {
 
@@ -38,6 +39,8 @@ void DeviceRenderer::renderCycle(float* const* output, uint32_t outputChannels,
         for (uint32_t c = 0; c < inCh; ++c) inBlock[c] = input[c] + offset;
         RenderTarget target{AudioBufferView{outBlock, outCh, n}, AudioBufferView{inBlock, inCh, n}};
         engine_.render(target, n);
+        // REC-001: the recorder copies the block's input into its FIFOs.
+        if (capture_ != nullptr) capture_->captureBlock(engine_.transport(), target.input, n);
         offset += n;
         ++blocks;
     }

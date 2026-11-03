@@ -87,9 +87,9 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 |---|---|---|---|---|---|
 | T-050 | E | FakeDeviceDriver (loopback, scripted events) | TEST-005 | T-011 | done |
 | T-051 | E | DeviceMonitor, hot-swap sequence, xrun detection, EngineEvents | IO-020..023 | T-050 | done |
-| T-052 | E | Audio recording: FIFOs, disk writer, latency comp, finalize, punch | REC-001..005 | T-050, T-009 | wip(t-052-audio-recording) |
+| T-052 | E | Audio recording: FIFOs, disk writer, latency comp, finalize, punch | REC-001..005 | T-050, T-009 | done |
 | T-053 | E | CoreMIDI input + MIDI recording | REC-010..012 | T-040 | ready |
-| T-054 | E | Input monitoring modes | REC-020..022 | T-052 | todo |
+| T-054 | E | Input monitoring modes | REC-020..022 | T-052 | ready |
 | T-055 | U | Audio preferences, device toasts, arm/monitor buttons | UI-040, UI-004 | T-051, T-034 | wip(t-055-audio-prefs) |
 | T-056 | E+M | Session sample-rate change (re-convert assets, re-prepare) | IO-033, MODEL-005 (`SetSessionSampleRate`) | T-051 | done |
 
@@ -110,7 +110,7 @@ DSP effects (T-070..073) depend only on the Node API and can be **pulled forward
 |---|---|---|---|---|---|
 | T-070 | D | EQ | DSP-030, 040, 041 | T-004, T-005 | ready |
 | T-071 | D | Compressor (+ sidechain) | DSP-031, 040, 041 | T-005, T-023 | done |
-| T-072 | D | Delay (tempo sync) | DSP-032, 040, 041 | T-008 | wip(t-072-delay) |
+| T-072 | D | Delay (tempo sync) | DSP-032, 040, 041 | T-008 | done |
 | T-073 | D | Reverb (FDN, deterministic) | DSP-033, 040, 041 | T-004, T-005 | done |
 | T-074 | E+M | Automation lanes model + AutomationPlayer + plugin param path | AUTO-001..005, 008..010 | T-030, T-061/T-062 (for AUTO-009) | todo |
 | T-075 | U+M | Automation recording (touch/latch/write) + lane UI | AUTO-006, 007, UI-015 | T-074, T-033 | todo |
@@ -120,7 +120,7 @@ DSP effects (T-070..073) depend only on the Node API and can be **pulled forward
 ### M8 — Comping, export, hardening
 | Task | Lane | Title | Requirements | Depends on | Status |
 |---|---|---|---|---|---|
-| T-080 | E+M | Loop recording takes, TakeFolder, comp model, flattening | REC-030..034 | T-052, T-035 | todo |
+| T-080 | E+M | Loop recording takes, TakeFolder, comp model, flattening | REC-030..034 | T-052, T-035 | ready |
 | T-081 | U | Take folder / comp editing UI | UI-016 | T-080, T-033 | todo |
 | T-082 | U | Export dialog | UI-042 | T-009, T-032 | ready |
 | T-083 | U | Crash recovery dialog | UI-043 | T-031, T-064 | todo |
@@ -292,7 +292,7 @@ Recorded by the lead from worker reports.
 | DW-093 | T-020 | Goldens: bus_send_sum with pre- and post-fader sends; strip mute ramp; phase-invert null; gain-node level step; muted track with sends goes silent and fades back | E (T-019 / T-025) | done (T-025 `bus_send_sum`, `send_ramps`; strip mute ramp/phase null covered by `ChannelStripTests`) |
 | DW-094 | T-016 | Real `SetParam` command needs a param-target design (likely shared with 11's `ParamTarget`); MODEL-032 must check model IDs ≤ `GraphNodeID.maxModelID` (2^56−1), since NodeIDs carry a role in the top 8 bits | M (T-022) | done (T-022: `ParamTarget` in `DAWModel/Project/ParamTarget.swift`, strip/sendLevel/device; spec 11 can adopt it) |
 | DW-095 | T-016 | Control layer: `EngineSync.flush()` before offline render/export; `EngineSync.pollEvents()` as the single engine-event drain (so `assetLoaded` reaches DW-072 bumps); map engine NodeIDs back with `GraphNodeID.owner(of:)`; master limiter is `runtime.masterLimiterParam(master.id)` | B/M (T-017/T-018) | done (T-017; master limiter unused until a control method sets it) |
-| DW-096 | T-016 | eq, compressor, reverb, delay, sampler, midiClipPlayer have no engine factories yet, so projects using them (fixture `routing`) are rejected by the real engine. Run `routing` through EngineClient once registered | D/E (T-040, T-041, T-070..073) | done for MIDI (T-044: `MidiTempoEngineTests` runs `midi_tempo` through EngineClient); `routing` still needs eq/delay (T-070, T-072; reverb registered by T-073) |
+| DW-096 | T-016 | eq, compressor, reverb, delay, sampler, midiClipPlayer have no engine factories yet, so projects using them (fixture `routing`) are rejected by the real engine. Run `routing` through EngineClient once registered | D/E (T-040, T-041, T-070..073) | done for MIDI (T-044: `MidiTempoEngineTests` runs `midi_tempo` through EngineClient); `routing` still needs eq/delay (T-070, T-072; reverb registered by T-073); T-072: delay registered (the `routing` fixture now only waits for `eq`, T-070) |
 | DW-097 | T-016 | Nothing in the model calls `loadAsset` for a project's assets on open/import yet | M (T-031 / ImportAsset) | done (T-031: `ProjectStore.loadAssets()` / `EngineSync.loadAssets(_:folder:)` on open) |
 | DW-098 | T-016 | Bypassed devices are left out of the graph until host bypass (PLUG-018): bypass is a rebuild and the device loses state. Optional: `ProjectChange` diff could skip entities with unchanged storage (main per-step cost on huge projects) | P (T-064), M (optional) | todo |
 | DW-099 | T-040 | MIDI routing in RenderGraph/GraphBuilder: MIDI edges carry no data (player `midiOut` capacity 0, instrument `midiIn` empty). Needs per-step MIDI storage of fixed capacity that never shrinks between blocks (no-hanging-notes guarantee) and MIDI edge delay for PDC (05 "PDC semantics") | E (T-045) | done (T-045: pulled MIDI storage of fixed capacity per graph, k-way stable merge, `MidiDelayLine` PDC with carry-over; 05 "MIDI routing") |
@@ -315,7 +315,7 @@ Recorded by the lead from worker reports.
 | DW-116 | T-051 | Add `io/DeviceMonitor.h` (`DeviceMonitorHost`, `DeviceSwap`) to the 04 Interfaces block, with DW-069 (Interfaces change → user) | spec (user/lead) | todo |
 | DW-117 | T-051 | `GraphCompiler` fixes its sample rate at construction, so a session-rate change replaces the compiler and maps tickets via `ticketBase`; `GraphCompiler::setSampleRate` would be simpler | E (small) | todo |
 | DW-118 | T-051 | After a session-rate change, loaded assets keep their load rate; the facade posts `assetsReloaded` with `unsupported`. The facade doesn't keep asset paths, so T-056 must (see DW-077) | E+M (T-056) | done (T-056: facade `AssetReloader` keeps paths; placeholder removed) |
-| DW-119 | T-051 | IO-021 (2) "finalize recordings" only disarms recording (`DeviceHost::finalizeRecordings`, `Impl::stopForDeviceChange`) | REC (09) | todo |
+| DW-119 | T-051 | IO-021 (2) "finalize recordings" only disarms recording (`DeviceHost::finalizeRecordings`, `Impl::stopForDeviceChange`) | REC (09) | done (T-052) |
 | DW-120 | T-051 | A device lost during an export: notifications are dropped while the export pauses the device; a failed restart afterwards reports `startFailed` and recovers on the next notification, with no fallback to the default | E (small) | todo |
 | DW-121 | T-051 | FakeDeviceDriver `start()` with an explicit rate doesn't move the fake device's nominal rate (CoreAudioDriver's does), so fake runs never produce the "rate set back" notification | E (small) | todo |
 | DW-122 | T-051 | Document `DAW_DEVICE_EVENT_TESTS=1` in 14 next to `DAW_DEVICE_INPUT_TESTS` / `DAW_SKIP_DEVICE_TESTS` | lead | todo |
@@ -356,7 +356,7 @@ Recorded by the lead from worker reports.
 | DW-157 | T-032 | Quitting the real app (SIGTERM, parent exit, menu) is verified by hand only; an automated test needs the built app, e.g. a `scripts/test.sh` stage after xcodebuild | B / test | todo |
 | DW-160 | T-024 | Project-level metronome wiring (model setting, command, graph node into master, `transport.setMetronome`, paramInfoJSON for `Metronome`/`GainNode` slots); proposal in T-024's report | M+B (T-026) | done (T-026) |
 | DW-161 | T-024 | Optional: add `NodeKind::metronome` to GraphBuilder's `resetsOnLocate` for consistency (the node already self-detects locates) | E | todo |
-| DW-162 | T-036 | TIME-008 "effects keep their tails" with a real tailed effect (delay feedback / reverb) once T-072/T-073 exist; today `locate_reset` uses a SineNode insert's state | D (T-072/T-073 or T-077) | todo; T-073: `ReverbTests` checks a locate keeps a real reverb tail through the Engine (unit level); the `locate_reset` golden could switch to the reverb (T-077) |
+| DW-162 | T-036 | TIME-008 "effects keep their tails" with a real tailed effect (delay feedback / reverb) once T-072/T-073 exist; today `locate_reset` uses a SineNode insert's state | D (T-072/T-073 or T-077) | done (T-072); T-073: `ReverbTests` checks a locate keeps a real reverb tail through the Engine (unit level); the `locate_reset` golden could switch to the reverb (T-077); T-072: `DelayTests` through the Engine: a locate keeps a real delay tail |
 | DW-163 | T-036 | dawmcp over stdio answered a pipelined `tools/call` (render.offline) before an earlier `daw_test_fixture` call finished, so the render failed; one at a time works. A pipelined script over dawmcp would race | B | todo |
 | DW-164 | T-036 | Fixtures can't locate mid-render (only at a render's start). If a golden ever needs it, add a scripted transport event to render.offline | E/B | todo |
 | DW-165 | T-033 | Keyboard: ⌫ delete and ⌘E split at the playhead aren't bound yet; bind them to `ArrangeModel.deleteSelection` / `splitSelection(at:)` (controls `edit.delete` / `edit.split`) | U (T-034) | done (T-034) |
@@ -379,7 +379,7 @@ Recorded by the lead from worker reports.
 | DW-180 | T-034 | Toolbar tempo/signature are display only; editing them (`SetTempoEvent` / `SetTimeSignature`) from the toolbar is a possible follow-up | U | todo |
 | DW-181 | T-034 | The NSEvent → `KeyMonitor` path has no automated test (posting key events needs Accessibility); manual check in the app: Space, R, L, ⌘E, ⌫, ⌘T | U / user | todo |
 | DW-182 | T-056 | Golden for a session-rate change (CONV §5.4 gap; checks live in `SessionRateTests`/`SessionRateControlTests`); `GoldenEngine.swift` doesn't map the `reload` event or `assetsReloadPending` | D/test | todo |
-| DW-183 | T-056 | App has no UI to change the session rate or show re-conversion progress | U (T-055 or later) | todo |
+| DW-183 | T-056 | App has no UI to change the session rate or show re-conversion progress | U (T-055 or later) | done (T-055) |
 | DW-184 | T-056 | Control: a method or `wait` flag on `command.apply` that blocks until re-conversion finishes, with CTL-031 progress (today clients poll `engine.telemetry.assetsReloadPending`) | B | todo |
 | DW-185 | T-056 | `RestoreSessionSampleRate` JSON requires `clipOffsets`/`zoneLoops` even when empty (hand-written scripts must pass `[]`) | M (minor) | todo |
 | DW-186 | T-051/T-056 | If the latest graph description is rejected during a rate change, the old-rate graph keeps rendering until the next accepted description | E | todo |
@@ -388,3 +388,12 @@ Recorded by the lead from worker reports.
 | DW-189 | T-043 | Headless `engine.previewNote` in dawctl/dawmcp so agents can check instruments without the app (today only `ui.perform pianoRoll.key.<n>` in attach mode) | B | todo |
 | DW-190 | T-043 | A held preview note is cut and retriggered when its player is re-created (graph rebuild while a key is held); no hang | E (low) | todo |
 | DW-191 | T-043 | Piano roll 60 fps check with Instruments on a dense clip; per-asset peak refresh during a re-conversion pass (today waveforms update once at `finished`) | U | todo |
+| DW-192 | T-055 | Telemetry has no input latency (IO-005 `inputLatency`) and no buffer size the device actually runs: the audio panel shows output latency only and the last requested buffer. Add `TelemetryPOD.inputLatency`/`bufferFrames` (additive 08 delta) | E+B | todo |
+| DW-193 | T-055 | `AudioDeviceInfo` doesn't list a device's supported rates / buffer range, so the panel offers every IO-003 value and the engine refuses what the device can't run. Expose `DeviceCaps.rates` + buffer range | E+B | todo |
+| DW-194 | T-055 | `Dispatcher.deviceSet` builds the next config from `engine.mode` (the creation config), so `device.set` after a buffer change resets the buffer. The facade could report its current `DriverConfigPOD` | B | todo |
+| DW-195 | T-055 | 13's `ui.*` paragraph should list the `prefs.audio.*` control ids and `ui.state.windows[].audioPreferences` (documented in 12 *Audio preferences details*), like DW-188 | spec (lead) | todo |
+| DW-196 | T-072 | `ParamInfo` has no step/enum metadata: the delay's `note` (0…13, labels in `Delay::kNotes`) and its `sync`/`pingpong` switches reach the model/UI as linear floats. A `steps`/value-label field is an 06 Interfaces change | spec (user) + D/U | todo |
+| DW-197 | T-072 | The `locate_reset` golden could use a real delay/reverb tail now (DW-162 is covered at unit level) | D (T-077) | todo |
+| DW-198 | T-052 | `ProjectWindowModel` calls `engine.setRecording` directly; it should go through `store.engineSync?.setRecording(_:)` so takes of an unsaved project land in the per-project temp folder | U (T-055) | todo |
+| DW-199 | T-052 | `Project.validate()` doesn't check `Track.inputPair ≤ 15` (ArmTrack refuses it, a hand-edited project.json isn't checked; the engine clamps) | M | todo |
+| DW-200 | T-052 | An input pair beyond the device's input channels records silence with no warning; the UI should offer only existing pairs | U (T-055) / E | todo |

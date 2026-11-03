@@ -270,6 +270,7 @@ Result<void> CoreAudioDriver::Impl::open(const DriverConfig& request) {
 
     // Scratch and FIFO first: the units may call back as soon as they start.
     renderer.configure(resolved->bufferFrames, rate);  // IO-023: judged against the device clock
+    renderer.setCapture(request.capture);  // REC-001 (T-052)
     if (in) input.allocate(inResolved.channels);
     if (separate) {
         captured.allocate(inResolved.channels);

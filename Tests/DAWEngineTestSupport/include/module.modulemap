@@ -39,6 +39,7 @@ module DAWEngineTestSupport {
   header "ReverbChecks.h"
   header "DelayChecks.h"
   header "SessionRateChecks.h"
+  header "RecordingChecks.h"
   requires cplusplus
   export *
 }

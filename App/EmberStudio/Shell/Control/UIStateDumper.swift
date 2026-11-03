@@ -23,7 +23,8 @@ import Foundation
 ///                    "visibleClips": [{"id", "track", "kind", "start", "length", "selected", "rect",
 ///                                      audio: "assetID", "gain", "fadeIn", "fadeOut", "waveformLevel" | null;
 ///                                      midi: "notes"}],
-///                    "selection", "marquee", "gesture", "playhead": {"tick", "x"}}}]}
+///                    "selection", "marquee", "gesture", "playhead": {"tick", "x"}},
+///        "pianoRoll": {…}, "audioPreferences": {…}}]}
 @MainActor
 enum UIStateDumper {
     static func dump(_ app: AppModel) -> JSONValue {
@@ -77,6 +78,55 @@ enum UIStateDumper {
             "controls": .array(window.controls.map(dump)),
             "arrange": dump(window.arrange),
             "pianoRoll": dump(window.pianoRoll),
+            "audioPreferences": dump(window.audioPrefs),
+        ]
+    }
+
+    /// UI-040, DW-183 (T-055): the audio settings and where a session-rate re-conversion is.
+    ///
+    ///     {"open", "driver": "fake" | "coreAudio" | null, "devices": [{id, name, inputChannels,
+    ///      outputChannels, nominalSampleRate, isDefaultOutput}], "outputDevice", "inputDevice"
+    ///      (0: system default), "runningDeviceID", "deviceRunning", "sampleRate" (the project's),
+    ///      "engineSampleRate", "bufferFrames", "inputChannels", "inputChannelChoices",
+    ///      "latency": {deviceSamples, graphSamples, totalSamples, totalMs},
+    ///      "reload": {phase, previousSampleRate, sampleRate, done, total, failed} | null,
+    ///      "assetsReloadPending", "error"}
+    static func dump(_ prefs: AudioPreferencesModel) -> JSONValue {
+        let config = prefs.config
+        let telemetry = prefs.telemetry
+        let latency = prefs.latency
+        return [
+            "open": .bool(prefs.isOpen),
+            "driver": prefs.driver.map { .string($0.rawValue) } ?? .null,
+            "devices": .array(prefs.devices.map { device in
+                [
+                    "id": .int(Int64(device.id)), "name": .string(device.name),
+                    "inputChannels": .int(Int64(device.inputChannels)), "outputChannels": .int(Int64(device.outputChannels)),
+                    "nominalSampleRate": .double(device.nominalSampleRate), "isDefaultOutput": .bool(device.isDefaultOutput),
+                ]
+            }),
+            "outputDevice": config.map { .int(Int64($0.outputDevice)) } ?? .null,
+            "inputDevice": config.map { .int(Int64($0.inputDevice)) } ?? .null,
+            "runningDeviceID": .int(Int64(telemetry.outputDeviceID)),
+            "deviceRunning": .bool(telemetry.deviceRunning),
+            "sampleRate": .double(prefs.sessionSampleRate),
+            "engineSampleRate": .double(telemetry.sampleRate),
+            "bufferFrames": config.map { .int(Int64($0.bufferFrames)) } ?? .null,
+            "inputChannels": config.map { .int(Int64($0.inputChannels)) } ?? .null,
+            "inputChannelChoices": .array(prefs.inputChannelChoices.map { .int(Int64($0)) }),
+            "latency": [
+                "deviceSamples": .int(Int64(latency.deviceSamples)), "graphSamples": .int(Int64(latency.graphSamples)),
+                "totalSamples": .int(Int64(latency.totalSamples)), "totalMs": .double(latency.totalMs),
+            ],
+            "reload": prefs.reload.map { r in
+                [
+                    "phase": .string(r.phase.rawValue), "previousSampleRate": .double(r.previousSampleRate),
+                    "sampleRate": .double(r.sampleRate), "done": .int(Int64(r.done)), "total": .int(Int64(r.total)),
+                    "failed": .int(Int64(r.failed)),
+                ]
+            } ?? .null,
+            "assetsReloadPending": .int(Int64(telemetry.assetsReloadPending)),
+            "error": prefs.lastError.map { .string($0) } ?? .null,
         ]
     }
 
