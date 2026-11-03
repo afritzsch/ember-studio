@@ -374,16 +374,6 @@ final class TimelineCanvasView: NSView, SnapshotCompositing {
         model.zoom(by: 1 + event.magnification, anchorX: point(event).x)
     }
 
-    /// UI-013: ⌘D duplicates the selection while the canvas has focus.
-    override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        if window?.firstResponder === self, event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
-           event.charactersIgnoringModifiers == "d" {
-            model.duplicateSelection()
-            return true
-        }
-        return super.performKeyEquivalent(with: event)
-    }
-
     override func menu(for event: NSEvent) -> NSMenu? {
         let p = point(event)
         guard let hit = model.hitTest(p) else { return nil }

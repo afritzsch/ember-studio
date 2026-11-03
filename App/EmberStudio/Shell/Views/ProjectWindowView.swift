@@ -42,6 +42,9 @@ struct ProjectWindowView: View {
     }
 }
 
+/// 12 *Layout*: transport · position (bars | time) · tempo/signature · record/loop/metronome ·
+/// CPU/xruns, then undo/redo, zoom and the pane toggles. Every button is a view-model control
+/// (UI-052), and the shortcuts (UI-002) run the same ones.
 private struct ToolbarRow: View {
     let model: ProjectWindowModel
     let controls: [String: UIControl]
@@ -50,10 +53,34 @@ private struct ToolbarRow: View {
         HStack(spacing: 8) {
             if let play = controls["transport.play"] { ControlButton(control: play, systemImage: "play.fill") }
             if let stop = controls["transport.stop"] { ControlButton(control: stop, systemImage: "stop.fill") }
-            Text(Self.position(model.transport.tick))
-                .font(.system(.body, design: .monospaced))
-                .accessibilityIdentifier("transport.position")
+            if let record = controls["transport.record"] { ControlToggle(control: record, face: "●").foregroundStyle(.red) }
+            if let loop = controls["transport.loop"] { ControlToggle(control: loop, face: "⟲") }
+            // T-026: the metronome toggle (`transport.metronome`) goes here.
+            Divider().frame(height: 18)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(model.positionBBT)
+                    .font(.system(.body, design: .monospaced))
+                    .accessibilityIdentifier("transport.position")
+                Text(model.positionTime)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("transport.time")
+            }
+            .frame(minWidth: 90, alignment: .leading)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(String(format: "%.2f BPM", model.tempo))
+                    .font(.system(.body, design: .monospaced))
+                    .accessibilityIdentifier("transport.tempo")
+                Text(model.signature)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("transport.signature")
+            }
             Spacer()
+            Text(String(format: "CPU %.0f%% · xruns %llu", model.telemetry.dspLoadPercent, model.telemetry.xruns))
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(model.telemetry.xruns > 0 ? Color.orange : Color.secondary)
+                .accessibilityIdentifier("engine.load")
             if let undo = controls["edit.undo"] { ControlButton(control: undo, systemImage: "arrow.uturn.backward") }
             if let redo = controls["edit.redo"] { ControlButton(control: redo, systemImage: "arrow.uturn.forward") }
             if let out = controls["zoom.out"] { ControlButton(control: out, systemImage: "minus.magnifyingglass") }
@@ -64,13 +91,6 @@ private struct ToolbarRow: View {
         .labelStyle(.iconOnly)
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
-    }
-
-    /// Bars.beats.ticks at 4/4 (the tempo map's signature is T-034's).
-    static func position(_ tick: Tick) -> String {
-        let ppq: Int64 = 960
-        let beat = max(tick.raw, 0) / ppq
-        return String(format: "%d.%d.%03d", beat / 4 + 1, beat % 4 + 1, max(tick.raw, 0) % ppq)
     }
 }
 
@@ -110,6 +130,12 @@ private struct ArrangeBar: View {
             }
             .fixedSize()
             .accessibilityIdentifier("snap.menu")
+            Menu("Add Track") {
+                if let audio = controls["track.add.audio"] { ControlButton(control: audio) }
+                if let midi = controls["track.add.midi"] { ControlButton(control: midi) }
+            }
+            .fixedSize()
+            .accessibilityIdentifier("track.add.menu")
             Text("⌘ while dragging: no snap").font(.caption).foregroundStyle(.secondary)
             Spacer()
             if let duplicate = controls["edit.duplicate"] { ControlButton(control: duplicate, systemImage: "plus.square.on.square") }

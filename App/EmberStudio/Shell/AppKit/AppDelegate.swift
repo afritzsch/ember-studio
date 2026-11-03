@@ -13,6 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private var windows: WindowManager!
     private var server: ControlSocketServer?
     private var pumpTimer: Timer?
+    private var keyMonitor: KeyMonitor?
     private var signalSources: [DispatchSourceSignal] = []
 
     private static let log = Logger(subsystem: "dev.emberstudio", category: "app")
@@ -27,6 +28,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         windows.confirmsUnsavedChanges = !options.isAutomated
         app.presenter = windows
         NSApp.mainMenu = makeMainMenu()
+        // UI-002: shortcuts go to the key window's view model.
+        keyMonitor = KeyMonitor { [weak self] window in self?.windows.model(for: window) }
 
         // CTL-030: the socket, when asked for (or in Debug).
         if let path = options.controlSocket {
@@ -92,6 +95,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         // DW-144: close every project (removes autosaves, so nothing offers recovery next time).
         Task { @MainActor in
             pumpTimer?.invalidate()
+            keyMonitor?.stop()
             await app.quit()
             server?.stop()
             readyToQuit = true
@@ -180,8 +184,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         NSApp.mainWindow?.performClose(sender)
     }
 
-    @objc func undoEdit(_ sender: Any?) { app.mainWindow?.store.undo() }
-    @objc func redoEdit(_ sender: Any?) { app.mainWindow?.store.redo() }
+    /// Edit, Track, Transport and View menu items: they run the main window's control with the id in
+    /// `representedObject` (UI-052), the one its button, its shortcut (UI-002) and `ui.perform` run.
+    @objc func performControl(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String, let control = mainWindowControl(id), control.isEnabled else { return }
+        control.action()
+    }
+
+    private func mainWindowControl(_ id: String) -> UIControl? {
+        app?.mainWindow?.controls.first { $0.id == id }
+    }
 
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
         let store = app?.mainWindow?.store
@@ -189,12 +201,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         case #selector(saveDocument(_:)), #selector(saveDocumentAs(_:)), #selector(exportAudio(_:)),
              #selector(closeProjectWindow(_:)):
             return store != nil
-        case #selector(undoEdit(_:)):
-            item.title = store?.undoLabel.map { "Undo \($0)" } ?? "Undo"
-            return store?.canUndo ?? false
-        case #selector(redoEdit(_:)):
-            item.title = store?.redoLabel.map { "Redo \($0)" } ?? "Redo"
-            return store?.canRedo ?? false
+        case #selector(performControl(_:)):
+            guard let id = item.representedObject as? String, let control = mainWindowControl(id) else { return false }
+            // Undo/redo and play/stop name what they'll do.
+            if ["edit.undo", "edit.redo", "transport.playStop"].contains(id) { item.title = control.label }
+            item.state = control.isOn == true ? .on : .off
+            return control.isEnabled
         default:
             return true
         }
@@ -236,16 +248,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         file.addItem(item("Export…", #selector(exportAudio(_:)), "e", [.command, .shift]))
         main.addItem(submenu: file, title: "File")
 
+        // UI-002: the shortcuts' menus. ⌘ chords show (and, if `KeyMonitor` passed them on, take)
+        // their key equivalent; plain keys (Space, R, L, ⌫) are named in the title.
         let edit = NSMenu(title: "Edit")
-        edit.addItem(item("Undo", #selector(undoEdit(_:)), "z"))
-        edit.addItem(item("Redo", #selector(redoEdit(_:)), "z", [.command, .shift]))
+        edit.addItem(controlItem("Undo", "edit.undo"))
+        edit.addItem(controlItem("Redo", "edit.redo"))
+        edit.addItem(.separator())
+        edit.addItem(controlItem("Split at Playhead", "edit.split"))
+        edit.addItem(controlItem("Duplicate", "edit.duplicate"))
+        edit.addItem(controlItem("Delete (⌫)", "edit.delete"))
+        edit.addItem(.separator())
+        edit.addItem(controlItem("Select All Clips", "edit.selectAll"))
+        edit.addItem(controlItem("Deselect Clips", "edit.deselectAll"))
         main.addItem(submenu: edit, title: "Edit")
+
+        let track = NSMenu(title: "Track")
+        track.addItem(controlItem("New Audio Track", "track.add.audio"))
+        track.addItem(controlItem("New MIDI Track", "track.add.midi"))
+        main.addItem(submenu: track, title: "Track")
+
+        let transport = NSMenu(title: "Transport")
+        transport.addItem(controlItem("Play (Space)", "transport.playStop"))
+        transport.addItem(controlItem("Record (R)", "transport.record"))
+        transport.addItem(controlItem("Loop (L)", "transport.loop"))
+        main.addItem(submenu: transport, title: "Transport")
+
+        let view = NSMenu(title: "View")
+        view.addItem(controlItem("Zoom In", "zoom.in"))
+        view.addItem(controlItem("Zoom Out", "zoom.out"))
+        main.addItem(submenu: view, title: "View")
 
         let window = NSMenu(title: "Window")
         window.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
         main.addItem(submenu: window, title: "Window")
         NSApp.windowsMenu = window
         return main
+    }
+
+    private func controlItem(_ title: String, _ controlID: String) -> NSMenuItem {
+        let key = KeyBindings.chord(for: controlID)?.menuKeyEquivalent
+        let item = item(title, #selector(performControl(_:)), key?.key ?? "", key?.modifiers ?? [])
+        item.representedObject = controlID
+        return item
     }
 
     private func item(_ title: String, _ action: Selector, _ key: String,

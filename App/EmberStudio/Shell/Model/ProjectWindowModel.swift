@@ -63,6 +63,8 @@ final class ProjectWindowModel: Identifiable {
 
     /// The engine's transport as of the last poll.
     private(set) var transport = TransportState()
+    /// The engine's telemetry as of the last poll (the toolbar's CPU and xrun readout).
+    private(set) var telemetry = EngineTelemetry()
 
     /// UI-010..014: the arrange canvas (snap, gestures, waveforms, playhead).
     let arrange = ArrangeModel()
@@ -88,6 +90,7 @@ final class ProjectWindowModel: Identifiable {
         selectedTracks = []
         selectedClips = []
         transport = TransportState()
+        telemetry = EngineTelemetry()
         scrollY = 0
     }
 
@@ -120,11 +123,52 @@ final class ProjectWindowModel: Identifiable {
         }
     }
 
+    // MARK: Toolbar (12 Layout)
+
+    /// The loop region the transport follows (DW-123), if looping is on.
+    var loopEnabled: Bool { store.project.loop?.isEnabled == true }
+
+    /// The playhead in bars.beats.ticks at the signature in force there (TIME-002).
+    var positionBBT: String {
+        let bbt = store.project.tempoMap.tickToBBT(Tick(max(transport.tick.raw, 0)))
+        return String(format: "%d.%d.%03d", bbt.bar, bbt.beat, bbt.tick)
+    }
+
+    /// The playhead as minutes:seconds.milliseconds, through the tempo map.
+    var positionTime: String {
+        let map = store.project.tempoMap
+        let seconds = Double(map.tickToSample(Tick(max(transport.tick.raw, 0)))) / map.sampleRate
+        let ms = Int((seconds * 1000).rounded(.down))
+        return String(format: "%d:%02d.%03d", ms / 60_000, ms / 1000 % 60, ms % 1000)
+    }
+
+    /// The tempo at the playhead, in BPM.
+    var tempo: Double { store.project.tempoMap.bpmAt(Tick(max(transport.tick.raw, 0))) }
+
+    /// The time signature in force at the playhead, "4/4".
+    var signature: String {
+        let tick = max(transport.tick.raw, 0)
+        let sig = store.project.tempoMap.timeSignatures.last { $0.tick.raw <= tick } ?? store.project.tempoMap.timeSignatures.first
+        return sig.map { "\($0.numerator)/\($0.denominator)" } ?? "4/4"
+    }
+
     /// UI-052: every control this window shows, in display order.
     var controls: [UIControl] {
+        let hasEngine = engine != nil
         var controls: [UIControl] = [
-            .button("transport.play", "Play", enabled: engine != nil && !transport.playing) { [weak self] in self?.play() },
-            .button("transport.stop", "Stop", enabled: engine != nil) { [weak self] in self?.stop() },
+            .button("transport.play", "Play", enabled: hasEngine && !transport.playing) { [weak self] in self?.play() },
+            .button("transport.stop", "Stop", enabled: hasEngine) { [weak self] in self?.stop() },
+            // UI-002: Space.
+            .button("transport.playStop", transport.playing ? "Stop" : "Play", enabled: hasEngine) { [weak self] in
+                self?.playStop()
+            },
+            // UI-002: R. Arms the transport's record state only; recording itself is M5 (09).
+            .toggle("transport.record", "Record", isOn: transport.recording, enabled: hasEngine) { [weak self] in
+                self?.toggleRecord()
+            },
+            // UI-002: L. The project's loop (SetLoop), which engine sync gives the transport (DW-123).
+            .toggle("transport.loop", "Loop", isOn: loopEnabled) { [weak self] in self?.toggleLoop() },
+            // T-026: the metronome toggle (`transport.metronome`, SetMetronome) goes here.
             .button("edit.undo", store.undoLabel.map { "Undo \($0)" } ?? "Undo", enabled: store.canUndo) { [weak self] in
                 self?.store.undo()
             },
@@ -135,6 +179,9 @@ final class ProjectWindowModel: Identifiable {
             .button("zoom.out", "Zoom Out", enabled: pixelsPerBeat > Self.zoomRange.lowerBound) { [weak self] in
                 self?.zoom(by: 1 / Self.zoomStep)
             },
+            // UI-002: ⌘T, ⇧⌘T.
+            .button("track.add.audio", "New Audio Track") { [weak self] in self?.addTrack(.audio) },
+            .button("track.add.midi", "New MIDI Track") { [weak self] in self?.addTrack(.midi) },
             .toggle("pane.browser", "Browser", isOn: showsBrowser) { [weak self] in self?.showsBrowser.toggle() },
             .toggle("pane.inspector", "Inspector", isOn: showsInspector) { [weak self] in self?.showsInspector.toggle() },
         ]
@@ -179,6 +226,62 @@ final class ProjectWindowModel: Identifiable {
         pollTransport()
     }
 
+    /// Space: stops if the engine is playing now (not as of the last poll), else plays.
+    func playStop() {
+        guard let engine else { return }
+        if engine.transport().playing { stop() } else { play() }
+    }
+
+    func toggleRecord() {
+        guard let engine else { return }
+        engine.setRecording(!engine.transport().recording)
+        pollTransport()
+    }
+
+    /// Bars a new loop spans when the project has none.
+    static let defaultLoopBars = 4
+
+    /// Turns the project's loop on or off (one undo entry, `SetLoop`). With no loop yet, it makes
+    /// one: around the selected clips if any, else `defaultLoopBars` bars from the playhead's bar.
+    func toggleLoop() {
+        let project = store.project
+        if let loop = project.loop {
+            perform(SetLoop(loop: LoopRange(start: loop.start, end: loop.end, isEnabled: !loop.isEnabled)))
+            return
+        }
+        let clips = project.tracks.flatMap(\.clips).filter { selectedClips.contains($0.id) }
+        if let start = clips.map(\.start.raw).min(), let end = clips.map({ $0.start.raw + $0.length.raw }).max(), end > start {
+            perform(SetLoop(start: Tick(start), end: Tick(end)))
+        } else {
+            let map = project.tempoMap
+            let bar = map.tickToBBT(Tick(max(transport.tick.raw, 0))).bar
+            perform(SetLoop(start: map.bbtToTick(BBT(bar: bar, beat: 1, tick: 0)),
+                            end: map.bbtToTick(BBT(bar: bar + Self.defaultLoopBars, beat: 1, tick: 0))))
+        }
+    }
+
+    /// ⌘T / ⇧⌘T: appends an empty track ("Audio 2", "MIDI 1", …) and selects it.
+    func addTrack(_ kind: Track.Kind) {
+        let prefix = kind == .midi ? "MIDI" : "Audio"
+        let count = store.project.tracks.filter { $0.kind == kind }.count
+        let before = Set(store.project.tracks.map(\.id))
+        perform(AddTrack(name: "\(prefix) \(count + 1)", kind: kind))
+        if let added = store.project.tracks.first(where: { !before.contains($0.id) }) { selectedTracks = [added.id] }
+    }
+
+    // MARK: Keyboard (UI-002)
+
+    /// Runs the control bound to `chord`. True if it ran; false for an unbound chord, a disabled
+    /// control or (when `isRepeat`) a binding that doesn't repeat, so the event goes on its way.
+    @discardableResult
+    func handleKey(_ chord: KeyChord, isRepeat: Bool = false) -> Bool {
+        guard let binding = KeyBindings.binding(for: chord), !isRepeat || binding.repeats,
+              let control = controls.first(where: { $0.id == binding.controlID }), control.isEnabled
+        else { return false }
+        control.action()
+        return true
+    }
+
     /// UI-004 toasts and UI-011 waveforms (newly loaded audio) from the engine's events.
     func engineEventsArrived(_ events: [EngineEvent]) {
         toasts.handle(events)
@@ -186,6 +289,10 @@ final class ProjectWindowModel: Identifiable {
     }
 
     func pollTransport() {
-        transport = engine?.transport() ?? TransportState()
+        // Only a change is assigned, so a stopped transport doesn't invalidate the views 30 times a second.
+        let transport = engine?.transport() ?? TransportState()
+        if transport != self.transport { self.transport = transport }
+        let telemetry = engine?.telemetry() ?? EngineTelemetry()
+        if telemetry != self.telemetry { self.telemetry = telemetry }
     }
 }

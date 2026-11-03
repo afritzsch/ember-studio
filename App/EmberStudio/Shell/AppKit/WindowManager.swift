@@ -17,6 +17,12 @@ final class WindowManager: NSObject, WindowPresenting, NSWindowDelegate {
 
     func nsWindow(for model: ProjectWindowModel) -> NSWindow? { windows[model.id] }
 
+    /// The project window model `window` shows (nil for panels, alerts and other windows).
+    func model(for window: NSWindow) -> ProjectWindowModel? {
+        guard let id = windows.first(where: { $0.value === window })?.key else { return nil }
+        return app?.window(id)
+    }
+
     func show(_ model: ProjectWindowModel) {
         if let window = windows[model.id] {
             window.makeKeyAndOrderFront(nil)
