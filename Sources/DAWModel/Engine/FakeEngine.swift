@@ -29,6 +29,7 @@ public final class FakeEngine: EngineProtocol {
         case setPluginState(slot: NodeIDValue)
         case setDevice(DriverConfig)
         case simulateDeviceEvent(DeviceEvent)
+        case setSessionSampleRate(Double)  // T-056
     }
 
     private struct State {
@@ -46,6 +47,7 @@ public final class FakeEngine: EngineProtocol {
         var pluginStates: [NodeIDValue: Data] = [:]
         var telemetry = EngineTelemetry()
         var loadedAssets: Set<ModelID> = []
+        var refusedSessionRates: Set<Double> = []  // T-056
     }
 
     private let state = Mutex(State())
@@ -294,4 +296,51 @@ public final class FakeEngine: EngineProtocol {
     }
 
     public func paramInfoJSON(_ kind: NodeKind) -> String { "[]" }
+
+    // MARK: Session sample rate (T-056: IO-033, MODEL-005, DW-130)
+
+    /// Records the call, then does what the engine does at once: invalidArgument for a rate that
+    /// isn't 44.1/48/88.2/96 kHz, `notImplemented` for one `refuseSessionRate` named (a device that
+    /// can't run it), nothing for the current rate, else the change (see
+    /// `simulateEngineRateChange`).
+    public func setSessionSampleRate(_ rate: Double) throws(DAWError) {
+        let refused: Bool = state.withLock { s in
+            s.calls.append(.setSessionSampleRate(rate))
+            return s.refusedSessionRates.contains(rate)
+        }
+        guard Project.supportedSampleRates.contains(rate) else {
+            throw .invalidArgument("not a session rate (44.1/48/88.2/96 kHz)")
+        }
+        if refused { throw .notImplemented("the device can't run at \(rate) Hz") }
+        changeRate(to: rate)
+    }
+
+    /// The next `setSessionSampleRate(rate)` calls throw, like a device that can't run `rate`.
+    public func refuseSessionRate(_ rate: Double) { _ = state.withLock { $0.refusedSessionRates.insert(rate) } }
+
+    /// The engine changes its session rate by itself (a device fallback, IO-021 (5)), as
+    /// `setSessionSampleRate` does but without a call: the transport stops, telemetry shows `rate`,
+    /// and `assetsReloaded` events say `started`, one `progress` per loaded asset (by ID) and
+    /// `finished`.
+    public func simulateEngineRateChange(to rate: Double) { changeRate(to: rate) }
+
+    private func changeRate(to rate: Double) {
+        state.withLock { s in
+            let previous = s.telemetry.sampleRate
+            guard rate != previous else { return }
+            s.transport.playing = false
+            s.telemetry.sampleRate = rate
+            let assets = s.loadedAssets.sorted()
+            let total = UInt32(assets.count)
+            func post(_ phase: AssetsReload.Phase, done: UInt32, asset: ModelID = 0) {
+                s.events.append(EngineEvent(
+                    kind: .assetsReloaded, subject: asset, count: UInt64(done),
+                    reload: AssetsReload(phase: phase, previousSampleRate: previous, sampleRate: rate, done: done,
+                                         total: total, assetID: asset)))
+            }
+            post(.started, done: 0)
+            for (i, asset) in assets.enumerated() { post(.progress, done: UInt32(i + 1), asset: asset) }
+            post(.finished, done: total)
+        }
+    }
 }

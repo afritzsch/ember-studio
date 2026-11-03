@@ -495,8 +495,8 @@ CheckResult midiClipPlayerThroughGraphBuilder() {
     DAW_CHECK(notes.size() == 3 && notes[0].pitch == 60 && notes[1].channel == 1 && notes[2].start == 5520);
     DAW_CHECK(playerNotes(5).size() == 1);
 
-    // Renders through the Engine (MIDI isn't routed yet, so the player writes into an empty
-    // writer) with 0 RT violations, across the tempo change.
+    // Renders through the Engine with 0 RT violations, across the tempo change. The MIDI edges
+    // carry the player's events to the sampler stand-in (T-045), which outputs silence.
     std::vector<float> l(512), r(512);
     float* ptrs[2] = {l.data(), r.data()};
     RenderTarget target;

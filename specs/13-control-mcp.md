@@ -83,6 +83,9 @@ Agents use this to **drive and verify the DAW themselves** (D-20, D-21, D-22). T
 - *Process (CTL-020):* SDK `modelcontextprotocol/swift-sdk` pinned `exact:` in `Package.swift` (+ `Package.resolved`). stdout carries only MCP frames (fd 1 is redirected to stderr at start). The server exits when stdin closes. Headless config as `dawctl` (fixtures: `--fixtures`, `$DAWCTL_FIXTURES`, the checkout's `Tests/GoldenTests/fixtures`).
 - *Launcher (CTL-025):* `.mcp.json` runs `sh -c 'exec "$(git rev-parse --show-toplevel)/scripts/dawmcp.sh"'`. The script builds `--product dawmcp` (output to stderr) when `.build/debug/dawmcp` is missing or older than `Package.swift`, `Package.resolved` or anything under `Sources/`, then execs it with the checkout root as its working directory, so relative render paths land in that worktree. `scripts/dawmcp.sh --build-only` pre-builds (a fresh worktree's first build takes minutes, longer than an MCP client waits).
 
+### Contract delta (T-056, accepted (autobuild, see docs/autobuild/DECISIONS.md))
+Additive. No new method: the session rate changes through `command.apply {"command": {"type": "SetSessionSampleRate", "sampleRate": 96000}}` (07, history-exempt, so `undo` steps over it), or follows the engine after `device.set`/`device.simulate` (DW-130: the dispatcher's event drain makes the store perform it). `engine.events` (and the `events` of `device.*` results) carry `reload: {phase: started|progress|finished, previousSampleRate, sampleRate, done, total, failed, assetID}` on `assetsReloaded` events (DW-044); `engine.telemetry` has `assetsReloadPending`. `render.offline` after a rate change waits for the re-conversion (in the engine), so a render hears the new assets.
+
 ### `dawctl`
 | ID | Requirement |
 |---|---|

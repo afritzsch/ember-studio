@@ -1,0 +1,30 @@
+# midi_locate_no_stuck_notes (M4, DSP-003, TIME-008, DW-103, T-044): a locate while a note is held
+# ends it with a note-off (no stuck note) and chases the note under the new position.
+# Fixtures can't locate in the middle of a render: render.offline starts with play() then
+# locate(from), a locate while playing (OfflineDriver). So, as in locate_reset, the locate is the
+# start of a second render that doesn't continue the first one.
+# Same instrument as sampler_pitch: MIDI track "Keys" (ID 2), sampler slot 7 with one zone on
+# assets/a440_48k.wav (440 Hz at 0.5), rootKey 69, looping [0, 48000), so a stuck note would ring
+# for ever; default params (attack 96 frames, sustain 1, release 9600 frames), velocity 127;
+# × 0.5 through the centre pans. One MIDI clip from tick 0 (ID 4):
+#   Z: A4 (69) ticks [0, 1920)    = frames [0, 48000)
+#   V: A5 (81) ticks [1960, 2160) = frames [49000, 54000)
+# The first render plays ticks 0..480 (12000 frames, 24 blocks of 512: 12288 rendered), so Z is
+# held when it stops, its voice 12288 frames into the asset. The golden render is ticks 2000..2640
+# (samples 50000..66000, 16000 frames), outside Z:
+#   frame 0: Z's note-off (a hanging note, DSP-003), then V's chased note-on (DW-103: V started at
+#            tick 1960, before the render). Z releases over 9600 frames reading on from source
+#            frame 12288; V sounds from its zone's frame 0 at rate 2.
+#   frame 4000: V's note-off (tick 2160); its release ends at 13600.
+#   frames 13600..16000: silent. Nothing rings.
+# M4GoldenTests checks every sample, and the first render.
+# @expect {"field": "frames", "value": 16000}
+# @expect {"field": "peakDb", "value": -240, "range": {"start": 13600, "end": 16000}}
+project.new {"name": "midi_locate_no_stuck_notes", "sampleRate": 48000}
+command.apply {"command": {"type": "AddTrack", "name": "Keys", "kind": "midi"}}
+asset.import {"path": "assets/a440_48k.wav"}
+command.apply {"command": {"type": "AddClip", "trackID": 2, "start": 0, "length": 2640}}
+command.apply {"command": {"type": "AddNotes", "clipID": 4, "notes": [{"start": 0, "length": 1920, "pitch": 69, "velocity": 127}, {"start": 1960, "length": 200, "pitch": 81, "velocity": 127}]}}
+command.apply {"command": {"type": "SetInstrument", "trackID": 2, "device": {"format": "builtin", "node": "sampler"}, "zones": [{"assetID": 3, "rootKey": 69, "loopStart": 0, "loopEnd": 48000}]}}
+render.offline {"from": 0, "to": 480, "path": "first_pass.wav", "tail": false}
+render.offline {"from": 2000, "to": 2640, "path": "midi_locate_no_stuck_notes.wav", "tail": false}

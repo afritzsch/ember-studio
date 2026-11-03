@@ -148,6 +148,30 @@ void previewNote(NodeID source, uint8_t pitch, uint8_t velocity, bool on);
 
 Affected: T-043 (piano roll audition). No other task's calls change. Tests: `PreviewNoteTests` (inbox, player merge, re-created player, mailbox reuse, no-hang fuzz, realtime facade on the fake device audible on the strip meter; 0 RT violations).
 
+### Contract delta (T-056, accepted (autobuild, see docs/autobuild/DECISIONS.md))
+IO-033 needs progress events for the re-conversion (DW-044), the facade must keep asset paths to re-load them (DW-118), and a project-driven rate change must work offline too, where `setDevice` is unsupported. Everything is **additive and defaulted**; no existing field, case or call changes meaning, except that the T-051 placeholder (point 4 of that delta: `assetsReloaded` with `error = unsupported`) is gone: assets are now re-converted.
+```cpp
+enum class AssetsReloadPhase : uint8_t { started, progress, finished };
+struct AssetsReloadPOD {
+  AssetsReloadPhase phase = AssetsReloadPhase::finished;
+  double previousSampleRate = 0, sampleRate = 0;   // the change
+  uint32_t done = 0, total = 0, failed = 0;        // assets
+  uint64_t assetID = 0;                            // progress: the asset just done
+};
+// EngineEventPOD gains:  AssetsReloadPOD reload;          // assetsReloaded
+// TelemetryPOD gains:    uint32_t assetsReloadPending = 0; // assets of the running pass still to come
+FacadeError setSessionSampleRate(double rate);   // 44.1/48/88.2/96 kHz, either mode (see below)
+JobID loadAsset(uint64_t assetID, const std::string& path, const std::string& peakCacheDir);  // DW-077
+```
+- `assetsReloaded` keeps its `EngineEventType` case; every session-rate change raises `started`, one `progress` per asset (`subject` = assetID, `count` = done) and `finished` (`error = io` if some asset failed to load again). A change during a pass abandons it without a `finished`; the new `started` supersedes it. No new `EngineEventType` case, so Swift switches over `EngineEvent.Kind` stay exhaustive.
+- `setSessionSampleRate`: invalidArgument for another rate, no-op for the current one, unsupported during an export. Offline (or realtime without a driver) it stops the transport and changes the rate (rebuild at it, IO-033 pass). Realtime with a driver it is `setDevice` with the running config at that rate, so a device that can't run it is unsupported and nothing changes.
+- `loadAsset` keeps each asset's path and peak-cache directory for IO-033 (DW-118); the three-argument form computes IO-034's peaks through `<peakCacheDir>/<assetID>.peaks` (DW-077). The two-argument form is the three-argument one with no directory.
+- While a pass runs `play()` is refused and `renderOffline` waits for it (IO-033).
+
+Swift (`EngineProtocol.swift`, in its own block at the end): `AssetsReload`, `EngineEvent.reload`, `EngineTelemetry.assetsReloadPending`, and the requirements `setSessionSampleRate(_:)` and `loadAsset(_:path:peakCacheDirectory:)`, both with defaults in a protocol extension (refused / plain load), so other conformers compile unchanged. `FakeEngine` implements them (`refuseSessionRate`, `simulateEngineRateChange` test hooks).
+
+Affected: T-056 only. T-055 (device toasts) may read `reload`; the app's `ToastCenter` already shows `assetsReloaded` only when it carries an error.
+
 ## Status
 | ID | status | test |
 |---|---|---|

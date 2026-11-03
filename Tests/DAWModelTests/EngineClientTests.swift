@@ -231,7 +231,7 @@ struct EngineClientTests {
         // DW-160 (T-026): sends (GainNode) and the metronome publish their slots; kinds without
         // published ParamInfo still give an empty list.
         #expect(ParamCatalog.parseDefaults(engine.paramInfoJSON(.gain)) == [1, 0])
-        #expect(engine.paramInfoJSON(.reverb) == "[]")
+        #expect(engine.paramInfoJSON(.audioClipPlayer) == "[]")  // no params (reverb publishes since T-073)
         // Plugin hosting (10) isn't there yet; the calls are safe and report it.
         let job = engine.instantiatePlugin(slot: 5, .audioUnit(AUDescriptor(identifier: "aufx:dely:appl", name: "Delay")))
         #expect(engine.pollJob(job).state == .failed)

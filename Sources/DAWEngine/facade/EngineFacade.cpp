@@ -38,6 +38,7 @@
 
 #include "core/Engine.h"
 #include "core/RenderTarget.h"
+#include "facade/AssetReloader.h"
 #include "facade/AssetTable.h"
 #include "facade/DriverAdapter.h"
 #include "facade/FacadeErrors.h"
@@ -56,6 +57,7 @@
 #include "nodes/GainNode.h"
 #include "nodes/Metronome.h"
 #include "nodes/MidiClipPlayer.h"
+#include "nodes/Reverb.h"
 #include "time/TempoMap.h"
 
 
@@ -69,6 +71,7 @@ constexpr auto kExportGraphWait = std::chrono::seconds(30);
 constexpr auto kRateRebuildWait = std::chrono::seconds(10);  // IO-021 (5): the rebuild at the new rate
 constexpr auto kDevicePoll = std::chrono::milliseconds(10);  // daw.device: how often it looks
 constexpr std::size_t kNotificationBatch = 64;
+constexpr auto kReloadWait = std::chrono::seconds(600);  // IO-033: an export waits this long for a re-conversion
 
 // DW-067: graphs must be prepared for the device's whole buffer, or its blocks render silence.
 // GraphCompiler prepares for kMaxBlock, above any buffer a driver accepts (IO-003).
@@ -214,6 +217,16 @@ struct EngineFacade::Impl {
     void stopForDeviceChange();
     // IO-021 (5), DW-079: with the driver stopped, rebuilds everything at `rate`.
     Result<void> changeSessionRate(double rate);
+    // IO-033 (T-056). replaceCompiler: a new GraphCompiler at `rate` builds the latest description
+    // from scratch, so every node is created (and prepared) again. The reload functions run the
+    // re-conversion pass (AssetReloader) and its assetsReloaded events.
+    Result<void> replaceCompiler(double rate);
+    JobID submitLoad(uint64_t assetID, const std::string& path, const std::string& peakCacheDir);
+    void startAssetReload(double previousRate);
+    void submitReload(AssetReloader::Request request);
+    void reloadCompleted(const AssetReloader::Request& request, AssetReloader::Staged staged, FacadeError error);
+    void finishAssetReload();
+    void pushReload(AssetsReloadPhase phase, uint64_t assetID, FacadeError error);
     bool exportBusy() const { return exportRunning || exportActive || !exportQueue.empty(); }
 
     std::atomic<uint32_t> refs{1};  // BRIDGE-001
@@ -281,6 +294,10 @@ struct EngineFacade::Impl {
     AssetTable assets;
     // IO-034 / UI-011: each loaded asset's peaks (computed on daw.loader), read by `peaks`.
     std::unordered_map<uint64_t, std::shared_ptr<const PeakMipmap>> peaks;
+    // IO-033, DW-118 (T-056): where each asset came from, and the re-conversion pass (before
+    // `loader`, whose completions use it). reloadDone wakes an export waiting for a pass.
+    AssetReloader reloader;
+    std::condition_variable reloadDone;
     MeterMap meters;
     // Waiters outside `mutex` copy it first; replaced only by changeSessionRate.
     std::shared_ptr<GraphCompiler> compiler;
@@ -507,7 +524,15 @@ Result<void> EngineFacade::Impl::changeSessionRate(double rate) {
     if (!(rate >= kMinSampleRate && rate <= kMaxSampleRate))
         return makeError(ErrorCode::invalidArgument, "session rate out of range");
     if (exportBusy()) return makeError(ErrorCode::unsupported, "can't change the session rate during an export");
+    const double previous = sampleRate;
+    auto rebuilt = replaceCompiler(rate);
+    // IO-033 (T-056): re-convert every asset from its file at the new rate, also when the rebuild
+    // failed (the rate has changed either way, and the next applyGraph builds at it).
+    if (sampleRate != previous) startAssetReload(previous);
+    return rebuilt;
+}
 
+Result<void> EngineFacade::Impl::replaceCompiler(double rate) {
     // Finish what was submitted, so no wait on the old compiler is left hanging, then let any
     // waiter that still holds it go before the new one publishes anything.
     if (const uint64_t last = ticketOf(submitted); last != 0 && !compiler->wait(last, kRateRebuildWait))
@@ -532,7 +557,6 @@ Result<void> EngineFacade::Impl::changeSessionRate(double rate) {
         event.error = toFacadeError(registry.error());
         pushEvent(std::move(event));
     }
-    const double previous = sampleRate;
     sampleRate = rate;
     compiler = std::make_shared<GraphCompiler>(
         engine, registry ? std::move(registry).value() : NodeRegistry::withBuiltins(), sampleRate);
@@ -555,17 +579,110 @@ Result<void> EngineFacade::Impl::changeSessionRate(double rate) {
     }
     (void)engine.transport().locate(position);
     applyTransportCommands();
+    return {};
+}
 
-    // IO-033 is T-056: assets keep the rate they were loaded at until then.
-    if (assets.size() > 0) {
+// MARK: Session-rate re-conversion (IO-033, T-056)
+
+void EngineFacade::Impl::pushReload(AssetsReloadPhase phase, uint64_t assetID, FacadeError error) {
+    const AssetReloader::Progress& p = reloader.progress();
+    EngineEventPOD event;
+    event.type = EngineEventType::assetsReloaded;
+    event.subject = assetID;
+    event.count = p.done;
+    event.reload.phase = phase;
+    event.reload.previousSampleRate = p.previousRate;
+    event.reload.sampleRate = p.rate;
+    event.reload.done = p.done;
+    event.reload.total = p.total;
+    event.reload.failed = p.failed;
+    event.reload.assetID = assetID;
+    event.error = std::move(error);
+    pushEvent(std::move(event));
+}
+
+// IO-033: every asset loaded so far is decoded again from its original file (D-27), in the
+// background on daw.loader. A pass still running is abandoned; its late results are ignored.
+void EngineFacade::Impl::startAssetReload(double previousRate) {
+    std::vector<AssetReloader::Request> requests = reloader.beginPass(previousRate, sampleRate);
+    pushReload(AssetsReloadPhase::started, 0, {});
+    if (requests.empty()) {
+        pushReload(AssetsReloadPhase::finished, 0, {});
+        reloadDone.notify_all();
+        return;
+    }
+    for (AssetReloader::Request& request : requests) submitReload(std::move(request));
+}
+
+// Only enqueues (the loader never takes the facade mutex itself), so it's fine under it.
+void EngineFacade::Impl::submitReload(AssetReloader::Request request) {
+    AudioLoadRequest load;
+    load.assetID = request.assetID;
+    load.file = request.source.path;
+    load.sessionRate = sampleRate;
+    load.peakCacheDir = request.source.peakCacheDir;  // IO-034: the cache sees the stale rate and rewrites
+    Impl* impl = this;
+    loader.submit(std::move(load), [impl, request = std::move(request)](Result<LoadedAudio> loaded) {
+        AssetReloader::Staged staged;
+        FacadeError error;
+        if (loaded) {
+            // IO-034 / UI-011: the peaks of the new asset, here on daw.loader like a first load.
+            staged.peaks = loaded->peaks ? loaded->peaks
+                                         : std::make_shared<const PeakMipmap>(PeakMipmap::compute(*loaded->asset));
+            staged.asset = std::move(loaded->asset);
+        } else {
+            error = toFacadeError(loaded.error());
+        }
+        std::lock_guard lock(impl->mutex);
+        if (impl->stopping) return;
+        impl->reloadCompleted(request, std::move(staged), std::move(error));
+    });
+}
+
+void EngineFacade::Impl::reloadCompleted(const AssetReloader::Request& request, AssetReloader::Staged staged,
+                                         FacadeError error) {
+    const uint32_t failedBefore = reloader.progress().failed;
+    const AssetReloader::Outcome outcome = reloader.complete(request, std::move(staged));
+    if (outcome == AssetReloader::Outcome::stale) return;
+    // A superseded asset (loaded again since the pass began) isn't counted as failed: its newer
+    // load stands.
+    const bool failed = reloader.progress().failed > failedBefore;
+    if (failed) {
+        // Like a failed first load: the asset is dropped at the swap and its clips are silent.
         EngineEventPOD event;
-        event.type = EngineEventType::assetsReloaded;
-        event.error = facadeError(FacadeErrorCode::unsupported,
-                                  "assets loaded at " + std::to_string(static_cast<int>(previous)) +
-                                      " Hz were not re-converted (IO-033)");
+        event.type = EngineEventType::assetLoadFailed;
+        event.subject = request.assetID;
+        event.error = error;
         pushEvent(std::move(event));
     }
-    return {};
+    pushReload(AssetsReloadPhase::progress, request.assetID, failed ? std::move(error) : FacadeError{});
+    if (outcome == AssetReloader::Outcome::finished) finishAssetReload();
+}
+
+// The last asset of the pass is done: swap them all in, then rebuild. Clip players and samplers
+// resolve their assets when they're created (DW-051), so a new compiler creates every node again
+// and the new assets go live in one new snapshot.
+void EngineFacade::Impl::finishAssetReload() {
+    const AssetReloader::Progress progress = reloader.progress();
+    for (AssetReloader::Staged& staged : reloader.takeStaged()) {
+        if (staged.asset) {
+            assets.put(staged.assetID, std::move(staged.asset));
+            peaks[staged.assetID] = std::move(staged.peaks);
+        } else {
+            assets.remove(staged.assetID);
+            peaks.erase(staged.assetID);
+        }
+    }
+    FacadeError error;
+    if (auto rebuilt = replaceCompiler(sampleRate); !rebuilt) {
+        error = toFacadeError(rebuilt.error());
+    } else if (progress.failed > 0) {
+        error = facadeError(FacadeErrorCode::io, std::to_string(progress.failed) + " of " +
+                                                     std::to_string(progress.total) +
+                                                     " assets could not be re-converted (IO-033)");
+    }
+    pushReload(AssetsReloadPhase::finished, 0, std::move(error));
+    reloadDone.notify_all();
 }
 
 GraphCompiler::Status EngineFacade::Impl::compilerStatus() const {
@@ -719,7 +836,10 @@ void EngineFacade::Impl::runExport(JobID jobID, Tick from, Tick to, const Export
     uint64_t latest;
     std::shared_ptr<GraphCompiler> builder;
     {
-        std::lock_guard lock(mutex);
+        // IO-033 (T-056): an export renders the assets at the session rate, so it waits for a
+        // re-conversion to finish (exportActive keeps another rate change out meanwhile).
+        std::unique_lock lock(mutex);
+        reloadDone.wait_for(lock, kReloadWait, [this] { return stopping || !reloader.active(); });
         latest = ticketOf(submitted);
         builder = compiler;  // exportActive also keeps session-rate changes out meanwhile
         if (auto it = jobs.find(jobID); it != jobs.end()) it->second.state = JobState::running;
@@ -748,6 +868,8 @@ void EngineFacade::Impl::runExport(JobID jobID, Tick from, Tick to, const Export
         auto tempo = versions.find(status.publishedVersion);
         if (!built) {
             error = facadeError(FacadeErrorCode::internal, "offline render: graph build timed out");
+        } else if (reloader.active()) {
+            error = facadeError(FacadeErrorCode::internal, "offline render: assets are still being re-converted (IO-033)");
         } else if (status.publishedVersion == 0 || tempo == versions.end()) {
             error = facadeError(FacadeErrorCode::invalidArgument, "offline render: no graph applied");
         } else if (auto map = makeTempoMap(tempo->second.tempo, sampleRate); !map) {
@@ -916,6 +1038,7 @@ float EngineFacade::getParam(ParamID id) const {
 
 void EngineFacade::play() {
     std::lock_guard lock(impl_->mutex);
+    if (impl_->reloader.active()) return;  // IO-033 (T-056): refused while assets re-convert
     (void)impl_->engine.transport().play();
     impl_->applyTransportCommands();
 }
@@ -971,19 +1094,27 @@ TransportPOD EngineFacade::transport() const {
 // MARK: Assets (DW-041)
 
 JobID EngineFacade::loadAsset(uint64_t assetID, const std::string& path) {
-    JobID jobID;
+    return loadAsset(assetID, path, std::string());
+}
+
+JobID EngineFacade::loadAsset(uint64_t assetID, const std::string& path, const std::string& peakCacheDir) {
+    std::lock_guard lock(impl_->mutex);
+    return impl_->submitLoad(assetID, path, peakCacheDir);
+}
+
+// Only enqueues on daw.loader (the completion takes the facade mutex there).
+JobID EngineFacade::Impl::submitLoad(uint64_t assetID, const std::string& path, const std::string& peakCacheDir) {
+    if (path.empty()) return 0;
+    const JobID jobID = addJob(JobKind::loadAsset, JobState::queued);
     AudioLoadRequest request;
-    {
-        std::lock_guard lock(impl_->mutex);
-        if (path.empty()) return 0;
-        jobID = impl_->addJob(JobKind::loadAsset, JobState::queued);
-        request.assetID = assetID;
-        request.file = path;
-        request.sessionRate = impl_->sampleRate;
-    }
-    // Outside the facade lock: the completion takes it, on daw.loader.
-    Impl* impl = impl_;
-    impl_->loader.submit(std::move(request), [impl, jobID, assetID](Result<LoadedAudio> loaded) {
+    request.assetID = assetID;
+    request.file = path;
+    request.sessionRate = sampleRate;
+    request.peakCacheDir = peakCacheDir;  // DW-077: empty computes the peaks without a cache file
+    // DW-118 (T-056): kept to re-convert the asset when the session rate changes (IO-033).
+    (void)reloader.recordLoad(assetID, AssetReloader::Source{path, peakCacheDir});
+    Impl* impl = this;
+    loader.submit(std::move(request), [impl, jobID, assetID](Result<LoadedAudio> loaded) {
         std::shared_ptr<const PeakMipmap> peaks;
         EngineEventPOD event;
         event.subject = assetID;
@@ -993,8 +1124,9 @@ JobID EngineFacade::loadAsset(uint64_t assetID, const std::string& path) {
             const AudioAsset& asset = *loaded->asset;
             info = AssetInfoPOD{assetID, asset.channels, asset.frames, asset.sampleRate,
                                 loaded->fileSampleRate, loaded->fileFrames, loaded->resampled};
-            // IO-034 / UI-011: here on daw.loader, before anyone hears the asset loaded.
-            peaks = std::make_shared<const PeakMipmap>(PeakMipmap::compute(asset));
+            // IO-034 / UI-011: here on daw.loader, before anyone hears the asset loaded. DW-077: from
+            // the cache file when the load named a cache directory.
+            peaks = loaded->peaks ? loaded->peaks : std::make_shared<const PeakMipmap>(PeakMipmap::compute(asset));
             impl->assets.put(assetID, std::move(loaded->asset));
             event.type = EngineEventType::assetLoaded;
         } else {
@@ -1163,6 +1295,31 @@ FacadeError EngineFacade::setDevice(const DriverConfigPOD& config) {
     return {};
 }
 
+// MODEL-005 SetSessionSampleRate, IO-033 (T-056). Realtime with a driver goes through setDevice
+// with the running config at the new rate (the device must support it, IO-021 (5)); otherwise
+// (offline, or no driver) the session rate changes on its own.
+FacadeError EngineFacade::setSessionSampleRate(double rate) {
+    if (!isSessionRate(rate))
+        return facadeError(FacadeErrorCode::invalidArgument, "not a session rate (44.1/48/88.2/96 kHz)");
+    DriverConfigPOD config;
+    {
+        std::lock_guard lock(impl_->mutex);
+        Impl& impl = *impl_;
+        if (rate == impl.sampleRate) return {};
+        if (impl.exportBusy())
+            return facadeError(FacadeErrorCode::unsupported, "can't change the session rate during an export");
+        if (impl.mode != EngineMode::realtime || !impl.driver) {
+            impl.stopForDeviceChange();  // the transport stops (there is no driver to stop)
+            if (auto changed = impl.changeSessionRate(rate); !changed) return toFacadeError(changed.error());
+            impl.config.sampleRate = rate;
+            return {};
+        }
+        config = impl.config;
+        config.sampleRate = rate;
+    }
+    return setDevice(config);
+}
+
 // MARK: Observability
 
 TelemetryPOD EngineFacade::telemetry() const {
@@ -1191,6 +1348,7 @@ TelemetryPOD EngineFacade::telemetry() const {
     t.eventsDropped = impl_->eventsDropped;
     t.sampleRate = impl_->sampleRate;
     t.deviceRunning = impl_->driver && impl_->driver->running();
+    if (const auto& reload = impl_->reloader.progress(); reload.active) t.assetsReloadPending = reload.total - reload.done;
     if (impl_->driver) {
         t.outputDeviceID = t.deviceRunning ? impl_->driver->current().outputDevice : 0;
         t.processorOverloads = impl_->driver->processorOverloads();
@@ -1235,6 +1393,7 @@ std::string EngineFacade::paramInfoJSON(NodeKind kind) const {
     if (kind == NodeKind::compressor) params = Compressor::kParamInfo;  // DSP-041
     if (kind == NodeKind::gain) params = GainNode::kParamInfo;            // DW-160 (T-026): sends, MIX-007
     if (kind == NodeKind::metronome) params = Metronome::kParamInfo;      // DW-160 (T-026): TIME-010 slots
+    if (kind == NodeKind::reverb) params = Reverb::kParamInfo;            // DSP-041 (T-073)
     std::string json = "[";
     for (const ParamInfo& p : params) {
         if (json.size() > 1) json += ",";

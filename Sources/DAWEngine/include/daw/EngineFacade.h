@@ -222,6 +222,9 @@ struct TelemetryPOD {
     uint32_t outputDeviceID = 0;
     uint64_t processorOverloads = 0;
     uint64_t renderOverruns = 0;
+    // IO-033 (T-056): assets of the running session-rate re-conversion still to come (0: none
+    // running; play() is refused until it is 0 again).
+    uint32_t assetsReloadPending = 0;
 };
 
 struct NodeLatencyPOD {
@@ -269,6 +272,24 @@ struct DeviceChangePOD {
     double sampleRate = 0;          // session rate after (differs only when IO-021 (5) changed it)
 };
 
+// IO-033, DW-044 (T-056): where an assetsReloaded event is in a session-rate change. Every change
+// of the session rate (setSessionSampleRate, setDevice, a device fallback, IO-021 (5)) raises
+// `started`, one `progress` per asset as it is re-converted from its original file on daw.loader,
+// and `finished` once the new assets are swapped in through a new graph. With no assets loaded,
+// `started` is followed by `finished` at once. The transport stays stopped in between: play() is
+// refused, and an offline render waits for `finished`.
+enum class AssetsReloadPhase : uint8_t { started, progress, finished };
+
+struct AssetsReloadPOD {
+    AssetsReloadPhase phase = AssetsReloadPhase::finished;
+    double previousSampleRate = 0;  // the session rate before the change
+    double sampleRate = 0;          // and after: the rate the assets are converted to
+    uint32_t done = 0;              // assets converted (or failed) so far
+    uint32_t total = 0;             // assets to convert
+    uint32_t failed = 0;            // assets that didn't load again (dropped: their clips are silent)
+    uint64_t assetID = 0;           // progress: the asset just done
+};
+
 struct EngineEventPOD {
     EngineEventType type = EngineEventType::deviceChanged;
     uint64_t subject = 0;
@@ -276,6 +297,7 @@ struct EngineEventPOD {
     uint64_t count = 0;
     FacadeError error;
     DeviceChangePOD device;  // deviceChanged
+    AssetsReloadPOD reload;  // assetsReloaded (T-056)
 };
 
 // T-051, DW-089: what simulateDeviceEvent makes the fake device do.
@@ -431,6 +453,10 @@ public:
     // IO-034 / UI-011 (autobuild, see DECISIONS.md): `level` (0…kPeakLevelCount-1, finest
     // first) of the asset's peaks, as loaded. Non-RT, any thread; found == false until it loads.
     PeakLevelPOD peaks(uint64_t assetID, uint32_t level) const;
+    // DW-077 (T-056): like loadAsset, and IO-034's peaks go through the cache file
+    // <peakCacheDir>/<assetID>.peaks (reused when current, rewritten when stale, e.g. after a
+    // session-rate change). An empty directory is the two-argument form.
+    JobID loadAsset(uint64_t assetID, const std::string& path, const std::string& peakCacheDir);
 
     // MARK: Recording (09) and plugins (10): later tasks
 
@@ -461,6 +487,13 @@ public:
     // (IO-021 ran if it needed to; see the deviceChanged event). unsupported unless the facade
     // was created with DeviceDriverKind::fake; invalidArgument for an unknown device or rate.
     FacadeError simulateDeviceEvent(const DeviceEventPOD& event);
+    // MODEL-005 SetSessionSampleRate, IO-033 (T-056): makes `rate` (44.1/48/88.2/96 kHz) the
+    // session rate in either mode. The transport stops, the graph is rebuilt at the rate, and every
+    // loaded asset is re-converted from its file in the background (assetsReloaded events). A
+    // realtime engine restarts its device at the rate (setDevice with the running config), and
+    // refuses (unsupported, nothing changed) when the device can't run it. The same rate is a
+    // no-op; invalidArgument for another rate; unsupported during an export.
+    FacadeError setSessionSampleRate(double rate);
 
     // MARK: Observability (BRIDGE-004/005)
 
