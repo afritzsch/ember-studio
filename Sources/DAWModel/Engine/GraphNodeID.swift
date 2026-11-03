@@ -20,6 +20,8 @@ public enum GraphNodeID {
         case input = 2
         /// The master's final node (`NodeKind.master`).
         case output = 3
+        /// The project metronome (`NodeKind.metronome`, T-026), owned by the master.
+        case metronome = 4
     }
 
     static let roleShift: UInt64 = 56
@@ -43,4 +45,6 @@ public enum GraphNodeID {
     public static func input(of channel: NodeIDValue) -> NodeIDValue { make(.input, channel) }
     /// The master node (`EngineGraph.master`).
     public static func output(of master: NodeIDValue) -> NodeIDValue { make(.output, master) }
+    /// The project metronome's node (TIME-010, T-026), feeding `output(of: master)`.
+    public static func metronome(of master: NodeIDValue) -> NodeIDValue { make(.metronome, master) }
 }

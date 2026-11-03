@@ -103,7 +103,7 @@ public:
 | ENG-020, 021 | done (T-005) | `ParamSlotTableTests`, `ParamSlotTests`, `ParamRealtimeTests` (RtScope count 0). `allocate(count)` returns a contiguous range; `generation` counts writes |
 | ENG-022 | done (T-005, T-019) | `ParamSmootherTests` (0→1 step = linear ramp for every block size 0..4096); golden `gain_ramp_smoothing` + `GoldenReferenceTests` (reference checked sample by sample) |
 | ENG-023 | partial (T-005) | `ParamSnapshotIsolationTests` (sweep leaves node config unchanged); "fader sweep → 0 publishes" pending Engine + GraphBuilder (T-012/T-014) |
-| ENG-001..004 | done (T-004) | `NodeAPITests` (lifecycle, replaced, nodeIO, midiWriter, randomBlockSizes 0..4096). RenderGraph doesn't route MIDI yet (T-012/T-040) |
+| ENG-001..004 | done (T-004) | `NodeAPITests` (lifecycle, replaced, nodeIO, midiWriter, randomBlockSizes 0..4096). RenderGraph routes MIDI since T-045 (`MidiRoutingTests`) |
 | ENG-010..015 | done (T-004) | `SnapshotTests` (10k publishes during render, freed on reclaim; stalled audio thread; idle reclaim; RetireQueue; silence). ASan clean; LSan unsupported on macOS, so the stress test counts frees. `renderEpoch` is odd during a block, even when idle (seq_cst) |
 | ENG-040..042 | done (T-004) | `EngineRenderTests` (renderOrder, flushToZero with decaying IIR, graphValidation). Transport (T-008) and telemetry (T-006) steps are marked seams in `Engine::render` |
 | ENG-050, 051 | done (T-006) | `TelemetryTests` (mach_absolute_time clock; DSP load EMA τ = 0.3 s; render publishes epoch/load/rtViolations; producer paths for xruns, latency, meters; seqlock latency table + packed meters never torn; POD-copyable). Per-field relaxed atomics: one snapshot may mix adjacent blocks. "Graph epoch" = renderEpoch after the last block |

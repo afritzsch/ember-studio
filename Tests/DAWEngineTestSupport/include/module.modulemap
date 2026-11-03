@@ -33,6 +33,8 @@ module DAWEngineTestSupport {
   header "SamplerChecks.h"
   header "MetronomeChecks.h"
   header "SidechainChecks.h"
+  header "MidiRoutingChecks.h"
+  header "CompressorChecks.h"
   requires cplusplus
   export *
 }

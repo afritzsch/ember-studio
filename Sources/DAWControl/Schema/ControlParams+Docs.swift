@@ -50,6 +50,16 @@ extension TransportLocateParams: JSONSchemaDocumented {
     public static var jsonSchemaDocs: [String: String] { ["tick": "960 ticks per quarter note"] }
 }
 
+extension TransportSetMetronomeParams: JSONSchemaDocumented {
+    public static var jsonSchemaDocs: [String: String] {
+        [
+            "enabled": "Click while playing. Left out: unchanged",
+            "level": "Linear amplitude of a beat click, 0…3.98 (+12 dB); default 0.25 (−12 dBFS). Left out: unchanged",
+            "accent": "Linear gain of the downbeat over level, 0…3.98; default 2 (+6 dB). Left out: unchanged",
+        ]
+    }
+}
+
 extension AssetImportParams: JSONSchemaDocumented {
     public static var jsonSchemaDocs: [String: String] { ["path": "Audio file; relative paths resolve against the server's working directory"] }
 }
@@ -65,6 +75,7 @@ extension RenderOfflineParams: JSONSchemaDocumented {
             "tail": "Keep rendering past `to` until the output is quiet (IO-012). Default true",
             "blockSize": "1…4096. Default 512",
             "loop": "Follow the transport's loop: render the range's length of playback from `from`, wrapping at the loop end. Default false (straight through, loop off)",
+            "includeMetronome": "Include the project metronome's click (when it is on, transport.setMetronome). Default false: exports leave the click out",
         ]
     }
 }

@@ -16,6 +16,11 @@ public final class ProjectStore {
     private var history: UndoStack
     /// `history.stateMarker` at the last save.
     private var cleanMarker: UInt64 = 0
+    /// T-026: counts edits that leave no undo entry (`HistoryExemptCommand`), so they make the
+    /// project dirty too; `cleanUnrecorded` is its value at the last save. Undo can't take them
+    /// back, so only a save makes them clean.
+    private var unrecordedEdits: UInt64 = 0
+    private var cleanUnrecorded: UInt64 = 0
     /// The project when the open gesture began, and everything its updates touched so far.
     private var gestureStart: Project?
     private var gestureChange: ProjectChange?
@@ -70,12 +75,17 @@ public final class ProjectStore {
 
     /// Applies `command` and pushes it onto the undo stack, or, inside a gesture, applies it
     /// without pushing (MODEL-003). Throws without changing anything if the command is invalid.
+    /// A `HistoryExemptCommand` (T-026) is never pushed, not even as part of a gesture; it still
+    /// publishes a `.perform` change and makes the project dirty.
     public func perform(_ command: any Command) throws(DAWError) {
         let before = project
         var working = project
         try history.perform(command, on: &working)
         project = working
-        if gestureStart != nil {
+        if command.isHistoryExempt {
+            unrecordedEdits &+= 1
+            publish(ProjectChange(cause: .perform, label: command.label, from: before, to: working))
+        } else if gestureStart != nil {
             let change = ProjectChange(cause: .gestureUpdate, label: command.label, from: before, to: working)
             gestureChange?.formUnion(change)
             publish(change)
@@ -169,6 +179,7 @@ public final class ProjectStore {
         }
         let snapshot = project
         let marker = history.stateMarker
+        let unrecorded = unrecordedEdits
         let serial = editSerial
         let states = capturePluginStates(snapshot)
         let source = folderURL
@@ -195,6 +206,7 @@ public final class ProjectStore {
             autosavedSerial = serial
         }
         cleanMarker = marker
+        cleanUnrecorded = unrecorded
         updateDirty()
         restartAutosave()
         // restartAutosave cancelled the debounce of edits made while saving; they still get it.
@@ -318,6 +330,7 @@ public final class ProjectStore {
     /// Records the current state as saved.
     func markClean() {
         cleanMarker = history.stateMarker
+        cleanUnrecorded = unrecordedEdits
         updateDirty()
     }
 
@@ -425,6 +438,7 @@ public final class ProjectStore {
 
     private func updateDirty() {
         let dirty = history.gestureHasChanges || history.stateMarker != cleanMarker
+            || unrecordedEdits != cleanUnrecorded
         if dirty != isDirty { isDirty = dirty }
     }
 }

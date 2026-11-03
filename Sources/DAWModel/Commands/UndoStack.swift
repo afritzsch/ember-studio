@@ -48,8 +48,10 @@ public struct UndoStack: Sendable {
 
     /// Applies `command`. Outside a gesture it is pushed as one undo entry; inside one it is
     /// recorded for the gesture's entry (MODEL-003). Either way the redo stack is cleared.
+    /// A `HistoryExemptCommand` is applied (and validated) but leaves the history as it is (T-026).
     public mutating func perform(_ command: any Command, on project: inout Project) throws(DAWError) {
         let inverse = try Self.apply(command, to: &project)
+        guard !command.isHistoryExempt else { return }
         redoEntries.removeAll()
         if gesture != nil {
             gesture!.inverses.append(inverse)

@@ -34,3 +34,6 @@ Unattended phases started by `/autobuild` (see `.claude/skills/autobuild/SKILL.m
 - Wave: T-045 MIDI edge routing (E, M4 critical), T-034 toolbar/transport (U, M3), T-026 project metronome (M+B, M2 remainder), T-071 compressor + sidechain golden (D, M7; the only D task with a merged dependency chain into M2's sidechain).
 - Start: week 23%, five-hour window 19%.
 - T-026's two open questions decided up front (DECISIONS.md): export excludes the click unless `includeMetronome: true`; `SetMetronome` is persisted but not undoable.
+- All four workers reported within ~25 min. T-045 merged (4ba14f9), then T-071 (61dccc0; GR-meter encoding decision), then T-026 (c283f6c). The add-only conflicts (module.modulemap, EngineFacade.cpp includes + paramInfoJSON) were resolved by keeping both sides.
+- test.sh's swift-test step failed on the T-045 trial merge only on wall-clock load flakes (UI-010 perf smoke, MODEL-044/DW-148 autosave) while four workers tested in parallel; plain swift test was 2× green, and the later trial merges were fully green (DW-172).
+- 5-hour window hit 85% at 1793678717 (epoch), ~45 min into the phase. T-034 (finished, waiting for its metronome-button follow-up) paused until the reset at 1793692800 + 120 s.

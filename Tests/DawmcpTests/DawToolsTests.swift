@@ -177,3 +177,23 @@ final class SnapshotUI: ControlUIProvider {
         return ["pngPath": .string(url.path)]
     }
 }
+
+@MainActor
+@Suite("dawmcp project metronome (TIME-010, T-026)")
+struct DawMetronomeToolTests {
+    @Test("TIME-010: daw_transport_set_metronome switches the click; daw_render_offline takes includeMetronome")
+    func metronomeTool() async throws {
+        let tool = try #require(DawTools.tools.first { $0.name == "daw_transport_set_metronome" })
+        #expect(DawTools.methodsByTool[tool.name] == .transportSetMetronome)
+        let properties = JSONValue(mcp: tool.inputSchema)["properties"]
+        #expect(properties?["enabled"] != nil && properties?["level"] != nil && properties?["accent"] != nil)
+        let render = try #require(DawTools.tools.first { $0.name == "daw_render_offline" })
+        #expect(JSONValue(mcp: render.inputSchema)["properties"]?["includeMetronome"]?["type"] == "boolean")
+
+        let tools = DawTools(dispatcher: Dispatcher())
+        _ = try await tools.ok("daw_project_new", ["name": "t"])
+        #expect(try await tools.ok("daw_transport_set_metronome", ["enabled": true]) == ["enabled": true, "level": 0.25, "accent": 2])
+        let bad = try await tools.failure("daw_transport_set_metronome", ["level": 5])
+        #expect(bad["code"] == -32000 && bad["data"]?["dawError"] == "invalidArgument")
+    }
+}

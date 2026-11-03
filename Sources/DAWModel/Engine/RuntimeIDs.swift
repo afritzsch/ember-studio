@@ -47,6 +47,10 @@ public struct RuntimeIDs: Hashable, Sendable {
     public func masterLimiterParam(_ master: NodeIDValue) -> ParamID? {
         paramID(GraphNodeID.output(of: master), ParamLayout.Master.limiter)
     }
+    /// TIME-010 (T-026): param `index` (`ParamLayout.Metronome`) of the project metronome.
+    public func metronomeParam(_ master: NodeIDValue, _ index: UInt32) -> ParamID? {
+        paramID(GraphNodeID.metronome(of: master), index)
+    }
 }
 
 /// The param slots of the nodes the model lays out itself. Device slots follow their kind's
@@ -78,6 +82,18 @@ public enum ParamLayout {
     public enum Master {
         public static let limiter: UInt32 = 0
         public static let count: UInt32 = 1
+    }
+
+    /// TIME-010 / DSP-011 (T-026): the metronome node's slots, as `Metronome::kParamInfo`
+    /// (nodes/Metronome.h; the engine publishes them through `paramInfoJSON(.metronome)`).
+    public enum Metronome {
+        /// Switch: clicks while ≥ 0.5. The model writes `MetronomeSettings.enabled` here.
+        public static let on: UInt32 = 0
+        /// Linear amplitude of a beat click.
+        public static let level: UInt32 = 1
+        /// Linear gain of a downbeat over `level`.
+        public static let accent: UInt32 = 2
+        public static let count: UInt32 = 3
     }
 }
 

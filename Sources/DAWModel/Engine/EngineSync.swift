@@ -50,6 +50,17 @@ public final class EngineSync {
     /// DW-123: the loop last given to the transport.
     private var pushedLoop: LoopRange?
 
+    /// T-026 (docs/autobuild/DECISIONS.md Q1): an offline export leaves the click out unless it
+    /// asks for it. The exporter sets this for the duration of the render: the metronome's `on`
+    /// slot is written 0 at once and stays 0 through any edit, then follows
+    /// `project.metronome.enabled` again when it is cleared. A slot write, never a rebuild.
+    public var isMetronomeSuppressed = false {
+        didSet {
+            guard isMetronomeSuppressed != oldValue, !isInvalidated else { return }
+            writeParams()
+        }
+    }
+
     private static let log = Logger(subsystem: "dev.emberstudio", category: "model")
 
     /// Allocates every param slot `project` needs, writes their values and applies its graph at
@@ -235,7 +246,8 @@ public final class EngineSync {
 
     /// Writes the slots whose value differs from the last write, in ParamID order.
     private func writeParams() {
-        let values = GraphDescriptionBuilder.paramValues(project, runtime: runtime, catalog: catalog)
+        let values = GraphDescriptionBuilder.paramValues(
+            project, runtime: runtime, catalog: catalog, metronomeSuppressed: isMetronomeSuppressed)
         var changed: [(ParamID, Float)] = []
         for (id, value) in values where written[id] != value { changed.append((id, value)) }
         changed.sort { $0.0 < $1.0 }
