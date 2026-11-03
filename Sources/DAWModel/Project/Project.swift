@@ -22,6 +22,8 @@ public struct Project: Sendable {
     public var master: MasterChannel
     public var assets: [AssetRef]
     public var loop: LoopRange?
+    /// TIME-010 (T-026): the click. Changed by `SetMetronome`, outside undo history.
+    public var metronome: MetronomeSettings
 
     /// An empty project at 48 kHz, 120 bpm 4/4.
     public init(id: UUID = UUID(), name: String = "Untitled") {
@@ -37,6 +39,7 @@ public struct Project: Sendable {
         self.buses = []
         self.assets = []
         self.loop = nil
+        self.metronome = MetronomeSettings()
     }
 
     /// An empty project at `sessionSampleRate`, 120 bpm 4/4.
@@ -113,7 +116,7 @@ extension Project: Equatable {
         lhs.formatVersion == rhs.formatVersion && lhs.id == rhs.id && lhs.name == rhs.name
             && lhs.sessionSampleRate == rhs.sessionSampleRate && lhs.tempoMap == rhs.tempoMap
             && lhs.tracks == rhs.tracks && lhs.buses == rhs.buses && lhs.master == rhs.master
-            && lhs.assets == rhs.assets && lhs.loop == rhs.loop
+            && lhs.assets == rhs.assets && lhs.loop == rhs.loop && lhs.metronome == rhs.metronome
     }
 }
 
@@ -121,7 +124,7 @@ extension Project: Equatable {
 
 extension Project: Codable {
     private enum CodingKeys: String, CodingKey {
-        case formatVersion, id, name, sessionSampleRate, tempoMap, ids, tracks, buses, master, assets, loop
+        case formatVersion, id, name, sessionSampleRate, tempoMap, ids, tracks, buses, master, assets, loop, metronome
     }
 
     /// DW-020: the tempo map's events without a rate; the rate is `sessionSampleRate`.
@@ -152,6 +155,9 @@ extension Project: Codable {
         master = try c.decode(MasterChannel.self, forKey: .master)
         assets = try c.decode([AssetRef].self, forKey: .assets)
         loop = try c.decodeIfPresent(LoopRange.self, forKey: .loop)
+        // T-026: files written before the metronome existed have no key; they get it off at the
+        // default levels. An added, defaulted key needs no format version or migration (MODEL-042).
+        metronome = try c.decodeIfPresent(MetronomeSettings.self, forKey: .metronome) ?? MetronomeSettings()
 
         // DW-031: a hand-edited or older file may hold IDs at or past its allocator's `next`.
         // Move the allocator past all of them so a new entity never takes an ID in use. An ID in
@@ -182,5 +188,6 @@ extension Project: Codable {
         try c.encode(master, forKey: .master)
         try c.encode(assets, forKey: .assets)
         try c.encodeIfPresent(loop, forKey: .loop)
+        try c.encode(metronome, forKey: .metronome)
     }
 }

@@ -2,7 +2,8 @@
 /// (MODEL-021) to choose between a param update and a graph rebuild.
 public struct ProjectChange: Hashable, Sendable {
     public enum Cause: Hashable, Sendable {
-        /// A command was performed and pushed onto the undo stack.
+        /// A command was performed and pushed onto the undo stack, or, for a
+        /// `HistoryExemptCommand` (`SetMetronome`), performed outside the history.
         case perform
         case undo
         case redo
@@ -18,6 +19,8 @@ public struct ProjectChange: Hashable, Sendable {
     /// Document properties that have no ID of their own.
     public enum Field: String, Hashable, Sendable, Codable {
         case name, sessionSampleRate, tempoMap, loop, assets, trackOrder, busOrder
+        /// T-026: `Project.metronome` (a history-exempt `SetMetronome`).
+        case metronome
     }
 
     public var cause: Cause
@@ -48,6 +51,7 @@ public struct ProjectChange: Hashable, Sendable {
         if old.sessionSampleRate != new.sessionSampleRate { fields.insert(.sessionSampleRate) }
         if old.tempoMap != new.tempoMap { fields.insert(.tempoMap) }
         if old.loop != new.loop { fields.insert(.loop) }
+        if old.metronome != new.metronome { fields.insert(.metronome) }
         if old.assets != new.assets { fields.insert(.assets) }
         if old.tracks.map(\.id) != new.tracks.map(\.id) { fields.insert(.trackOrder) }
         if old.buses.map(\.id) != new.buses.map(\.id) { fields.insert(.busOrder) }

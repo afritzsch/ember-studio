@@ -15,7 +15,17 @@ public protocol Command: Codable, Sendable {
     func apply(to project: inout Project) throws(DAWError) -> any Command
 }
 
+/// A command that changes the document but not its history (07, T-026): `UndoStack` applies and
+/// validates it like any other, but pushes no entry, records nothing in an open gesture and keeps
+/// the redo stack. `ProjectStore` still publishes the change, marks the project dirty and syncs
+/// the engine. It can't be a step of a `CompositeCommand`, which would put it into history. Used
+/// for monitoring settings (`SetMetronome`) that ⌘Z shouldn't undo.
+public protocol HistoryExemptCommand: Command {}
+
 extension Command {
+    /// Whether `UndoStack` leaves this command out of the history.
+    public var isHistoryExempt: Bool { self is any HistoryExemptCommand }
+
     /// Applies to a copy and writes it back only on success, so a throwing command leaves
     /// `project` untouched.
     func applyAtomically(to project: inout Project) throws(DAWError) -> any Command {

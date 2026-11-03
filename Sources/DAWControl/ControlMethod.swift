@@ -16,6 +16,7 @@ public enum ControlMethod: String, CaseIterable, Hashable, Sendable {
     case transportSetLoop = "transport.setLoop"
     case transportRecord = "transport.record"
     case transportWait = "transport.wait"
+    case transportSetMetronome = "transport.setMetronome"
     case assetImport = "asset.import"
     case renderOffline = "render.offline"
     case audioAnalyze = "audio.analyze"
@@ -54,6 +55,7 @@ public enum ControlMethod: String, CaseIterable, Hashable, Sendable {
         case .transportSetLoop: TransportSetLoopParams.self
         case .transportRecord: TransportRecordParams.self
         case .transportWait: TransportWaitParams.self
+        case .transportSetMetronome: TransportSetMetronomeParams.self
         case .assetImport: AssetImportParams.self
         case .renderOffline: RenderOfflineParams.self
         case .audioAnalyze: AudioAnalyzeParams.self
@@ -86,8 +88,9 @@ public enum ControlMethod: String, CaseIterable, Hashable, Sendable {
         case .transportSetLoop: "Set the loop {enabled, start, end} → transport"
         case .transportRecord: "Arm or disarm recording {enabled} → transport"
         case .transportWait: "Wait for playback to reach a tick or stop {untilTick?, timeoutMs} (live engine only)"
+        case .transportSetMetronome: "Switch the project metronome or set its levels {enabled?, level?, accent?} → {enabled, level, accent} (not undoable)"
         case .assetImport: "Load an audio file into the project {path} → {assetID, …}"
-        case .renderOffline: "Render ticks [from, to) to a file {from, to, path, format?} → {path, durationSec, renderTimeSec}"
+        case .renderOffline: "Render ticks [from, to) to a file {from, to, path, format?, includeMetronome?} → {path, durationSec, renderTimeSec}"
         case .audioAnalyze: "Levels, loudness, spectrum and first sound of a file {path, range?, fftSize?, bands?}"
         case .audioCompare: "Null-test two files {a, b, toleranceDb?} → {nullResidualDb, maxDiffSample, offsetSamples}"
         case .engineTelemetry: "Engine telemetry, per-node latency and rtViolations"

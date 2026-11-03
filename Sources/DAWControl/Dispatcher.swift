@@ -239,6 +239,7 @@ public final class Dispatcher {
         case .transportPlay, .transportStop, .transportLocate, .transportSetLoop, .transportRecord:
             return try encode(transport(method, params))
         case .transportWait: return try encode(await transportWait(decode(params)))
+        case .transportSetMetronome: return try encode(transportSetMetronome(decode(params)))
         case .assetImport: return try encode(await assetImport(decode(params)))
         case .renderOffline: return try encode(await renderOffline(decode(params)))
         case .audioAnalyze: return try encode(await audioAnalyze(decode(params)))
@@ -454,6 +455,14 @@ public final class Dispatcher {
         return engine.transport()
     }
 
+    /// T-026 (TIME-010): `SetMetronome` on the project (validated, persisted, dirty, not undoable);
+    /// engine sync turns it into slot writes on the metronome node. Returns the settings now.
+    private func transportSetMetronome(_ p: TransportSetMetronomeParams) throws -> MetronomeSettings {
+        let store = try requireStore()
+        try store.perform(SetMetronome(enabled: p.enabled, level: p.level, accent: p.accent))
+        return store.project.metronome
+    }
+
     private func transportWait(_ p: TransportWaitParams) async throws -> TransportState {
         let engine = try requireEngine()
         guard case .realtime = engine.mode else {
@@ -518,6 +527,12 @@ public final class Dispatcher {
         var spec = ExportSpec(path: url.path, fileType: p.format ?? .wav, sampleFormat: p.sampleFormat ?? .float32,
                               blockSize: p.blockSize ?? 512, tailEnabled: p.tail ?? true)
         spec.followLoop = p.loop ?? false  // T-036
+        // T-026 (DECISIONS.md Q1): the click stays out of an export unless asked for. The `on`
+        // slot is held at 0 for the render (a slot write, no rebuild) and follows the project again
+        // afterwards, whatever happens to the job.
+        let sync = store?.engineSync
+        sync?.isMetronomeSuppressed = !(p.includeMetronome ?? false)
+        defer { sync?.isMetronomeSuppressed = false }
         let status = try await finish(engine.renderOffline(from: p.from, to: p.to, spec: spec), "render.offline")
         let render = status.render ?? OfflineRenderResult()
         renderRtViolations += render.rtViolations

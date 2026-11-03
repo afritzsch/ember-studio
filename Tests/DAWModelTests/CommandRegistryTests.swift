@@ -66,6 +66,9 @@ struct CommandRegistryTests {
         RestoreInstrument(trackID: 2, instrument: nil),
         SetSamplerZones(slotID: 4, zones: [SamplerZone(assetID: 1, lowKey: 10, highKey: 20, lowVel: 30, highVel: 40, gain: 0.5)]),
         SetSamplerZones(slotID: 4, zones: []),
+        // T-026 (TIME-010)
+        SetMetronome(enabled: true, level: 0.5, accent: 1.5),
+        SetMetronome(enabled: false),
     ]
 
     @Test("MODEL-006: built-in type strings are stable and unique")
@@ -80,6 +83,7 @@ struct CommandRegistryTests {
             "RemoveTimeSignature", "SetLoop", "RestoreLoop",
             "AddNotes", "RemoveNotes", "RestoreNotes", "MoveNotes", "SetNoteProps", "SetInstrument", "RemoveInstrument",
             "RestoreInstrument", "SetSamplerZones",
+            "SetMetronome",
         ])
         let all = CommandRegistry.registered.map { $0.type }
         #expect(Set(all).count == all.count)
