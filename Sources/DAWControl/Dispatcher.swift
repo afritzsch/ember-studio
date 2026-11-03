@@ -256,6 +256,11 @@ public final class Dispatcher {
             let p: EngineParamInfoParams = try decode(params)
             let json = try requireEngine().paramInfoJSON(p.kind)
             return json.isEmpty ? .array([]) : try JSONValue(parsing: Data(json.utf8))
+        case .enginePluginInfo:
+            let p: EnginePluginInfoParams = try decode(params)
+            let json = try requireEngine().pluginInfoJSON(slot: p.slot)
+            return json.isEmpty ? .object(["slot": .int(Int64(p.slot)), "loaded": .bool(false)])
+                : try JSONValue(parsing: Data(json.utf8))
         case .deviceList:
             let _: NoParams = try decode(params)
             return try encode(deviceList())
@@ -311,6 +316,8 @@ public final class Dispatcher {
                 driver: params?.driver ?? .fake))
         }
         try store.attachEngine(engine, debounce: configuration.engineDebounce)
+        // MODEL-043, DW-143 (T-061): saves capture hosted plugins' live state from the engine.
+        store.pluginStateProvider = EnginePluginStates(engine: engine)
         // MODEL-044: a headless run (dawctl, dawmcp) doesn't autosave, so it leaves no autosave/
         // behind in the folders it opens or saves. In attach mode the app's store keeps its policy.
         if configuration.mode == .headless { store.autosavePolicy = nil }

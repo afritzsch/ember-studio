@@ -199,6 +199,12 @@ final class AppModel {
 
     /// The app's engine for `store`; offline when that fails (no device), with the reason.
     private func attachEngine(_ store: ProjectStore) -> String? {
+        defer {
+            // MODEL-043, DW-143 (T-061): saves capture hosted plugins' live state from the engine,
+            // as the Dispatcher does for dawctl/dawmcp. Opening needs nothing more: a slot's stored
+            // state reaches its AU through the node's configJSON.
+            if let engine = store.engineSync?.engine { store.pluginStateProvider = EnginePluginStates(engine: engine) }
+        }
         do {
             try store.attachEngine(try makeEngine(store.project.sessionSampleRate))
             return nil

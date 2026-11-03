@@ -125,6 +125,9 @@ public struct ParamCatalog: Hashable, Sendable {
     }
 
     public func defaultValue(for slot: DeviceSlot, _ index: Int) -> Float {
+        // PLUG-015 (T-061): a hosted plugin's param without a stored value is NaN, "not set": the
+        // engine leaves the plugin's own value alone (AUPluginNode), whatever the state set it to.
+        if slot.nodeKind == .auPlugin || slot.nodeKind == .vst3Plugin { return .nan }
         guard let values = defaults[slot.nodeKind], values.indices.contains(index) else { return 0 }
         return values[index]
     }

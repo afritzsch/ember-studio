@@ -39,8 +39,24 @@ struct PluginDescriptorPOD { uint8_t format; /*au=0, vst3=1*/ std::string identi
 ```
 Scanner stdout JSON = array of `PluginDescriptorPOD` fields + `{status: ok|blocked, reason?}`.
 
+### Contract delta (T-061), accepted (autobuild, see docs/autobuild/DECISIONS.md "T-061 contract")
+Additive; the facade side is in 08 "Contract delta (T-061)". How the AU half is hosted (`Sources/DAWEngine/plugins/`):
+- **Identity and config.** `NodeKind::auPlugin`'s `configJSON` = `{"identifier", "state"?}`. The identifier follows the scanner's `AudioUnitIdentifier` (four-character codes, `0x` + 8 hex digits otherwise).
+- **One AU per slot** (`AUPluginHost`). A slot's AU outlives node re-creations (configVersion bumps, a changed param range), so edits never reset its DSP or lose state; a new AU is made only for a new slot, a changed identifier, or a session-rate change (the new AU gets the old one's state). Instantiation runs on `daw.compile` (or the caller's thread for `instantiatePlugin`), in-process; an AUv3 that can't load in-process is loaded out of process (waits ≤ 10 s). The node is rendered only once `prepare` (formats, `maximumFramesToRender`, `allocateRenderResources`) has succeeded (PLUG-012).
+- **Render** (PLUG-010): stereo bus formats where the AU accepts them (else mono, summed/duplicated), main input bus enabled, preallocated `AudioBufferList` and scratch buffers, `renderBlock` with a pull-input block; MIDI from `NodeIO::midiIn` through `scheduleMIDIEventBlock` at `AUEventSampleTimeImmediate + frameOffset`; host musical-context and transport-state blocks from the block's `TransportBlock`. No Objective-C message on the audio thread. Apple's AUDelay/AUSampler/AUMIDISynth render, schedule MIDI and take parameter events without allocating, so the RT trap needs no exemption.
+- **Params** (PLUG-015): param slot *i* drives the AU parameter at index *i* of `parameterTree.allParameters` (listed by `pluginInfoJSON`). Slots whose generation moved are pushed at block start through `scheduleParameterBlock` (clamped; ramped over the block if the parameter can ramp). NaN = not set: the plugin keeps its value. The plugin→model direction (AU parameter observer → `SetParam`, gesture-coalesced) is left to T-063, where plugin-side edits first appear.
+- **Latency** (PLUG-013): `latency` at prepare, then KVO; a change goes to the node's `LatencyReporter` from a global dispatch queue (MIX-024).
+- **Sidechain** (PLUG-014, DW-159): the AU's aux input bus (bus 1) is enabled and fed from `NodeIO::sidechain` (graph `toPort` 0).
+- **State** (PLUG-016): `fullState` ↔ binary plist, off the RT thread.
+
 ## Status
 | ID | status | test |
 |---|---|---|
 | PLUG-001..004 | done (T-060) | `PluginScannerTests` (launcher crash/timeout → blocked with fake VST3 bundles, VST3 probe, AU scan of Apple built-ins, cache rescan). AUv3 extension path not covered by an automated test |
+| PLUG-010 | done for AU (T-061) | `AUPluginTests` (identifier/configJSON round trip; AUDelay echo at 0.25 s with param slots as render-thread events; MIDI at exact frame offsets, fake AU + AUSampler; 0 RT violations); golden `AUGoldenTests` AUSampler instrument nulls against AVAudioEngine at ≤ −90 dBFS (−156.5 measured; no stored reference, DECISIONS "T-061 golden"); `PluginControlTests`. VST3 half: T-062 |
+| PLUG-012 | done for AU (T-061) | `AUPluginTests` "a missing AU renders as absent and is reported; slots keep their AU; parked AUs are adopted" (`pluginCrashed` event, graph never rejected) |
+| PLUG-013 | done for AU (T-061) | `AUPluginTests` "AU latency change (KVO) rebuilds the graph and PDC keeps paths aligned" (0 → 480 → 0) |
+| PLUG-014 | done for AU (T-061) | `AUPluginTests` aux input bus fed from the node's sidechain port (test-only AUv3; no Apple FX has an aux bus) |
+| PLUG-015 | done for AU, host → plugin (T-061) | `AUPluginTests` AUDelay slot pushes; `AUSlotModelTests` (NaN = not set, written once); `engine.pluginInfo`. Plugin → model direction: T-063 (DW-204) |
+| PLUG-016 | done for AU (T-061) | `AUPluginTests` fullState round trip off the RT thread, survives a rate change; `AUSlotModelTests`; `PluginControlTests` (`Plugins/<slot>.state` bplist); `AppModelTests` app saves capture live state |
 | PLUG-* (rest) | todo | |

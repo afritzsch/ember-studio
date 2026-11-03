@@ -25,6 +25,7 @@ public enum ControlMethod: String, CaseIterable, Hashable, Sendable {
     case engineTelemetry = "engine.telemetry"
     case engineEvents = "engine.events"
     case engineParamInfo = "engine.paramInfo"
+    case enginePluginInfo = "engine.pluginInfo"
     case deviceList = "device.list"
     case deviceSet = "device.set"
     case deviceSimulate = "device.simulate"
@@ -64,6 +65,7 @@ public enum ControlMethod: String, CaseIterable, Hashable, Sendable {
         case .audioCompare: AudioCompareParams.self
         case .engineEvents: EngineEventsParams.self
         case .engineParamInfo: EngineParamInfoParams.self
+        case .enginePluginInfo: EnginePluginInfoParams.self
         case .deviceSet: DeviceSetParams.self
         case .deviceSimulate: DeviceSimulateParams.self
         case .uiSnapshot: UISnapshotParams.self
@@ -99,6 +101,7 @@ public enum ControlMethod: String, CaseIterable, Hashable, Sendable {
         case .engineTelemetry: "Engine telemetry, per-node latency and rtViolations"
         case .engineEvents: "Engine events after a cursor {since?} → {events, next}"
         case .engineParamInfo: "Param info of a node kind {kind}"
+        case .enginePluginInfo: "A device slot's hosted plugin {slot} → {identifier, loaded, error?, latencySamples, params: [{index, address, name, min, max, value}], …}"
         case .deviceList: "Audio devices and the running one → {devices, outputDeviceID, driver}"
         case .deviceSet: "Switch the output/input device or rate {outputDevice?, inputDevice?, sampleRate?, bufferFrames?} (realtime engine)"
         case .deviceSimulate: "Make the fake device lose, restore, change rate or overload {kind, deviceID?, sampleRate?} → {outputDeviceID, sampleRate, events}"

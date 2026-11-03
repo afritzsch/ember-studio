@@ -499,6 +499,13 @@ public:
     ByteVector getPluginState(NodeID slot);
     void setPluginState(NodeID slot, const ByteVector& state);
     void* createPluginView(NodeID slot);  // NSView*, owned by the facade
+    // PLUG-010/015 (T-061, accepted (autobuild, see docs/autobuild/DECISIONS.md)): what the slot's
+    // Audio Unit is, as JSON: {"slot", "identifier", "loaded", "error"?, "name", "instrument",
+    // "midi", "sidechain", "inputChannels", "outputChannels", "latencySamples", "tailSeconds",
+    // "params": [{"index", "address", "id", "name", "unit", "min", "max", "value", "canRamp"}]}.
+    // Param slot i of the auPlugin node drives params[i]. {"slot": n, "loaded": false} for a slot
+    // the engine has no plugin for. Non-RT, any thread.
+    std::string pluginInfoJSON(NodeID slot) const;
     void destroyPluginView(NodeID slot);
 
     // MARK: Recording (09, T-052; accepted (autobuild, see docs/autobuild/DECISIONS.md))

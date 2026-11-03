@@ -195,6 +195,17 @@ Swift (`EngineProtocol.swift`): `RecordedTake` and `EngineEvent.recording`, `Tra
 
 Affected: T-052. T-055 (arm/monitor buttons) uses `ArmTrack`/`SetMonitoring` and `EngineSync.setRecording`; T-054 (monitoring) and T-080 (loop takes, `takeIndex`) build on it. No other task's calls change. Tests: `RecordingTests` (DAWEngineTests, six checks incl. a loopback ±1 sample and device-loss finalize), golden `record_loopback_alignment`.
 
+### Contract delta (T-061), accepted (autobuild, see docs/autobuild/DECISIONS.md "T-061 contract")
+AU hosting (10 PLUG-010, 012..016) fills the existing plugin calls and adds one **additive, read-only, non-RT** query. No existing signature, field or enum case changes.
+- **`NodeKind::auPlugin` config.** The node's `configJSON` is `{"identifier": "type:subtype:manufacturer", "state": "<base64>"}` (`plugins/AUPluginConfig.h`); `state` (the binary-plist `fullState`, as `getPluginState` returns it) is optional. DAWModel writes it from a `.au` `DeviceSlot` (identifier, `pluginState`), keys sorted.
+- **`instantiatePlugin(slot, plugin)`** instantiates the AU on the calling (non-RT) thread and parks it for `slot`; the build that brings the slot's auPlugin node adopts it. The job is finished when the call returns (`succeeded`, or `failed` with `notFound`/`unsupported`). VST3 descriptors fail with `unsupported` until T-062.
+- **`getPluginState(slot)` / `setPluginState(slot, state)`** read and write the slot's AU `fullState` (binary plist) off the audio thread. With no AU yet, `setPluginState` holds the state for the slot's first AU; `getPluginState` returns the configured state of a slot whose plugin couldn't load (so a save keeps it), else empty. A refused state is reported as below.
+- **Failures** (a component that isn't installed, a prepare that failed, a refused state) are `pluginCrashed` events with `subject` = the slot and `error` set. The node then renders as absent (an effect passes its input through, an instrument is silent); the graph isn't rejected. (No new `EngineEventType` case, so Swift switches stay exhaustive. PLUG-022's misbehaviour events are T-064's.)
+- **New:** `std::string pluginInfoJSON(NodeID slot) const;` → `{"slot", "identifier", "loaded", "error"?, "name", "instrument", "midi", "sidechain", "inputChannels", "outputChannels", "latencySamples", "tailSeconds", "params": [{"index", "address", "id", "name", "unit", "min", "max", "value", "canRamp"}]}`, or `{"slot": n, "loaded": false}`. Param slot *i* of the auPlugin node drives `params[i]` (PLUG-015).
+- **Swift:** `EngineProtocol.pluginInfoJSON(slot:) -> String`, with a default `""` in a protocol extension (own block at the end of `EngineProtocol.swift`); `EngineClient` forwards it. `ParamCatalog.defaultValue` is NaN ("not set") for hosted-plugin kinds, and `EngineSync` compares written values by bit pattern so a NaN isn't rewritten each update.
+
+Affected: T-061 only. T-062 (VST3) should follow the same configJSON / NaN / pluginInfoJSON shape; T-063 (editors) and T-065 (device chain UI) read `pluginInfoJSON`.
+
 ## Status
 | ID | status | test |
 |---|---|---|

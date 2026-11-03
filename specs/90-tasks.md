@@ -97,10 +97,10 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 | Task | Lane | Title | Requirements | Depends on | Status |
 |---|---|---|---|---|---|
 | T-060 | P | PluginScanner + cache + blocklist | PLUG-001..004 | T-001 | done |
-| T-061 | P | AU hosting node (FX + instrument), params, state, latency | PLUG-010, 012..016 (AU) | T-021, T-014 | wip(t-061-au-hosting) |
+| T-061 | P | AU hosting node (FX + instrument), params, state, latency | PLUG-010, 012..016 (AU) | T-021, T-014 | done |
 | T-062 | P | VST3 hosting node + build SDK `again` test plugin | PLUG-011..016 (VST3) | T-021, T-014 | ready |
 | T-063 | P+U | Plugin editor windows (AU view controller, VST3 IPlugView) | PLUG-017 | T-061, T-062, T-032 | todo |
-| T-064 | P | Host bypass, NaN guard, crash marker + safe-mode open | PLUG-018, 020..022 | T-061 | todo |
+| T-064 | P | Host bypass, NaN guard, crash marker + safe-mode open | PLUG-018, 020..022 | T-061 | ready |
 | T-065 | U | Device chain view (generic UI from ParamInfo), plugin manager | UI-032, UI-041 | T-063 | todo |
 
 ### M7 — Effects & automation
@@ -112,7 +112,7 @@ DSP effects (T-070..073) depend only on the Node API and can be **pulled forward
 | T-071 | D | Compressor (+ sidechain) | DSP-031, 040, 041 | T-005, T-023 | done |
 | T-072 | D | Delay (tempo sync) | DSP-032, 040, 041 | T-008 | done |
 | T-073 | D | Reverb (FDN, deterministic) | DSP-033, 040, 041 | T-004, T-005 | done |
-| T-074 | E+M | Automation lanes model + AutomationPlayer + plugin param path | AUTO-001..005, 008..010 | T-030, T-061/T-062 (for AUTO-009) | todo |
+| T-074 | E+M | Automation lanes model + AutomationPlayer + plugin param path | AUTO-001..005, 008..010 | T-030, T-061/T-062 (for AUTO-009) | ready |
 | T-075 | U+M | Automation recording (touch/latch/write) + lane UI | AUTO-006, 007, UI-015 | T-074, T-033 | todo |
 | T-076 | U | Mixer view + meters + routing pickers | UI-030, 031, 033 | T-022, T-032 | ready |
 | T-077 | D | M7 goldens | TEST (M7 set) | T-071, T-073, T-074 | todo |
@@ -278,7 +278,7 @@ Recorded by the lead from worker reports.
 | DW-079 | T-014 | `setDevice` with a different session rate returns `unsupported` until IO-021/IO-033 | E (T-051 / T-056) | done (T-051: setDevice with a new rate rebuilds the graph at that rate; assets wait for T-056) |
 | DW-080 | T-014 | Facade adds a `daw.export` thread for offline jobs; not in the CONV §3 thread table | spec (lead) | todo |
 | DW-081 | T-014 | `GraphCompiler::Status` keeps only the latest error: two builds finishing between polls can lose the earlier `graphRejected` event (`waitForGraph` is still right) | E | todo |
-| DW-082 | T-021 | Expose `GraphCompiler::takeEvents()` (latency change, MIX-024) as `EngineEventType::latencyChanged`; needs a PROPOSED delta to 08 events (`include/daw/`) | B | todo |
+| DW-082 | T-021 | Expose `GraphCompiler::takeEvents()` (latency change, MIX-024) as `EngineEventType::latencyChanged`; needs a PROPOSED delta to 08 events (`include/daw/`) | B | todo; T-061: a latency rebuild republishes the same `publishedVersion`, so clients only see it in telemetry after rendering |
 | DW-083 | T-021 | `MasterNode::clippedSamples()` → telemetry: new Telemetry counter + `TelemetryPOD` field | E (core) + B | todo |
 | DW-084 | T-021 | Goldens `pdc_alignment_null` (MIX-021) and click-on-beat-1 behind a latent master insert (MIX-023); need T-019's harness + a test-only FakeLatencyNode in golden builds | E (T-019 / T-025) | done (T-025 `pdc_alignment_null`) |
 | DW-085 | T-021 | Metronome is already a timeline node (scheduled `latency` ahead); T-024 should confirm and decide whether it resets on locate | D (T-024) | done (T-024: timeline node, latency ahead; resets on locate by detecting non-continuing segments, 64-frame fade) |
@@ -339,13 +339,13 @@ Recorded by the lead from worker reports.
 | DW-140 | T-041 | Model: `DeviceSlot` has no place for the sampler's zone config and nothing emits its `configJSON` (06 "Sampler semantics" format); needs a configVersion bump when zones change or their assets load (DW-051/072) and zone-edit commands | M (T-042 or later) | done (T-042: `DeviceSlot.zones`, `SetSamplerZones`, configJSON in 06 format, bumps) |
 | DW-141 | T-041 | `EngineFacade::paramInfoJSON` publishes only channelStrip, so the model gives the sampler `numParams` 0 (default ADSR). Publish `Sampler::kParamInfo` (and GainNode's), ideally via `NodeRegistry::paramInfo` (DSP-041) | E/B | todo |
 | DW-142 | T-041 | DSP-040 NaN guard: Telemetry has no NaN counter for processors; the sampler doesn't guard against a NaN asset yet | E (core), then D | todo; the compressor counts NaN blocks locally (`Compressor::nanBlocks()`), ready to forward (T-071) |
-| DW-143 | T-031 | MODEL-043 rest: instantiate hosted plugins on open, then `store.restorePluginStates()` with `store.pluginStateProvider = EnginePluginStates(engine:)`; real facade `getPluginState` and a round trip through a real plugin | P | todo |
+| DW-143 | T-031 | MODEL-043 rest: instantiate hosted plugins on open, then `store.restorePluginStates()` with `store.pluginStateProvider = EnginePluginStates(engine:)`; real facade `getPluginState` and a round trip through a real plugin | P | done (T-061: Dispatcher + app set `pluginStateProvider`; slot state reaches the AU via configJSON on open) |
 | DW-144 | T-031 | App: offer recovery when `loadReport.recoveryAvailable` (reopen with `recover: true`), call `close()` on a clean quit, show `offlineAssets` and `repairs` | U (T-032 / T-083) | done (T-032 app part: recovery toast, close() on window close/quit; T-083 dialog still todo) |
 | DW-145 | T-031 | A project that was never saved has no folder and isn't autosaved; crash safety for it needs an autosave location such as Application Support | M | todo |
 | DW-146 | T-035, T-025 | dawmcp/dawctl `test.fixture` resolves a fixture's relative `asset.import` paths against the server's cwd, not the fixture's folder, so every fixture that imports an asset (`wav_playback_resampled`, `pan_law`, `bus_send_sum`, `pdc_alignment_null`, `clip_overlap_crossfade`) fails in dawmcp unless an `assets` symlink exists | B (T-032 or later) | done (T-032: fixture-relative inputs resolve against the fixture folder) |
 | DW-147 | T-035 | A dawmcp server started by the MCP client keeps the engine it was built with; `scripts/dawmcp.sh` rebuilds only at launch, so an agent can't verify engine changes through `daw_render_offline` without a client restart. Add a `--rebuild`/restart hint to the CTL-025 tooling | B | todo |
 | DW-148 | T-035, T-025, lead | Flake: `PersistenceTests` "MODEL-044: an edit is autosaved after the debounce…" times out (30 s `eventually`, 30 ms debounce) under full-suite load; seen 3× on 2026-11-02. Likely cooperative-pool starvation or a race in `ProjectStore.scheduleDebouncedAutosave`/`serialized`, not plain slowness | M | done (T-042: race in `ProjectStore.autosave()` bookkeeping, fixed; stress tests) |
-| DW-149 | T-025, T-042 | Insert-chain commands `InsertDevice`/`RemoveDevice`/`MoveDevice`/`SetDeviceBypass` (MODEL-005) have no task, and nothing places a master insert (no `RestoreMaster`). Fixtures place inserts through `RestoreTrack`/`RestoreBus` with hand-written IDs; MIX-023's golden uses a bus as the "latent master insert". Could share helpers with T-042's `SetInstrument` | M | todo |
+| DW-149 | T-025, T-042 | Insert-chain commands `InsertDevice`/`RemoveDevice`/`MoveDevice`/`SetDeviceBypass` (MODEL-005) have no task, and nothing places a master insert (no `RestoreMaster`). Fixtures place inserts through `RestoreTrack`/`RestoreBus` with hand-written IDs; MIX-023's golden uses a bus as the "latent master insert". Could share helpers with T-042's `SetInstrument` | M | todo; T-061: an AU FX can only be placed via RestoreTrack (its golden uses AUSampler as instrument) |
 | DW-150 | T-042 | `validate()` now rejects note velocity 0 (06 clamps to 1…127), so an old `project.json` with a velocity-0 note fails to open with `invalidProject`. If such files ever exist, add an open-time repair 0 → 1 (autobuild decision, see docs/autobuild/DECISIONS.md) | M | todo |
 | DW-151 | T-042 | dawmcp started at worktree setup doesn't know commands the worker adds (`unknownCommandType`); same root as DW-147. Note it in 14's *Agent verification recipe* or let dawmcp restart when its binary is stale | B / lead (14) | todo |
 | DW-152 | T-042 | 07 *Persistence*: say that autosave bookkeeping follows the queue order of file operations and that an edit made during a save still gets its debounced autosave (DW-148 fix) | lead (07) | todo |
@@ -363,7 +363,7 @@ Recorded by the lead from worker reports.
 | DW-166 | T-033 | UI-010's 60 fps with 1,000 clips on M1 still needs an Instruments run on the real app (only a debug smoke test was measured) | U / user | todo |
 | DW-167 | T-033 | Trimming with snap on can shrink a clip to 1 tick; a minimum of one grid step may feel better (UX choice) | U | todo |
 | DW-158 | T-023 | Golden `@node` doesn't know the `sidechainMix` test node yet (`TestNodeType::sidechainMix` is in GoldenEngineSupport.h); adding it lets a fixture prove MIX-008 through the model before T-071 | E (T-071 / GoldenTests) | won't do (T-071: the real-compressor golden `sidechain_compressor` proves MIX-008 through the model) |
-| DW-159 | T-023 | PLUG-014 says "expose sidechain port 1" while MIX-004 says sidechain edges use `toPort` 0: clarify that "1" is the plugin's aux input bus, fed from the node's NodeIO sidechain (graph `toPort` 0) | spec (lead) | todo |
+| DW-159 | T-023 | PLUG-014 says "expose sidechain port 1" while MIX-004 says sidechain edges use `toPort` 0: clarify that "1" is the plugin's aux input bus, fed from the node's NodeIO sidechain (graph `toPort` 0) | spec (lead) | done (T-061: AU aux input bus ← NodeIO sidechain, graph toPort 0; 10 contract delta) |
 | DW-168 | lead (phase 2) | `swift test` hung 4 h+ in AttachTests.dawctlAttach: `waitUntilExit()` after `await`s in async tests waits on a run loop that never gets the exit event | B / test | done (T-023: `waitForExit` polls `isRunning`; no `waitUntilExit()` left in DAWControlTests/DawmcpTests) |
 | DW-169 | lead (phase 2) | EACCES flakes in DAWControlTests ($TMPDIR dirs created without x bit): ControlSocketServer narrowed the process-wide umask while binding; app autosave could hit it too | B | done (T-023: no umask; chmod 0600 + lstat check before listen) |
 | DW-170 | T-045 | MIDI events dropped by a full `MidiDelayLine` are counted per line (`dropped()`) but not in Telemetry: add `midiEventsDropped` to `core/Telemetry` / `TelemetryPOD` / `engine.telemetry`, summed by `Engine::render` (additive 08 delta) | E+B | todo |
@@ -400,3 +400,5 @@ Recorded by the lead from worker reports.
 | DW-201 | T-072 | DAWModelTests' `@MainActor` tests still finish together (8–15 s): something else synchronous holds the main actor; candidates are the real-engine tests calling the blocking `EngineClient.waitForGraph` on it. Confirm with a per-test timing pass or `sample` | M/B | todo |
 | DW-202 | T-055 | Mixer channel strips (UI-030) need the same arm/monitor/input controls (logic in `TrackHeaderModel`, reusable) | U (T-076) | todo |
 | DW-203 | T-055 | `ProjectStore.connectRecording` only logs a take it couldn't import; the app infers it from the project's assets (`ProjectWindowModel.containsTake`). An import-result callback/event would be more direct | M | todo |
+| DW-204 | T-061 | Plugin → model params: a change from the AU's own UI (or user) isn't written back to `DeviceSlot.params` (PLUG-015 second half) | P+M (T-063) | todo |
+| DW-205 | T-061 | A session-rate change re-instantiates the slot's AU synchronously on daw.compile (state carried over); may need to be async for slow out-of-process AUv3s | P (T-064 or later) | todo |

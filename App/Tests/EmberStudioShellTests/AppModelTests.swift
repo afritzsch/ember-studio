@@ -125,4 +125,31 @@ struct AppModelTests {
         }
         #expect(render.count == 1 && render[0].0 == Tick(0) && render[0].1 == Tick(3840) && render[0].2 == dir.file("out.wav").path)
     }
+
+    @Test("MODEL-043, DW-143 (T-061): app saves capture a hosted plugin's live state from the window's engine")
+    func savesCapturePluginState() async throws {
+        let dir = try TempDir()
+        let t = TestApp()
+        let window = t.app.newProject()
+        window.store.autosavePolicy = nil
+        #expect(window.store.pluginStateProvider is EnginePluginStates)
+        window.perform(AddTrack(name: "Keys", kind: .midi))
+        let track = try #require(window.project.tracks.first?.id)
+        window.perform(SetInstrument(trackID: track, device: .au(AUDescriptor(identifier: "aumu:samp:appl", name: "AUSampler"))))
+        let slot = try #require(window.project.tracks.first?.instrument?.id)
+        // What the AU holds now, as the engine reports it (FakeEngine keeps what it's given).
+        let live = Data("bplist00 live".utf8)
+        try #require(t.engines.last).setPluginState(slot: slot, live)
+
+        let folder = dir.file("AU.dawproject")
+        try await t.app.save(window, to: folder)
+        #expect(try Data(contentsOf: folder.appending(path: "Plugins/\(slot).state")) == live)
+        #expect(window.project.tracks.first?.instrument?.pluginState == nil, "the save doesn't edit the project")
+
+        // Reopened, the stored state is in the slot, so the engine gets it in the node's configJSON.
+        await t.app.closeWindow(window.id)
+        let opened = try await t.app.open(folder)
+        #expect(opened.project.tracks.first?.instrument?.pluginState == live)
+        #expect(opened.store.pluginStateProvider is EnginePluginStates)
+    }
 }

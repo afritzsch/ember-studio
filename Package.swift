@@ -143,6 +143,9 @@ let package = Package(
                 .linkedFramework("CoreFoundation"),
                 // IO-001..005: HAL device properties and the AUHAL output unit (io/CoreAudioDriver).
                 .linkedFramework("CoreAudio"),
+                // PLUG-010 (T-061): AUAudioUnit hosting (plugins/), AVAudioFormat for bus formats.
+                .linkedFramework("AVFAudio"),
+                .linkedFramework("Foundation"),
             ]
         ),
 

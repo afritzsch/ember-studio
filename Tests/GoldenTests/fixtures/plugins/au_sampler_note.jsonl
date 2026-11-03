@@ -1,0 +1,16 @@
+# au_sampler_note (T-061, PLUG-010): Apple's AUSampler (aumu:samp:appl, a system AU) hosted as a
+# track instrument, playing A4 (69, velocity 100) for 960 ticks (24000 frames at 120 BPM) from
+# frame 0, rendered in 480-frame blocks. No stored reference (docs/autobuild/DECISIONS.md
+# "T-061 golden": a system AU can change with macOS). Instead AUGoldenTests nulls this render at
+# <= -90 dBFS against the same AU rendered by AVAudioEngine offline (note-on before the first
+# 480-frame slice, note-off before slice 50), times 0.5: the track and master strips' centre pans
+# (√½ each, MIX-005). The @expects hold whatever macOS ships: sound from frame 0 at 440 Hz.
+# @expect {"field": "frames", "value": 48000}
+# @expect {"field": "firstNonSilentSample", "value": 0, "tolerance": 64}
+# @expect {"field": "spectrumPeakHz", "value": 440, "tolerance": 15, "range": {"start": 0, "end": 24000}}
+project.new {"name": "au_sampler_note", "sampleRate": 48000}
+command.apply {"command": {"type": "AddTrack", "name": "Keys", "kind": "midi"}}
+command.apply {"command": {"type": "AddClip", "trackID": 2, "start": 0, "length": 1920}}
+command.apply {"command": {"type": "AddNotes", "clipID": 3, "notes": [{"start": 0, "length": 960, "pitch": 69, "velocity": 100}]}}
+command.apply {"command": {"type": "SetInstrument", "trackID": 2, "device": {"format": "au", "identifier": "aumu:samp:appl", "name": "AUSampler", "vendor": "Apple", "version": ""}}}
+render.offline {"from": 0, "to": 1920, "path": "au_sampler_note.wav", "tail": false, "blockSize": 480}
