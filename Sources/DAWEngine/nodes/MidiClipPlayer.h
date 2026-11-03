@@ -32,7 +32,9 @@
 // Capacity: midiOut is fixed storage (NodeIO.h) that may drop events. A note-on is written only
 // if the writer keeps room for its own off and the off of every note still on, so offs are never
 // dropped as long as the writer's capacity doesn't shrink between blocks. Dropped ons are notes
-// that don't sound, never notes that hang.
+// that don't sound, never notes that hang. In a RenderGraph (T-045) the writer has
+// GraphBuilder::kMidiCapacity in every graph while the player has an outgoing MIDI edge, so a
+// snapshot swap never shrinks it.
 
 #include <cstdint>
 #include <memory>

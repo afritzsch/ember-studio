@@ -3,8 +3,9 @@
 // Tests/DAWEngineTests/SamplerTests.swift. C++ because they drive the node's DAW_RT process()
 // inside RtScopes (every check asserts 0 violations, CONV §5.3), GraphBuilder and the Engine.
 //
-// MIDI edges carry no data in a RenderGraph yet (DW-099), so most checks feed NodeIO::midiIn
-// directly, splitting a list of events at absolute frames into the blocks being rendered.
+// Most checks feed NodeIO::midiIn directly, splitting a list of events at absolute frames into
+// the blocks being rendered, so they control every event exactly. A sampler fed by a
+// midiClipPlayer through a RenderGraph (T-045, DW-099) is checked in MidiRoutingChecks.h.
 
 #include "Checks.h"
 

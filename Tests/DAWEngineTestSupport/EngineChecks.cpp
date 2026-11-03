@@ -508,7 +508,9 @@ CheckResult nodeIOViews() {
     DAW_CHECK(withoutInputs->sidechainChannels == 0);
     DAW_CHECK(withoutInputs->outChannels == 2 && withoutInputs->outFrames == 200);
 
-    // MIDI isn't routed by the graph yet: nothing comes in, nothing can be written.
+    // This hand-built graph gives the probe no MIDI inputs and no MIDI storage (T-045:
+    // RenderStepDesc::midiInputs / midiCapacity left at their defaults): nothing comes in,
+    // nothing can be written.
     DAW_CHECK(withInputs->midiInSize == 0);
     DAW_CHECK(withInputs->midiOutCapacity == 0);
     DAW_CHECK(!withInputs->midiOutPushed);

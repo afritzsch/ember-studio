@@ -10,14 +10,20 @@
 //   - one master node, of kind master, with no outgoing edges; it runs last (MIX-009);
 //   - acyclic (MIX-002), and a valid tempo map (TIME-003).
 // Then it reuses or creates node instances (DW-036, ENG-013), works out PDC (below), plans
-// buffers (MIX-003) and assembles the graph. MIDI edges order nodes but carry no data yet (T-040).
+// buffers (MIX-003), routes MIDI and assembles the graph.
+//
+// MIDI (T-045, DW-099). A node with an outgoing MIDI edge gets MIDI output storage of
+// kMidiCapacity events per block, the same for every graph, so it never shrinks under a node
+// between blocks (MidiClipPlayer keeps room for its note-offs in it). Each MIDI edge becomes a
+// RenderMidiInputDesc of its target, in description order: one undelayed input is read in
+// place, several are merged in frame order, ties in description order (RenderGraph.h).
 //
 // PDC (MIX-020..023, T-021). In topological order, a node's arrival is the latest path latency
 // over all its incoming edges (audio, sidechain and MIDI), and its path latency is its arrival
-// plus its own latencySamples() (read after prepare). Each audio or sidechain edge is delayed by
-// arrival(to) − pathLatency(from), so everything reaching a node's main and sidechain inputs
-// lines up; MIDI edges can't be delayed, so a MIDI path shorter than an audio one into the same
-// node stays early (T-040). The graph's latency is the master's path latency; every path from a
+// plus its own latencySamples() (read after prepare). Each edge, MIDI included (T-045), is
+// delayed by arrival(to) − pathLatency(from), so everything reaching a node's main, sidechain
+// and MIDI inputs lines up. MIDI edges go through a MidiDelayLine, kept per edge ID for the same
+// endpoints whatever the delay (even 0), so queued events survive a rebuild. The graph's latency is the master's path latency; every path from a
 // node without inputs to the master then adds up to exactly that, which is what lets Engine run
 // timeline nodes that far ahead. Delay lines are kept per edge ID across builds: an edge with the
 // same endpoints whose delay still fits its line keeps the line and its contents (MIX-022); a
@@ -70,6 +76,11 @@ public:
     // line memory and the pre-roll (about 22 s at 48 kHz).
     static constexpr uint64_t kMaxGraphLatency = uint64_t{1} << 20;
 
+    // T-045: MIDI events a node with an outgoing MIDI edge can write per block, and events a
+    // delayed MIDI edge can hold in flight (05 "MIDI routing").
+    static constexpr uint32_t kMidiCapacity = 1024;
+    static constexpr uint32_t kMidiDelayCapacity = 4096;
+
     double sampleRate() const { return sampleRate_; }
     uint32_t maxBlock() const { return maxBlock_; }
 
@@ -104,6 +115,13 @@ private:
         std::shared_ptr<DelayLine> line;
     };
     std::unordered_map<uint64_t, EdgeDelay> delayLines_;
+    // T-045: the same for MIDI edges' lines.
+    struct MidiEdgeDelay {
+        NodeID from;
+        NodeID to;
+        std::shared_ptr<MidiDelayLine> line;
+    };
+    std::unordered_map<uint64_t, MidiEdgeDelay> midiDelayLines_;
 
     std::shared_ptr<LatencyRelay> relay_ = std::make_shared<LatencyRelay>();
 };

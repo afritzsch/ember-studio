@@ -79,6 +79,128 @@ void DelayLine::process(const AudioBufferView& in, const AudioBufferView& out, u
     write_ += numFrames;
 }
 
+// MARK: MidiDelayLine (T-045, MIX-021 for MIDI)
+
+namespace {
+
+constexpr uint8_t kStatusMask = 0xF0;
+constexpr uint8_t kNoteOffStatus = 0x80;
+constexpr uint8_t kNoteOnStatus = 0x90;
+constexpr uint8_t kControlStatus = 0xB0;
+constexpr uint8_t kSustainCC = 64;
+constexpr uint8_t kAllSoundOffCC = 120;
+constexpr uint8_t kResetControllersCC = 121;
+constexpr uint8_t kAllNotesOffCC = 123;
+
+} // namespace
+
+MidiDelayLine::MidiDelayLine(uint32_t capacity, uint32_t maxOut)
+    : maxOut_(std::max(maxOut, 1u)) {
+    const uint32_t cap = nextPowerOfTwo(std::clamp(capacity, 1u, kMaxCapacity));
+    mask_ = cap - 1;
+    queue_.reset(new Pending[cap]());
+    out_.reset(new MidiEvent[maxOut_]());
+    held_.reset(new uint16_t[16 * 128]());
+}
+
+bool MidiDelayLine::admit(const MidiEvent& e) DAW_RT {
+    const uint32_t free = capacity() - count_;
+    const uint32_t reserve = numHeld_ + numPedals_;
+    if (e.size >= 3) {
+        const uint8_t status = e.data[0] & kStatusMask;
+        const uint8_t channel = e.data[0] & 0x0F;
+        const uint32_t key = uint32_t{channel} * 128 + (e.data[1] & 0x7Fu);
+        if (status == kNoteOnStatus && e.data[2] > 0) {
+            // Room for this on, its off, and every held note's and pedal's release.
+            if (free < reserve + 2) return false;
+            ++held_[key];
+            ++numHeld_;
+            return true;
+        }
+        if (status == kNoteOffStatus || status == kNoteOnStatus) {  // velocity 0: an off
+            if (held_[key] > 0) {  // its slot was reserved when the on went in
+                --held_[key];
+                --numHeld_;
+                return free > 0;
+            }
+            return free > reserve;
+        }
+        if (status == kControlStatus) {
+            const uint8_t cc = e.data[1];
+            if (cc == kSustainCC) {
+                const bool down = e.data[2] >= 64;
+                if (down && !pedal_[channel]) {
+                    if (free < reserve + 2) return false;
+                    pedal_[channel] = true;
+                    ++numPedals_;
+                    return true;
+                }
+                if (!down && pedal_[channel]) {
+                    pedal_[channel] = false;
+                    --numPedals_;
+                    return free > 0;
+                }
+            } else if (cc == kAllNotesOffCC || cc == kAllSoundOffCC) {
+                // The channel's notes end here (a re-created player sends CC 123 for the notes
+                // its predecessor left on, whose offs never come): stop reserving for them.
+                for (uint32_t k = 0; k < 128; ++k) {
+                    numHeld_ -= held_[std::size_t{channel} * 128 + k];
+                    held_[std::size_t{channel} * 128 + k] = 0;
+                }
+                return free > numHeld_ + numPedals_;
+            } else if (cc == kResetControllersCC && pedal_[channel]) {
+                pedal_[channel] = false;
+                --numPedals_;
+                return free > 0;
+            }
+        }
+    }
+    return free > reserve;
+}
+
+void MidiDelayLine::drain(uint32_t numFrames) DAW_RT {
+    // Bounded by maxOut_ (CONV-RT-04). Due frames are in order, so out_ stays in frame order;
+    // overdue events (late from an earlier block) go at the earliest frame still allowed.
+    const int64_t end = now_ + numFrames;
+    while (count_ > 0 && numOut_ < maxOut_) {
+        const Pending& p = queue_[head_];
+        if (p.due >= end) break;
+        MidiEvent e = p.event;
+        const int64_t frame = std::max<int64_t>(p.due - now_, lastOutFrame_);
+        e.frameOffset = static_cast<uint32_t>(frame);
+        lastOutFrame_ = e.frameOffset;
+        out_[numOut_++] = e;
+        head_ = (head_ + 1) & mask_;
+        --count_;
+    }
+}
+
+MidiEventSpan MidiDelayLine::process(MidiEventSpan in, uint32_t delay, uint32_t numFrames) DAW_RT {
+    numOut_ = 0;
+    lastOutFrame_ = 0;
+    // Drain first so events due now free their slots, queue the input, then drain again: a
+    // short delay can put this block's input in this block.
+    drain(numFrames);
+    uint64_t dropped = 0;
+    for (const MidiEvent& e : in) {  // bounded by the upstream writer's capacity
+        if (!admit(e)) {
+            ++dropped;
+            continue;
+        }
+        const uint32_t frame = numFrames > 0 ? std::min(e.frameOffset, numFrames - 1) : 0;
+        const int64_t due = std::max(now_ + frame + delay, lastDue_);
+        lastDue_ = due;
+        queue_[(head_ + count_) & mask_] = Pending{due, e};
+        ++count_;
+    }
+    drain(numFrames);
+    if (dropped > 0) dropped_.fetch_add(dropped, std::memory_order_relaxed);
+    now_ += numFrames;
+    return MidiEventSpan(out_.get(), numOut_);
+}
+
+// MARK: RenderGraph
+
 Result<std::unique_ptr<RenderGraph>> RenderGraph::create(RenderGraphDesc desc) {
     if (!(desc.sampleRate > 0))
         return makeError(ErrorCode::invalidArgument, "sampleRate must be > 0");
@@ -132,14 +254,67 @@ Result<std::unique_ptr<RenderGraph>> RenderGraph::create(RenderGraphDesc desc) {
             }
         }
 
+        // T-045: MIDI inputs come from earlier steps; a line serves one input per graph.
+        for (const RenderMidiInputDesc& m : s.midiInputs) {
+            if (m.fromStep >= i)
+                return makeError(ErrorCode::invalidArgument,
+                                 "MIDI input from a later step in step " + std::to_string(i));
+            if (m.delay > 0 && !m.delayLine)
+                return makeError(ErrorCode::invalidArgument,
+                                 "delayed MIDI input without a delay line in step " + std::to_string(i));
+            if (m.delayLine) {
+                if (std::find(graph->midiLines_.begin(), graph->midiLines_.end(), m.delayLine) !=
+                    graph->midiLines_.end())
+                    return makeError(ErrorCode::invalidArgument,
+                                     "MIDI delay line used by two inputs in step " + std::to_string(i));
+                graph->midiLines_.push_back(m.delayLine);
+            }
+        }
+
         const auto firstFeed = static_cast<uint32_t>(graph->feeds_.size());
         for (const RenderFeedDesc& f : s.feeds)
             graph->feeds_.push_back(Feed{f.buffer, f.add, f.delay, f.delay > 0 ? f.delayLine.get() : nullptr});
+        const auto firstMidiInput = static_cast<uint32_t>(graph->midiInputs_.size());
+        for (const RenderMidiInputDesc& m : s.midiInputs)
+            graph->midiInputs_.push_back(MidiInput{m.fromStep, m.delay, m.delayLine.get()});
         graph->steps_.push_back(Step{s.node.get(), s.input.buffer, s.sidechain.buffer, s.output,
                                      firstFeed, static_cast<uint32_t>(s.feeds.size()),
-                                     s.resetOnLocate, s.timeline});
+                                     s.resetOnLocate, s.timeline, nullptr, s.midiCapacity,
+                                     firstMidiInput, static_cast<uint32_t>(s.midiInputs.size()),
+                                     nullptr, 0});
         graph->owned_.push_back(std::move(s.node));
     }
+
+    // T-045: lay out every step's MIDI output and merge storage in one allocation. A merge holds
+    // everything its inputs can deliver in one block: an upstream writer's capacity, or a delay
+    // line's maxOut(), so merging never drops.
+    std::size_t midiEvents = 0;
+    uint32_t maxFanIn = 0;
+    for (Step& step : graph->steps_) {
+        midiEvents += step.midiCapacity;
+        maxFanIn = std::max(maxFanIn, step.numMidiInputs);
+        if (step.numMidiInputs < 2) continue;
+        uint64_t merge = 0;
+        for (uint32_t j = 0; j < step.numMidiInputs; ++j) {
+            const MidiInput& m = graph->midiInputs_[step.firstMidiInput + j];
+            merge += m.delayLine ? m.delayLine->maxOut() : graph->steps_[m.fromStep].midiCapacity;
+        }
+        if (merge > std::numeric_limits<uint32_t>::max())
+            return makeError(ErrorCode::invalidArgument, "MIDI merge too large");
+        step.mergeCapacity = static_cast<uint32_t>(merge);
+        midiEvents += merge;
+    }
+    if (midiEvents > 0) graph->midiStorage_.reset(new MidiEvent[midiEvents]());
+    std::size_t at = 0;
+    for (Step& step : graph->steps_) {
+        if (step.midiCapacity > 0) step.midiOut = graph->midiStorage_.get() + at;
+        at += step.midiCapacity;
+        if (step.mergeCapacity > 0) step.midiMerge = graph->midiStorage_.get() + at;
+        at += step.mergeCapacity;
+    }
+    graph->midiSizes_.reset(new uint32_t[std::max<std::size_t>(graph->steps_.size(), 1)]());
+    graph->mergeSpans_.reset(new MidiEventSpan[std::max(maxFanIn, 1u)]());
+    graph->mergeCursors_.reset(new uint32_t[std::max(maxFanIn, 1u)]());
 
     graph->sampleRate_ = desc.sampleRate;
     graph->maxBlock_ = desc.maxBlock;
@@ -187,15 +362,55 @@ void RenderGraph::feed(const Step& step, uint32_t numFrames) const DAW_RT {
     }
 }
 
+MidiEventSpan RenderGraph::gatherMidi(const Step& step, uint32_t numFrames) const DAW_RT {
+    if (step.numMidiInputs == 0) return {};
+    // Each input's events for this block: the upstream writer's (it ran earlier in this block),
+    // through the edge's delay line when it has one (MIX-021). Every line runs once per block.
+    for (uint32_t j = 0; j < step.numMidiInputs; ++j) {
+        const MidiInput& m = midiInputs_[step.firstMidiInput + j];
+        const Step& from = steps_[m.fromStep];
+        MidiEventSpan events(from.midiOut, from.midiOut ? midiSizes_[m.fromStep] : 0);
+        if (m.delayLine != nullptr) events = m.delayLine->process(events, m.delay, numFrames);
+        mergeSpans_[j] = events;
+    }
+    if (step.numMidiInputs == 1) return mergeSpans_[0];  // the writer's own span, no copy
+
+    // k-way merge in frame order; on equal frames the earlier input goes first (stable). Each
+    // pass emits one event, so it is bounded by mergeCapacity (CONV-RT-04).
+    for (uint32_t j = 0; j < step.numMidiInputs; ++j) mergeCursors_[j] = 0;
+    uint32_t size = 0;
+    while (size < step.mergeCapacity) {
+        uint32_t best = step.numMidiInputs;
+        for (uint32_t j = 0; j < step.numMidiInputs; ++j) {
+            if (mergeCursors_[j] >= mergeSpans_[j].size()) continue;
+            if (best == step.numMidiInputs ||
+                mergeSpans_[j][mergeCursors_[j]].frameOffset < mergeSpans_[best][mergeCursors_[best]].frameOffset)
+                best = j;
+        }
+        if (best == step.numMidiInputs) break;
+        step.midiMerge[size++] = mergeSpans_[best][mergeCursors_[best]++];
+    }
+    return MidiEventSpan(step.midiMerge, size);
+}
+
+MidiEventSpan RenderGraph::midiOutput(uint32_t step) const DAW_RT {
+    const Step& s = steps_[step];
+    return MidiEventSpan(s.midiOut, s.midiOut ? midiSizes_[step] : 0);
+}
+
 void RenderGraph::process(ProcessContext& ctx, ProcessContext& timeline) const DAW_RT {
     const uint32_t numFrames = ctx.numFrames;
     DAW_RT_ASSERT(numFrames <= maxBlock_ && timeline.numFrames == numFrames);
-    for (const Step& step : steps_) {
+    for (uint32_t i = 0; i < steps_.size(); ++i) {
+        const Step& step = steps_[i];
         NodeIO io;
         io.audioIn = input(step.input, numFrames);
         io.sidechain = input(step.sidechain, numFrames);  // MIX-008, ENG-003: empty when unrouted
         if (step.output != kNoBuffer) io.audioOut = buffers_.view(step.output, numFrames);
+        io.midiIn = gatherMidi(step, numFrames);  // T-045
+        if (step.midiOut != nullptr) io.midiOut = MidiEventWriter(step.midiOut, step.midiCapacity);
         step.node->process(step.timeline ? timeline : ctx, io);
+        if (step.midiOut != nullptr) midiSizes_[i] = io.midiOut.size();
         if (step.numFeeds > 0) feed(step, numFrames);
     }
 }
