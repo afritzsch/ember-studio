@@ -582,6 +582,10 @@ public protocol EngineProtocol: AnyObject, Sendable {
     func setLoop(enabled: Bool, start: Tick, end: Tick)
     func setRecording(_ recording: Bool)
     func transport() -> TransportState
+    /// UI-021 (T-043): auditions `pitch` on `track`'s instrument (a MIDI track's sampler or plugin),
+    /// whether the transport plays or not. Every note-on needs its note-off; `stop` and `locate`
+    /// end any still on. Non-RT; queued lock-free for the audio thread.
+    func previewNote(track: ModelID, pitch: UInt8, velocity: UInt8, on: Bool)
 
     // Assets (IO-031)
     func loadAsset(_ assetID: ModelID, path: String) -> JobID
@@ -616,6 +620,13 @@ public protocol EngineProtocol: AnyObject, Sendable {
     /// Drains up to `max` queued events, oldest first.
     func pollEvents(max: Int) -> [EngineEvent]
     func paramInfoJSON(_ kind: NodeKind) -> String
+}
+
+// MARK: T-043 (UI-021)
+
+extension EngineProtocol {
+    /// Engines that can't audition (test doubles) ignore preview notes.
+    public func previewNote(track: ModelID, pitch: UInt8, velocity: UInt8, on: Bool) {}
 }
 
 extension EngineProtocol {

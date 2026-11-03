@@ -413,6 +413,15 @@ public:
     void setRecording(bool recording);
     TransportPOD transport() const;
 
+    // UI-021 (T-043, accepted (autobuild, see docs/autobuild/DECISIONS.md)): auditions `pitch` on
+    // the instrument fed by the MIDI source node `source` (a MIDI track's MidiClipPlayer), on MIDI
+    // channel 1, whether the transport plays or not. Non-RT, any thread; it queues the note
+    // lock-free for the audio thread, which plays it at the start of the next block. A note-on for
+    // a sounding pitch retriggers it; every note-on needs its note-off, and stop(), locate() and
+    // renderOffline() turn off every preview note still on. A note-on is ignored in offline mode
+    // and while an export runs (nothing would hear it but the export); a note-off never is.
+    void previewNote(NodeID source, uint8_t pitch, uint8_t velocity, bool on);
+
     // MARK: Assets (IO-031, DW-041)
 
     // Decodes `path` on daw.loader at the session rate. A later load of the same assetID

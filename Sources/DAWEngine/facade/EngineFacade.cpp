@@ -55,6 +55,7 @@
 #include "nodes/Compressor.h"
 #include "nodes/GainNode.h"
 #include "nodes/Metronome.h"
+#include "nodes/MidiClipPlayer.h"
 #include "time/TempoMap.h"
 
 
@@ -220,6 +221,9 @@ struct EngineFacade::Impl {
     const EngineMode mode;
     // Kept to rebuild the registry when the session rate changes.
     std::function<Result<void>(NodeRegistry&)> registerNodes;
+    // UI-021 (T-043): preview notes for the tracks' MidiClipPlayers. Declared before `engine`, so
+    // it outlives every node that reads it.
+    MidiPreviewInbox previewInbox;
 
     // Declaration order is destruction order in reverse: the loader and compiler threads stop
     // before the state their callbacks touch, and the engine outlives everything rendering
@@ -379,6 +383,14 @@ EngineFacade::Impl::Impl(EngineMode m, const DriverConfigPOD& cfg, FacadeOptions
         }
     }
     if (!(sampleRate >= kMinSampleRate && sampleRate <= kMaxSampleRate)) sampleRate = 48000.0;
+
+    // UI-021 (T-043): MIDI players read preview notes from previewInbox. Registered before the
+    // creator's hook, which may still replace the kind; kept in registerNodes for rate changes.
+    registerNodes = [hook = std::move(registerNodes), inbox = &previewInbox](NodeRegistry& r) -> Result<void> {
+        if (auto set = r.set(NodeKind::midiClipPlayer, MidiClipPlayer::kindInfo(inbox)); !set) return set;
+        return hook ? hook(r) : Result<void>{};
+    };
+    options.registerNodes = registerNodes;
 
     auto registry = makeRegistry(assets, engine.telemetry(), meters, options);
     if (!registry) {
@@ -910,12 +922,14 @@ void EngineFacade::play() {
 
 void EngineFacade::stop() {
     std::lock_guard lock(impl_->mutex);
+    impl_->previewInbox.releaseAll();  // UI-021: no preview note outlives a stop
     (void)impl_->engine.transport().stop();
     impl_->applyTransportCommands();
 }
 
 void EngineFacade::locate(Tick tick) {
     std::lock_guard lock(impl_->mutex);
+    impl_->previewInbox.releaseAll();  // UI-021: nor a locate
     (void)impl_->engine.transport().locate(tick);
     impl_->applyTransportCommands();
 }
@@ -930,6 +944,14 @@ void EngineFacade::setRecording(bool recording) {
     std::lock_guard lock(impl_->mutex);
     (void)impl_->engine.transport().setRecording(recording);
     impl_->applyTransportCommands();
+}
+
+// UI-021 (T-043): see EngineFacade.h. The inbox (nodes/MidiClipPlayer.h) is lock-free towards
+// the audio thread; the facade lock only serializes its producers.
+void EngineFacade::previewNote(NodeID source, uint8_t pitch, uint8_t velocity, bool on) {
+    std::lock_guard lock(impl_->mutex);
+    if (on && (impl_->mode == EngineMode::offline || impl_->exportBusy())) return;
+    (void)impl_->previewInbox.post(source, pitch, velocity, on);
 }
 
 TransportPOD EngineFacade::transport() const {
@@ -1064,6 +1086,7 @@ JobID EngineFacade::renderOffline(Tick from, Tick to, const ExportSpecPOD& spec)
                                                            std::to_string(kMaxBlock)));
         return job;
     }
+    impl_->previewInbox.releaseAll();  // UI-021: previews end before the export
     impl_->exportQueue.push_back({job, from, to, spec});
     impl_->exportWake.notify_one();
     return job;
