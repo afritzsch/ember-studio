@@ -251,6 +251,14 @@ double maxStep(const Signal& s, size_t from, size_t to) {
     return worst;
 }
 
+// The largest step a hard switch from delay `from` to `to` could make at a frame in
+// [at, at + 960): |in[t − from] − in[t − to]|.
+double jumpSize(const Signal& in, size_t at, size_t from, size_t to) {
+    double worst = 0;
+    for (size_t t = at; t < at + 960; ++t) worst = std::max(worst, std::fabs(double{in[t - from]} - in[t - to]));
+    return worst;
+}
+
 struct Response {
     Signal left, right;
     uint64_t violations;
@@ -532,7 +540,8 @@ CheckResult delayResponse() {
         }
         DAW_CHECK(worst < 1e-6);
         DAW_CHECK(rig.left[30960] == tone[30960 - 11040] && rig.left[29999] == tone[29999 - 12000]);
-        DAW_CHECK(std::fabs(double{tone[30000 - 12000]} - tone[30000 - 11040]) > 0.5);  // what a jump would do
+        // What a jump would do: the old and new taps differ by up to ~0.54 (|0.5 · 2 sin(π · 8.82)|).
+        DAW_CHECK(jumpSize(tone, 30000, 12000, 11040) > 0.4);
         const double slope = 0.5 * 2 * std::numbers::pi * 441.0 / kRate;
         DAW_CHECK(maxStep(rig.left, 12001, 60000) < slope + 0.002);
         violations += rig.violations;
@@ -745,7 +754,7 @@ CheckResult delayThroughEngine() {
         worst = std::max({worst, std::fabs(double{f.left()[t]} - want), std::fabs(double{f.right()[t]} - want)});
     }
     DAW_CHECK(worst < 1e-6);
-    DAW_CHECK(std::fabs(double{tone[48128 - 12000]} - tone[48128 - 24000]) > 0.5);  // what a jump would do
+    DAW_CHECK(jumpSize(tone, 48128, 12000, 24000) > 0.5);  // what a jump would do (≈ 0.71)
     DAW_CHECK(maxStep(f.left(), 12001, 120000) < 0.5 * 2 * std::numbers::pi * 441.0 / kRate + 0.002);
 
     DAW_CHECK(a.engine().telemetry().snapshot().graphLatency == 0);
