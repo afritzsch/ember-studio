@@ -80,7 +80,15 @@ public final class ProjectStore {
     public func perform(_ command: any Command) throws(DAWError) {
         let before = project
         var working = project
-        try history.perform(command, on: &working)
+        // T-056: a session-rate change goes to the engine first, so a rate it refuses (the device
+        // can't run it) leaves the document as it is; if the command then fails, the engine goes back.
+        let engineRateBefore = try changeEngineSampleRate(for: command)
+        do {
+            try history.perform(command, on: &working)
+        } catch {
+            if let engineRateBefore { try? engineSync?.setSessionSampleRate(engineRateBefore) }
+            throw error
+        }
         project = working
         if command.isHistoryExempt {
             unrecordedEdits &+= 1
@@ -157,6 +165,8 @@ public final class ProjectStore {
     ) throws(DAWError) -> EngineSync {
         detachEngine()
         let sync = try EngineSync(engine: engine, project: project, debounce: debounce)
+        // DW-130 (T-056): the document follows a session-rate change the engine made by itself.
+        sync.onEngineSampleRateChange = { [weak self] rate in self?.followEngineSampleRate(rate) }
         engineSync = sync
         return sync
     }
@@ -164,6 +174,30 @@ public final class ProjectStore {
     public func detachEngine() {
         engineSync?.invalidate()
         engineSync = nil
+    }
+
+    // MARK: Session sample rate (T-056)
+
+    /// For `SetSessionSampleRate` and its inverse: changes the attached engine's rate and returns
+    /// the one it had (nil when nothing changed).
+    private func changeEngineSampleRate(for command: any Command) throws(DAWError) -> Double? {
+        let rate = (command as? SetSessionSampleRate)?.sampleRate ?? (command as? RestoreSessionSampleRate)?.sampleRate
+        guard let rate, let engineSync, rate != engineSync.engineSampleRate else { return nil }
+        try SetSessionSampleRate.check(rate)
+        let previous = engineSync.engineSampleRate
+        try engineSync.setSessionSampleRate(rate)
+        return previous
+    }
+
+    /// DW-130: the engine runs at `rate` now (a device fallback, `device.set`); the document
+    /// follows with `SetSessionSampleRate`, which marks it dirty but isn't undoable.
+    private func followEngineSampleRate(_ rate: Double) {
+        guard rate != project.sessionSampleRate else { return }
+        do {
+            try perform(SetSessionSampleRate(sampleRate: rate))
+        } catch {
+            Self.log.error("couldn't follow the engine's session rate \(rate): \(error)")
+        }
     }
 
     // MARK: Persistence (MODEL-040..046)

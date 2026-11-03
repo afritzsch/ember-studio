@@ -189,6 +189,18 @@ public final class EngineClient: EngineProtocol {
         if let error = Self.error(facade.simulateDeviceEvent(pod)) { throw error }
     }
 
+    // MARK: Session sample rate (T-056)
+
+    /// MODEL-005 `SetSessionSampleRate`, IO-033 (`daw::EngineFacade::setSessionSampleRate`).
+    public func setSessionSampleRate(_ rate: Double) throws(DAWError) {
+        if let error = Self.error(facade.setSessionSampleRate(rate)) { throw error }
+    }
+
+    /// DW-077: IO-034's peaks through the cache file in `peakCacheDirectory`.
+    public func loadAsset(_ assetID: ModelID, path: String, peakCacheDirectory: String) -> JobID {
+        facade.loadAsset(assetID, std.string(path), std.string(peakCacheDirectory))
+    }
+
     // MARK: Observability
 
     public func telemetry() -> EngineTelemetry {
@@ -217,6 +229,7 @@ public final class EngineClient: EngineProtocol {
         out.outputDeviceID = t.outputDeviceID
         out.processorOverloads = t.processorOverloads
         out.renderOverruns = t.renderOverruns
+        out.assetsReloadPending = t.assetsReloadPending  // T-056
         return out
     }
 
@@ -340,6 +353,18 @@ public final class EngineClient: EngineProtocol {
         case .jobFinished: .jobFinished
         default: .deviceChanged
         }
+        // T-056 (IO-033, DW-044): the re-conversion's progress.
+        var reload: AssetsReload?
+        if kind == .assetsReloaded {
+            let phase: AssetsReload.Phase = switch e.reload.phase {
+            case .started: .started
+            case .progress: .progress
+            default: .finished
+            }
+            reload = AssetsReload(phase: phase, previousSampleRate: e.reload.previousSampleRate,
+                                  sampleRate: e.reload.sampleRate, done: e.reload.done, total: e.reload.total,
+                                  failed: e.reload.failed, assetID: e.reload.assetID)
+        }
         var device: DeviceChange?
         if kind == .deviceChanged {
             let reason: DeviceChange.Reason = switch e.device.reason {
@@ -355,7 +380,7 @@ public final class EngineClient: EngineProtocol {
                                   sampleRate: e.device.sampleRate)
         }
         return EngineEvent(kind: kind, subject: e.subject, job: e.job, count: e.count, error: error(e.error),
-                           device: device)
+                           device: device, reload: reload)
     }
 
     private static func cxx(_ kind: NodeKind) -> daw.NodeKind {
