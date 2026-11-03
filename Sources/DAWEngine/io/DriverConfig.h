@@ -10,6 +10,8 @@
 
 namespace daw {
 
+class InputCapture;
+
 // An AudioObjectID. 0 (kAudioObjectUnknown) means "the system default".
 using AudioDeviceRef = uint32_t;
 
@@ -35,6 +37,9 @@ struct DriverConfig {
     // The first N device channels; fewer if the device has fewer.
     uint32_t outputChannels = 2;
     uint32_t inputChannels = 2;
+    // REC-001 (T-052): handed each block's input after Engine::render (DeviceRenderer). Not owned;
+    // it must outlive the run. Null: input goes nowhere but the engine's RenderTarget.
+    InputCapture* capture = nullptr;
 };
 
 // What a driver's start() resolved (IO-003, IO-004), for any driver (DW-088). Zeros while

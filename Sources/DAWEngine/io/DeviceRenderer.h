@@ -24,6 +24,7 @@
 namespace daw {
 
 class Engine;
+class InputCapture;
 
 // IO-023, DW-068: how long after a driver start overruns and overload notifications are ignored.
 inline constexpr double kXrunGraceSeconds = 0.25;
@@ -41,6 +42,9 @@ public:
     // window.
     void configure(uint32_t maxBlock, double sampleRate = 0);
     uint32_t maxBlock() const DAW_RT { return maxBlock_; }
+    // REC-001 (T-052), non-RT while no cycle runs: gets each block's input after Engine::render.
+    // Null: none.
+    void setCapture(InputCapture* capture) { capture_ = capture; }
 
     // RT. Renders `numFrames` frames into `output` (its first kMaxDeviceChannels channels; any
     // beyond are cleared) with `input` as the device input. Either side may have 0 channels.
@@ -61,6 +65,7 @@ public:
 
 private:
     Engine& engine_;
+    InputCapture* capture_ = nullptr;
     uint32_t maxBlock_ = kDefaultDeviceBuffer;
     double nanosPerFrame_ = 0;  // 0: overruns aren't judged
     std::atomic<uint64_t> graceEndFrame_{0};
