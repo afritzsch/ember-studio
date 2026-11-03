@@ -86,16 +86,26 @@ struct ProjectCrashTests {
 
             // Kill between the tmp file's creation and its rename. Even runs aim at the write
             // itself (the file is shorter than a full one), odd runs at any point (mostly fsync).
+            // DW-172: the spin runs off the main actor (it never awaits, and on the main actor it
+            // held every other @MainActor test in the process for up to 30 s per run). It sends
+            // the kill itself, from the same thread, the moment the condition holds, so the kill
+            // timing is as tight as before.
             let tmp = folder.appending(path: "project.json.tmp").path
-            let deadline = ContinuousClock.now + .seconds(30)
-            var info = stat()
-            while ContinuousClock.now < deadline {
-                guard stat(tmp, &info) == 0 else { continue }
-                if run % 2 == 1 || (info.st_size > 0 && Int(info.st_size) < full / 2) { break }
-            }
-            killAndWait(process)
+            let pid = process.processIdentifier
+            let anyPoint = run % 2 == 1
+            await Task.detached {
+                let deadline = ContinuousClock.now + .seconds(30)
+                var info = stat()
+                while ContinuousClock.now < deadline {
+                    guard stat(tmp, &info) == 0 else { continue }
+                    if anyPoint || (info.st_size > 0 && Int(info.st_size) < full / 2) { break }
+                }
+                kill(pid, SIGKILL)
+            }.value
+            process.waitUntilExit()
             #expect(process.terminationReason == .uncaughtSignal)
 
+            var info = stat()
             if stat(tmp, &info) == 0 {
                 killedBeforeRename += 1
                 if Int(info.st_size) < full { killedMidWrite += 1 }
