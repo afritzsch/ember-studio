@@ -78,8 +78,8 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 | T-040 | D | MidiClipPlayer, hanging-note handling | DSP-003 | T-008, T-012 | done |
 | T-041 | D | Sampler (zones, Hermite, voices, ADSR, CC64, bend) | DSP-020..023 | T-040, T-010 | done |
 | T-042 | M | Note commands, instrument slot on MIDI tracks | MODEL-005 (note subset) | T-030 | done |
-| T-043 | U | Piano roll + velocity lane + audition (`previewNote` facade addition) | UI-020, 021 | T-033, T-042 | ready |
-| T-044 | D | M4 goldens | TEST (M4 set) | T-041, T-042, T-045 | ready |
+| T-043 | U | Piano roll + velocity lane + audition (`previewNote` facade addition) | UI-020, 021 | T-033, T-042 | wip(t-043-piano-roll) |
+| T-044 | D | M4 goldens | TEST (M4 set) | T-041, T-042, T-045 | wip(t-044-m4-goldens) |
 | T-045 | E | MIDI edge routing in RenderGraph/GraphBuilder: player → instrument MIDI data, frame-ordered merge, fixed-capacity storage, MIDI delay for PDC; makes a MIDI track with a sampler audible | DW-099 (DSP-003, MIX-001, MIX-021 for MIDI) | T-040, T-041 | done |
 
 ### M5 — Recording & devices
@@ -91,7 +91,7 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 | T-053 | E | CoreMIDI input + MIDI recording | REC-010..012 | T-040 | todo |
 | T-054 | E | Input monitoring modes | REC-020..022 | T-052 | todo |
 | T-055 | U | Audio preferences, device toasts, arm/monitor buttons | UI-040, UI-004 | T-051, T-034 | ready |
-| T-056 | E+M | Session sample-rate change (re-convert assets, re-prepare) | IO-033, MODEL-005 (`SetSessionSampleRate`) | T-051 | ready |
+| T-056 | E+M | Session sample-rate change (re-convert assets, re-prepare) | IO-033, MODEL-005 (`SetSessionSampleRate`) | T-051 | wip(t-056-session-rate) |
 
 ### M6 — Plugins
 | Task | Lane | Title | Requirements | Depends on | Status |
@@ -111,7 +111,7 @@ DSP effects (T-070..073) depend only on the Node API and can be **pulled forward
 | T-070 | D | EQ | DSP-030, 040, 041 | T-004, T-005 | ready |
 | T-071 | D | Compressor (+ sidechain) | DSP-031, 040, 041 | T-005, T-023 | done |
 | T-072 | D | Delay (tempo sync) | DSP-032, 040, 041 | T-008 | ready |
-| T-073 | D | Reverb (FDN, deterministic) | DSP-033, 040, 041 | T-004, T-005 | ready |
+| T-073 | D | Reverb (FDN, deterministic) | DSP-033, 040, 041 | T-004, T-005 | wip(t-073-reverb) |
 | T-074 | E+M | Automation lanes model + AutomationPlayer + plugin param path | AUTO-001..005, 008..010 | T-030, T-061/T-062 (for AUTO-009) | todo |
 | T-075 | U+M | Automation recording (touch/latch/write) + lane UI | AUTO-006, 007, UI-015 | T-074, T-033 | todo |
 | T-076 | U | Mixer view + meters + routing pickers | UI-030, 031, 033 | T-022, T-032 | ready |

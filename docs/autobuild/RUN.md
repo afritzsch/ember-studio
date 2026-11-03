@@ -40,3 +40,8 @@ Unattended phases started by `/autobuild` (see `.claude/skills/autobuild/SKILL.m
 - 5-hour window hit 85% at 1793678717 (epoch), ~45 min into the phase. T-034 (finished, waiting for its metronome-button follow-up) paused until the reset at 1793692800 + 120 s.
 - Resumed T-034 at 1793692983 (five-hour window 0%). It merged main and added the `transport.metronome` toolbar toggle. T-034 merged (190deac). T-055 is now ready.
 - End: 4/4 merged, main green (test.sh 11/11, timed swift test 2×), no worker session left open.
+
+### Phase 4 (2026-11-03)
+- Wave: T-044 M4 goldens (D, test-only), T-043 piano roll + audition (U, M4; `previewNote` pre-decided), T-056 session-rate change (E+M, M5; undo/events pre-decided), T-073 reverb (D, M7; new files only, disjoint from T-044).
+- Start: week 34%, five-hour window 12%.
+- Pre-decisions in DECISIONS.md: T-043 `previewNote` facade addition; T-056 `SetSessionSampleRate` history-exempt and follows engine-side rate changes (DW-130); T-056 additive progress events pre-accepted.
