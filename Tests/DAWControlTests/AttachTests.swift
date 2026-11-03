@@ -48,7 +48,7 @@ struct AttachTests {
         try server.run()
         defer {
             server.terminate()
-            server.waitUntilExit()
+            waitForExit(server)
         }
         #expect(await waitUntil { ControlSocketClient.isListening(at: path) })
 
@@ -148,8 +148,7 @@ struct AttachTests {
         run.arguments = ["serve", "--engine", "warp"]
         run.standardError = FileHandle.nullDevice
         try run.run()
-        run.waitUntilExit()
-        #expect(run.terminationStatus == 2)
+        #expect(waitForExit(run) && run.terminationStatus == 2)
     }
 
     @Test("CTL-023: the app is rebuilt when it is missing or older than its sources")
