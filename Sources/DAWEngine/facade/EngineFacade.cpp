@@ -55,6 +55,7 @@
 #include "nodes/Compressor.h"
 #include "nodes/GainNode.h"
 #include "nodes/Metronome.h"
+#include "nodes/Reverb.h"
 #include "time/TempoMap.h"
 
 
@@ -1212,6 +1213,7 @@ std::string EngineFacade::paramInfoJSON(NodeKind kind) const {
     if (kind == NodeKind::compressor) params = Compressor::kParamInfo;  // DSP-041
     if (kind == NodeKind::gain) params = GainNode::kParamInfo;            // DW-160 (T-026): sends, MIX-007
     if (kind == NodeKind::metronome) params = Metronome::kParamInfo;      // DW-160 (T-026): TIME-010 slots
+    if (kind == NodeKind::reverb) params = Reverb::kParamInfo;            // DSP-041 (T-073)
     std::string json = "[";
     for (const ParamInfo& p : params) {
         if (json.size() > 1) json += ",";

@@ -45,7 +45,7 @@
 | `vst3_again_gain` | M6 | PLUG-011 |
 | `automation_ramp` | M7 | AUTO-002 |
 | `sidechain_compressor` | M7 | DSP-031, MIX-008 |
-| `reverb_determinism` | M7 | IO-011 |
+| `reverb_determinism` | M7 | DSP-033, IO-011 |
 
 ## Agent verification recipe
 When an agent finishes an audio-affecting task it must:
