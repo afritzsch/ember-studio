@@ -52,6 +52,8 @@ public enum CommandRegistry {
         RemoveInstrument.self,
         RestoreInstrument.self,
         SetSamplerZones.self,
+        // T-026: project metronome (TIME-010, outside undo history)
+        SetMetronome.self,
     ]
 
     private static let table = Mutex<[String: any Command.Type]>(

@@ -18,6 +18,10 @@ public struct CompositeCommand: Command {
         var inverses: [any Command] = []
         inverses.reserveCapacity(commands.count)
         for command in commands {
+            // T-026: a history-exempt step would become undoable as part of this entry.
+            guard !command.isHistoryExempt else {
+                throw .invalidArgument("\(Swift.type(of: command).type) stays out of undo history and can't be part of a composite edit")
+            }
             inverses.append(try command.apply(to: &working))
         }
         project = working

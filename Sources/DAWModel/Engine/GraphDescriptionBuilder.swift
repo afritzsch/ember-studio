@@ -11,6 +11,7 @@ import Foundation
 /// MIDI track:  midiClipPlayer(source) ─midi→ instrument(slot) → inserts… → strip(track)
 /// bus:         bus(input) → inserts… → strip(bus)
 /// master:      bus(input) → inserts… → strip(master) → master(output)
+/// metronome:   metronome(master) → master(output)    (T-026, always there; its slots switch it)
 /// strip → input of the output target (a bus or the master)
 /// send:        tap → gain(send) → input of the target bus
 ///              post-fader tap = the strip; pre-fader tap = the node feeding the strip
@@ -83,6 +84,13 @@ public enum GraphDescriptionBuilder {
         b.edge(master.id, masterOutput)
         b.graph.master = masterOutput
 
+        // TIME-010 (T-026): the click goes straight into the master node, past the master's
+        // inserts and fader, so no solo, mute or master FX touches it. It is always in the graph:
+        // `project.metronome` only reaches its param slots, so toggling it never rebuilds.
+        let metronome = GraphNodeID.metronome(of: master.id)
+        b.node(metronome, .metronome)
+        b.edge(metronome, masterOutput)
+
         // Outputs, then sends, then sidechains: every node they connect exists by now.
         let buses = Set(project.buses.map(\.id))
         func input(of target: OutputTarget) -> NodeIDValue? {
@@ -120,6 +128,7 @@ public enum GraphDescriptionBuilder {
         var out: [NodeIDValue: UInt32] = [:]
         out[project.master.id] = ParamLayout.Strip.count
         out[GraphNodeID.output(of: project.master.id)] = ParamLayout.Master.count
+        out[GraphNodeID.metronome(of: project.master.id)] = ParamLayout.Metronome.count
         for track in project.tracks {
             out[track.id] = ParamLayout.Strip.count
             for send in track.sends { out[send.id] = ParamLayout.Send.count }
@@ -139,7 +148,12 @@ public enum GraphDescriptionBuilder {
     /// mute (manual or solo, MIX-006) goes into its strip's mute slot and into the mute slot of
     /// every send it owns (MIX-007), so a muted channel can't leak into a bus through a pre-fader
     /// send. Send levels keep their value while muted.
-    public static func paramValues(_ project: Project, runtime: RuntimeIDs, catalog: ParamCatalog) -> [ParamID: Float] {
+    ///
+    /// T-026: the metronome's `on` slot holds `project.metronome.enabled`, unless
+    /// `metronomeSuppressed` (an export that leaves the click out) forces it off.
+    public static func paramValues(
+        _ project: Project, runtime: RuntimeIDs, catalog: ParamCatalog, metronomeSuppressed: Bool = false
+    ) -> [ParamID: Float] {
         let muted = SoloResolver.mutedChannels(in: project)
         var out: [ParamID: Float] = [:]
         func set(_ node: NodeIDValue, _ index: UInt32, _ value: Float) {
@@ -160,6 +174,10 @@ public enum GraphDescriptionBuilder {
 
         strip(project.master.id, project.master.strip)
         set(GraphNodeID.output(of: project.master.id), ParamLayout.Master.limiter, 0)
+        let metronome = GraphNodeID.metronome(of: project.master.id)
+        set(metronome, ParamLayout.Metronome.on, project.metronome.enabled && !metronomeSuppressed ? 1 : 0)
+        set(metronome, ParamLayout.Metronome.level, project.metronome.level)
+        set(metronome, ParamLayout.Metronome.accent, project.metronome.accent)
         for track in project.tracks {
             strip(track.id, track.strip)
             sends(track.id, track.sends)

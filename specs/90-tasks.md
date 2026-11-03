@@ -59,7 +59,7 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 | T-023 | E | Sidechain edges and ports | MIX-008 | T-021 | done |
 | T-024 | D | Metronome node | TIME-010, DSP-011 | T-008 | done |
 | T-025 | E | M2 goldens: pan law, bus/send sum, PDC null | TEST (M2 set) | T-020, T-021, T-022, T-019 (harness) | done |
-| T-026 | M+B | Project metronome: `Project.metronome {enabled, level, accent}` (persisted), `SetMetronome` command, GraphDescriptionBuilder emits one metronome node straight into the master (not soloed/muted with tracks; toggles are slot writes), `transport.setMetronome` + dawmcp tool, facade `paramInfoJSON` publishes `Metronome::kParamInfo` (and `GainNode`). Open for the user (T-024 Qs): export includes the click? (recommended: no, unless `includeMetronome: true`); toggle undoable? (recommended: a command that doesn't enter undo history). Toolbar button: T-034 | TIME-010 (project part), DW-160 | T-024 | wip(t-026-project-metronome) |
+| T-026 | M+B | Project metronome: `Project.metronome {enabled, level, accent}` (persisted), `SetMetronome` command, GraphDescriptionBuilder emits one metronome node straight into the master (not soloed/muted with tracks; toggles are slot writes), `transport.setMetronome` + dawmcp tool, facade `paramInfoJSON` publishes `Metronome::kParamInfo` (and `GainNode`). Open for the user (T-024 Qs): export includes the click? (recommended: no, unless `includeMetronome: true`); toggle undoable? (recommended: a command that doesn't enter undo history). Toolbar button: T-034 | TIME-010 (project part), DW-160 | T-024 | done |
 
 ### M3 — Timeline, persistence, app shell
 | Task | Lane | Title | Requirements | Depends on | Status |
@@ -354,7 +354,7 @@ Recorded by the lead from worker reports.
 | DW-155 | T-032 | `project.open` through the app's socket swaps the document but doesn't toast its load report (recovery available, offline assets); File > Open does | U | todo |
 | DW-156 | T-032 | Every project window gets its own engine; with `--engine coreAudio` several windows each open the device. Needs a policy (one live engine for the main window, others offline?) | lead/user | todo |
 | DW-157 | T-032 | Quitting the real app (SIGTERM, parent exit, menu) is verified by hand only; an automated test needs the built app, e.g. a `scripts/test.sh` stage after xcodebuild | B / test | todo |
-| DW-160 | T-024 | Project-level metronome wiring (model setting, command, graph node into master, `transport.setMetronome`, paramInfoJSON for `Metronome`/`GainNode` slots); proposal in T-024's report | M+B (T-026) | todo |
+| DW-160 | T-024 | Project-level metronome wiring (model setting, command, graph node into master, `transport.setMetronome`, paramInfoJSON for `Metronome`/`GainNode` slots); proposal in T-024's report | M+B (T-026) | done (T-026) |
 | DW-161 | T-024 | Optional: add `NodeKind::metronome` to GraphBuilder's `resetsOnLocate` for consistency (the node already self-detects locates) | E | todo |
 | DW-162 | T-036 | TIME-008 "effects keep their tails" with a real tailed effect (delay feedback / reverb) once T-072/T-073 exist; today `locate_reset` uses a SineNode insert's state | D (T-072/T-073 or T-077) | todo |
 | DW-163 | T-036 | dawmcp over stdio answered a pipelined `tools/call` (render.offline) before an earlier `daw_test_fixture` call finished, so the render failed; one at a time works. A pipelined script over dawmcp would race | B | todo |
@@ -373,3 +373,5 @@ Recorded by the lead from worker reports.
 | DW-174 | T-071 | Meters (strip post-fader, compressor GR) can't be read through the control protocol: `dawctl`/`dawmcp` have no meter method, only the facade's `meter(node)` / `EngineProtocol.meter`. Add one (13 delta); a typed GR reading could come with it | B | todo |
 | DW-175 | T-071 | `nodes/BuiltinNodes.h` doc comment lists the registered kinds but not `compressor` (one line) | D | todo |
 | DW-176 | T-071 | TEST-008 perf (64 × EQ + Comp ≥ 20× realtime): the compressor does a per-sample `log10` + `exp` in double, unmeasured. If too slow, add a below-knee fast path | D (T-077 / T-084) | todo |
+| DW-177 | T-026 | Export dialog (T-082) must leave the click out by default: go through `render.offline` (which does it) or set `store.engineSync?.isMetronomeSuppressed = true` around `renderOffline`; an "Include metronome" checkbox maps to `includeMetronome` | U (T-082) | todo |
+| DW-178 | T-026 | `paramInfoJSON(.gain)` now publishes GainNode's 2 slots, so a device slot of built-in kind `.gain` gets level/mute slots (it had none). Sends are unaffected (`ParamLayout.Send`). Check when insert chains land (DW-149) | M | todo |

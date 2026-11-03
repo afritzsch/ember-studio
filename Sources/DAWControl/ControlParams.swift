@@ -164,6 +164,16 @@ public struct TransportRecordParams: Codable, Hashable, Sendable {
     public var enabled: Bool
 }
 
+/// T-026 (TIME-010): performs `SetMetronome` (outside undo history). Fields left out keep their
+/// value; at least one is needed.
+public struct TransportSetMetronomeParams: Codable, Hashable, Sendable {
+    public var enabled: Bool?
+    /// Linear amplitude of a beat click, 0…3.98 (+12 dB). Default 0.25.
+    public var level: Float?
+    /// Linear gain of the downbeat over `level`, 0…3.98. Default 2.
+    public var accent: Float?
+}
+
 public struct TransportWaitParams: Codable, Hashable, Sendable {
     /// Wait until the playhead is at or past this tick. Default: until playback stops.
     public var untilTick: Tick?
@@ -203,6 +213,9 @@ public struct RenderOfflineParams: Codable, Hashable, Sendable {
     /// T-036: follow the transport's loop (wrap at its end, as live playback does) instead of
     /// playing the range straight through. Default false.
     public var loop: Bool?
+    /// T-026 (docs/autobuild/DECISIONS.md Q1): include the project metronome's click when it is
+    /// on. Default false: exports leave the click out.
+    public var includeMetronome: Bool?
 }
 
 public struct RenderOfflineResult: Codable, Hashable, Sendable {
