@@ -162,6 +162,9 @@ public final class EngineClient: EngineProtocol {
         facade.setPluginState(slot, bytes)
     }
 
+    /// PLUG-010/015 (T-061).
+    public func pluginInfoJSON(slot: NodeIDValue) -> String { String(facade.pluginInfoJSON(slot)) }
+
     // MARK: Offline
 
     public func renderOffline(from: Tick, to: Tick, spec: ExportSpec) -> JobID {

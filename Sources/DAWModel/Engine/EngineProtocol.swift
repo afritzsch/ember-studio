@@ -606,6 +606,8 @@ public protocol EngineProtocol: AnyObject, Sendable {
     func instantiatePlugin(slot: NodeIDValue, _ plugin: PluginDescriptor) -> JobID
     func pluginState(slot: NodeIDValue) -> Data
     func setPluginState(slot: NodeIDValue, _ state: Data)
+    /// PLUG-010/015 (T-061): see the extension at the end of this file (default: "").
+    func pluginInfoJSON(slot: NodeIDValue) -> String
 
     // Offline (IO-010..013)
     func renderOffline(from: Tick, to: Tick, spec: ExportSpec) -> JobID
@@ -740,4 +742,13 @@ extension EngineProtocol {
     public func loadAsset(_ assetID: ModelID, path: String, peakCacheDirectory: String) -> JobID {
         loadAsset(assetID, path: path)
     }
+}
+
+/// T-061 additions to `EngineProtocol`, with defaults so test doubles compile unchanged.
+extension EngineProtocol {
+    /// PLUG-010/015: what the slot's hosted plugin is, as the engine's JSON
+    /// (`EngineFacade::pluginInfoJSON`): identifier, whether it loaded (and why not), buses,
+    /// latency and its parameters in slot order (param index i of the slot drives `params[i]`).
+    /// Engines without plugin hosting return "".
+    public func pluginInfoJSON(slot: NodeIDValue) -> String { "" }
 }

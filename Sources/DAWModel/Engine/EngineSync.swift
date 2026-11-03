@@ -295,7 +295,8 @@ public final class EngineSync {
         let values = GraphDescriptionBuilder.paramValues(
             project, runtime: runtime, catalog: catalog, metronomeSuppressed: isMetronomeSuppressed)
         var changed: [(ParamID, Float)] = []
-        for (id, value) in values where written[id] != value { changed.append((id, value)) }
+        // Bit patterns, so a NaN ("not set", PLUG-015) that was written isn't written again.
+        for (id, value) in values where written[id]?.bitPattern != value.bitPattern { changed.append((id, value)) }
         changed.sort { $0.0 < $1.0 }
         for (id, value) in changed {
             engine.setParam(id, value)

@@ -269,11 +269,23 @@ private struct Emitter {
 extension DeviceSlot {
     /// DW-140: the node's `configJSON`. A sampler with zones gets `{"zones": [...]}` in the
     /// format of 06 "Sampler semantics", keys sorted so equal zones give equal strings (MODEL-021
-    /// compares graphs); every other slot gets "" (no config).
+    /// compares graphs); an AU gets its identifier and state (T-061); every other slot gets "".
     var configJSON: String {
-        guard isSampler, !zones.isEmpty else { return "" }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        // PLUG-010/016 (T-061): an AU slot's identifier and its stored state (base64 of the binary
+        // plist), `{"identifier": …, "state": …}` (plugins/AUPluginConfig.h). The engine applies the
+        // state when it makes the slot's AU (a project being opened) or when it changes later.
+        if case .au(let descriptor) = kind {
+            struct AUConfig: Encodable {
+                var identifier: String
+                var state: String?
+            }
+            let config = AUConfig(identifier: descriptor.identifier, state: pluginState?.base64EncodedString())
+            guard let data = try? encoder.encode(config) else { return "" }
+            return String(decoding: data, as: UTF8.self)
+        }
+        guard isSampler, !zones.isEmpty else { return "" }
         // Plain integers, floats and optionals: encoding can't fail.
         guard let data = try? encoder.encode(["zones": zones]) else { return "" }
         return String(decoding: data, as: UTF8.self)

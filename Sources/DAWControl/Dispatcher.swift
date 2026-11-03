@@ -311,6 +311,8 @@ public final class Dispatcher {
                 driver: params?.driver ?? .fake))
         }
         try store.attachEngine(engine, debounce: configuration.engineDebounce)
+        // MODEL-043, DW-143 (T-061): saves capture hosted plugins' live state from the engine.
+        store.pluginStateProvider = EnginePluginStates(engine: engine)
         // MODEL-044: a headless run (dawctl, dawmcp) doesn't autosave, so it leaves no autosave/
         // behind in the folders it opens or saves. In attach mode the app's store keeps its policy.
         if configuration.mode == .headless { store.autosavePolicy = nil }

@@ -232,12 +232,17 @@ struct EngineClientTests {
         // published ParamInfo still give an empty list.
         #expect(ParamCatalog.parseDefaults(engine.paramInfoJSON(.gain)) == [1, 0])
         #expect(engine.paramInfoJSON(.audioClipPlayer) == "[]")  // no params (reverb publishes since T-073)
-        // Plugin hosting (10) isn't there yet; the calls are safe and report it.
+        // T-061 (PLUG-012/016): an AU is instantiated and parked for the slot; its state crosses as
+        // Data (a binary plist), and a state it refuses is reported as an event.
         let job = engine.instantiatePlugin(slot: 5, .audioUnit(AUDescriptor(identifier: "aufx:dely:appl", name: "Delay")))
-        #expect(engine.pollJob(job).state == .failed)
-        #expect(engine.pollJob(job).error == .notImplemented("plugin hosting is not implemented yet (10)"))
+        #expect(engine.pollJob(job).state == .succeeded)
+        let state = engine.pluginState(slot: 5)
+        #expect(state.starts(with: Data("bplist".utf8)))
         engine.setPluginState(slot: 5, Data([1, 2, 3]))
-        #expect(engine.pluginState(slot: 5).isEmpty)
+        #expect(engine.pluginState(slot: 5) == state)
+        #expect(engine.pollEvents().contains { $0.kind == .pluginCrashed && $0.subject == 5 })
+        let vst3 = engine.instantiatePlugin(slot: 6, .vst3(VST3Descriptor(identifier: "/x.vst3#00", name: "X")))
+        #expect(engine.pollJob(vst3).state == .failed)
         engine.armInput(track: 2, inputChannelPair: 0, armed: true)
     }
 }
