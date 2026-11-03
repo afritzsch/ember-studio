@@ -52,6 +52,7 @@
 #include "io/PeakMipmap.h"
 #include "nodes/BuiltinNodes.h"
 #include "nodes/ChannelStrip.h"
+#include "nodes/Compressor.h"
 #include "time/TempoMap.h"
 
 
@@ -1206,6 +1207,7 @@ size_t EngineFacade::pollEvents(EngineEventPOD* out, size_t max) {
 std::string EngineFacade::paramInfoJSON(NodeKind kind) const {
     std::span<const ParamInfo> params;
     if (kind == NodeKind::channelStrip) params = ChannelStrip::kParamInfo;
+    if (kind == NodeKind::compressor) params = Compressor::kParamInfo;  // DSP-041
     std::string json = "[";
     for (const ParamInfo& p : params) {
         if (json.size() > 1) json += ",";

@@ -6,6 +6,7 @@
 
 #include "nodes/AudioClipPlayer.h"
 #include "nodes/ChannelStrip.h"
+#include "nodes/Compressor.h"
 #include "nodes/GainNode.h"
 #include "nodes/Metronome.h"
 #include "nodes/MidiClipPlayer.h"
@@ -34,6 +35,8 @@ Result<void> registerBuiltinNodes(NodeRegistry& registry, AssetLookup lookup, Te
     NodeKindInfo stripInfo{std::move(strip)};
     stripInfo.meters = true;  // MIX-005, DW-048
     if (auto r = registry.set(NodeKind::channelStrip, std::move(stripInfo)); !r) return r;
+
+    if (auto r = registry.set(NodeKind::compressor, Compressor::kindInfo(telemetry)); !r) return r;  // DSP-031
 
     auto gain = [](const NodeCreateInfo& info) -> Result<std::unique_ptr<Node>> {
         if (info.desc.numParams < GainNode::kMinNumParams)
