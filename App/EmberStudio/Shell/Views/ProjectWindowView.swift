@@ -57,7 +57,7 @@ private struct ToolbarRow: View {
             // almost alike in the dark appearance.
             if let record = controls["transport.record"] { ControlToggle(control: record, face: "●") }
             if let loop = controls["transport.loop"] { ControlToggle(control: loop, face: "⟲") }
-            // T-026: the metronome toggle (`transport.metronome`) goes here.
+            if let metronome = controls["transport.metronome"] { ControlToggle(control: metronome, face: "♩") }
             Divider().frame(height: 18)
             VStack(alignment: .leading, spacing: 0) {
                 Text(model.positionBBT)

@@ -229,6 +229,30 @@ struct ToolbarTests {
         #expect(bindings.contains(["keys": "Space", "control": "transport.playStop"]))
     }
 
+    @Test("TIME-010: the metronome button toggles project.metronome through SetMetronome: dirty, no undo entry, no rebuild")
+    func metronome() throws {
+        let (model, engine) = try makeWindow()
+        #expect(!model.store.isDirty && !model.store.canUndo)
+        #expect(try model.control("transport.metronome").isOn == false)
+        let graphs = engine.appliedGraphs.count
+        engine.clearCalls()
+
+        try model.control("transport.metronome").action()
+        #expect(model.project.metronome.enabled && model.metronomeEnabled)
+        #expect(try model.control("transport.metronome").isOn == true)
+        #expect(model.store.isDirty, "persisted, so the project is edited")
+        #expect(!model.store.canUndo, "SetMetronome stays out of undo history: ⌘Z never toggles the click")
+        #expect(engine.appliedGraphs.count == graphs, "a slot write, not a rebuild (MODEL-021)")
+        #expect(engine.calls.contains { if case .setParam = $0 { true } else { false } })
+
+        let json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(UIStateDumper.dump(model, isMain: true))) as? [String: Any]
+        #expect((json?["toolbar"] as? [String: Any])?["metronome"] as? Bool == true)
+
+        try model.control("transport.metronome").action()
+        #expect(!model.project.metronome.enabled && !model.store.canUndo)
+        #expect(KeyBindings.chord(for: "transport.metronome") == nil, "12 names no shortcut for it")
+    }
+
     @Test("Without an engine the transport controls are disabled and the keys fall through")
     func noEngine() throws {
         let store = ProjectStore(project: Project(name: "No engine"))

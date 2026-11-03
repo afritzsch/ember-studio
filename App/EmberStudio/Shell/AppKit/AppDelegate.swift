@@ -271,6 +271,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         transport.addItem(controlItem("Play (Space)", "transport.playStop"))
         transport.addItem(controlItem("Record (R)", "transport.record"))
         transport.addItem(controlItem("Loop (L)", "transport.loop"))
+        transport.addItem(controlItem("Metronome", "transport.metronome"))
         main.addItem(submenu: transport, title: "Transport")
 
         let view = NSMenu(title: "View")

@@ -185,7 +185,9 @@ final class ProjectWindowModel: Identifiable {
             },
             // UI-002: L. The project's loop (SetLoop), which engine sync gives the transport (DW-123).
             .toggle("transport.loop", "Loop", isOn: loopEnabled) { [weak self] in self?.toggleLoop() },
-            // T-026: the metronome toggle (`transport.metronome`, SetMetronome) goes here.
+            // TIME-010 (T-026): the project's click. SetMetronome marks the project dirty but stays out
+            // of undo history; engine sync turns it into param-slot writes.
+            .toggle("transport.metronome", "Metronome", isOn: metronomeEnabled) { [weak self] in self?.toggleMetronome() },
             .button("edit.undo", store.undoLabel.map { "Undo \($0)" } ?? "Undo", enabled: store.canUndo) { [weak self] in
                 self?.store.undo()
             },
@@ -263,6 +265,12 @@ final class ProjectWindowModel: Identifiable {
         if let recording { requestedRecording = recording }
         pendingPolls = 0
         pollTransport()
+    }
+
+    var metronomeEnabled: Bool { store.project.metronome.enabled }
+
+    func toggleMetronome() {
+        perform(SetMetronome(enabled: !store.project.metronome.enabled))
     }
 
     /// Bars a new loop spans when the project has none.

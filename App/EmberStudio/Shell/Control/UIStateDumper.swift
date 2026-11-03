@@ -15,7 +15,7 @@ import Foundation
 ///        "tracks": [{"id", "name", "kind", "mute", "solo", "selected"}],
 ///        "transport": {"playing", "recording", "tick"},
 ///        "toolbar": {"position", "time", "tempo", "signature", "loop": {"enabled", "start", "end"} | null,
-///                    "dspLoadPercent", "xruns"},
+///                    "metronome", "dspLoadPercent", "xruns"},
 ///        "keyBindings": [{"keys": "⇧⌘T", "control": "track.add.midi"}],
 ///        "toasts": [{"id", "kind", "severity", "title", "message", "action"?, "count"?}],
 ///        "controls": [{"id", "kind", "label", "isOn"?, "enabled"}],
@@ -89,6 +89,7 @@ enum UIStateDumper {
             "loop": window.project.loop.map { loop in
                 ["enabled": .bool(loop.isEnabled), "start": .int(loop.start.raw), "end": .int(loop.end.raw)]
             } ?? .null,
+            "metronome": .bool(window.metronomeEnabled),
             "dspLoadPercent": .double(Double(window.telemetry.dspLoadPercent)),
             "xruns": .int(Int64(clamping: window.telemetry.xruns)),
         ]
