@@ -12,6 +12,12 @@ struct ProjectWindowView: View {
         VStack(spacing: 0) {
             ToolbarRow(model: model, controls: controls)
             Divider()
+            // UI-040: the audio settings, a strip under the toolbar. In the layout rather than an
+            // overlay: the AppKit canvases (layer-backed, Metal) would draw over a SwiftUI overlay.
+            if model.audioPrefs.isOpen {
+                AudioPreferencesPanel(model: model.audioPrefs, controls: controls)
+                Divider()
+            }
             HSplitView {
                 if model.showsBrowser {
                     PanePlaceholder(title: "Browser", detail: "Files and plugins")
@@ -37,13 +43,6 @@ struct ProjectWindowView: View {
             }
             Divider()
             BottomTabs(controls: controls)
-        }
-        .overlay(alignment: .top) {
-            // UI-040: the audio settings, over the arrange area.
-            if model.audioPrefs.isOpen {
-                AudioPreferencesPanel(model: model.audioPrefs, controls: controls)
-                    .padding(.top, 48)
-            }
         }
         .overlay(alignment: .bottomTrailing) {
             ToastStack(center: model.toasts)

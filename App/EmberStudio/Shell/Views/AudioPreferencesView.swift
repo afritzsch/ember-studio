@@ -1,17 +1,30 @@
 import DAWModel
 import SwiftUI
 
-/// UI-040 (T-055): the audio settings panel, drawn over the project window (inside it, so
-/// `ui.snapshot` shows it). Every choice is a view-model control (UI-052) in a menu, like the snap
+/// UI-040 (T-055): the audio settings, a strip under the project window's toolbar (inside the
+/// window, so `ui.snapshot` shows it). Every choice is a view-model control (UI-052) in a menu, like the snap
 /// menu, so `ui.perform` drives the same actions a click does.
 struct AudioPreferencesPanel: View {
     let model: AudioPreferencesModel
     let controls: [String: UIControl]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("Audio Settings").font(.title3.weight(.semibold))
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 16) {
+                Text("Audio Settings").font(.headline)
+                field("Driver") {
+                    Text(driverText).foregroundStyle(.secondary).accessibilityIdentifier("prefs.audio.driver")
+                }
+                field("Output") {
+                    menu(model.outputTitle, id: "prefs.audio.output.menu",
+                         ids: ["prefs.audio.output.default"] + model.outputDevices.map { "prefs.audio.output.\($0.id)" },
+                         face: { $0.label.replacingOccurrences(of: "Output: ", with: "") })
+                }
+                field("Input") {
+                    menu(model.inputTitle, id: "prefs.audio.input.menu",
+                         ids: ["prefs.audio.input.default"] + model.inputDevices.map { "prefs.audio.input.\($0.id)" },
+                         face: { $0.label.replacingOccurrences(of: "Input: ", with: "") })
+                }
                 Spacer()
                 if let refresh = controls["prefs.audio.refresh"] {
                     ControlButton(control: refresh, systemImage: "arrow.clockwise").labelStyle(.iconOnly)
@@ -20,68 +33,53 @@ struct AudioPreferencesPanel: View {
                     ControlButton(control: close, systemImage: "xmark").labelStyle(.iconOnly)
                 }
             }
-            Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 10) {
-                GridRow {
-                    label("Driver")
-                    Text(driverText).foregroundStyle(.secondary).accessibilityIdentifier("prefs.audio.driver")
+            HStack(spacing: 16) {
+                field("Sample rate") {
+                    // DW-183: the project's rate; changing it re-converts its audio (IO-033).
+                    menu(AudioPreferencesModel.khz(model.sessionSampleRate), id: "prefs.audio.sampleRate.menu",
+                         ids: AudioPreferencesModel.sampleRates.map { "prefs.audio.sampleRate.\(Int($0))" },
+                         face: { $0.label.replacingOccurrences(of: "Sample Rate ", with: "") })
                 }
-                GridRow {
-                    label("Output device")
-                    menu(model.outputTitle, id: "prefs.audio.output.menu",
-                         ids: ["prefs.audio.output.default"] + model.outputDevices.map { "prefs.audio.output.\($0.id)" },
-                         face: { $0.label.replacingOccurrences(of: "Output: ", with: "") })
-                }
-                GridRow {
-                    label("Input device")
-                    menu(model.inputTitle, id: "prefs.audio.input.menu",
-                         ids: ["prefs.audio.input.default"] + model.inputDevices.map { "prefs.audio.input.\($0.id)" },
-                         face: { $0.label.replacingOccurrences(of: "Input: ", with: "") })
-                }
-                GridRow {
-                    label("Sample rate")
-                    HStack(spacing: 8) {
-                        menu(AudioPreferencesModel.khz(model.sessionSampleRate), id: "prefs.audio.sampleRate.menu",
-                             ids: AudioPreferencesModel.sampleRates.map { "prefs.audio.sampleRate.\(Int($0))" },
-                             face: { $0.label.replacingOccurrences(of: "Sample Rate ", with: "") })
-                        Text("The project's rate; changing it re-converts its audio.")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-                GridRow {
-                    label("Buffer size")
+                field("Buffer") {
                     menu(model.config.map { "\($0.bufferFrames) samples" } ?? "—", id: "prefs.audio.buffer.menu",
                          ids: AudioPreferencesModel.bufferSizes.map { "prefs.audio.buffer.\($0)" },
                          face: { $0.label.replacingOccurrences(of: "Buffer ", with: "") })
                 }
-                GridRow {
-                    label("Input channels")
+                field("Input channels") {
                     menu(model.config.map { "\($0.inputChannels)" } ?? "—", id: "prefs.audio.inputChannels.menu",
                          ids: model.inputChannelChoices.map { "prefs.audio.inputChannels.\($0)" }, face: { $0.label })
                 }
-                GridRow {
-                    label("Latency")
+                field("Latency") {
                     Text(model.latencyText)
-                        .font(.body.monospacedDigit())
+                        .font(.callout.monospacedDigit())
                         .accessibilityIdentifier("prefs.audio.latency")
                 }
-            }
-            if let reload = model.reloadText {
-                ReloadProgress(text: reload, fraction: model.reload?.fraction ?? 0)
-            }
-            if let error = model.lastError {
-                Label(error, systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.orange)
-                    .accessibilityIdentifier("prefs.audio.error")
+                Spacer()
+                if let reload = model.reloadText {
+                    ReloadProgress(text: reload, fraction: model.reload?.fraction ?? 0)
+                }
+                if let error = model.lastError {
+                    Label(error, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .lineLimit(1)
+                        .accessibilityIdentifier("prefs.audio.error")
+                }
             }
         }
-        .controlSize(.regular)
-        .padding(16)
-        .frame(width: 460, alignment: .leading)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.secondary.opacity(0.3)))
-        .shadow(radius: 12)
+        .controlSize(.small)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(nsColor: .underPageBackgroundColor))
         .accessibilityIdentifier("prefs.audio.panel")
+    }
+
+    private func field(_ label: String, @ViewBuilder content: () -> some View) -> some View {
+        HStack(spacing: 6) {
+            Text(label).foregroundStyle(.secondary)
+            content()
+        }
     }
 
     private var driverText: String {
@@ -90,10 +88,6 @@ struct AudioPreferencesPanel: View {
         case .fake: "Fake devices (testing)"
         case nil: "Offline (no device)"
         }
-    }
-
-    private func label(_ text: String) -> some View {
-        Text(text).gridColumnAlignment(.trailing).foregroundStyle(.secondary)
     }
 
     /// A menu of toggles: the one that is on is checked.
