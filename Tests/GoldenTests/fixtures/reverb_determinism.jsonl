@@ -1,0 +1,23 @@
+# reverb_determinism (M7, DSP-033, IO-011, T-073): an impulse and a kick through the built-in
+# reverb insert. The render must be bit-identical every time it runs (no random modulation, no
+# time-based seeds) and null against the reference.
+# "Room" plays assets/click_48k.wav (1.0 at frame 0, then silence) at tick 0 and
+# assets/kick_48k.wav (a 150 → 50 Hz sweep, peak ≈ 0.9, 9600 frames) at tick 480 (frame 12000)
+# through a reverb: size 0.6, decay 0.8 s, damping 0.4, pre-delay 15 ms, mix 0.5. Centre pans on
+# Room and the master give × 0.5 on each side.
+#   Frame 0 is the dry click: 0.5 · (1 − 0.5) · 1 = 0.25 on both sides; then silence until the
+#   first wet sample at pre-delay 720 + shortest line round(2411 · 0.66) = 1591 → frame 2311.
+#   The tail falls by 60 dB per 0.8 s (low frequencies), so the 60000-frame render ends quiet.
+# IDs: master 1, Room 2 (reverb insert 3), click asset 4, kick asset 5.
+# ReverbGoldenTests runs the fixture twice on fresh engines and compares the renders bit for bit,
+# and checks every sample against an oracle of 06's reverb signal path.
+# @expect {"field": "frames", "value": 60000}
+# @expect {"field": "peakDb", "value": -12.041, "tolerance": 0.001, "range": {"start": 0, "end": 1}}
+# @expect {"field": "peakDb", "value": -240, "tolerance": 0.001, "range": {"start": 1, "end": 2311}}
+project.new {"name": "reverb_determinism", "sampleRate": 48000}
+command.apply {"command": {"type": "RestoreTrack", "index": 0, "track": {"id": 2, "name": "Room", "kind": "audio", "color": {"red": 0.5, "green": 0.5, "blue": 0.5}, "clips": [], "takeFolders": [], "inserts": [{"id": 3, "kind": {"format": "builtin", "node": "reverb"}, "params": [{"index": 0, "value": 0.6}, {"index": 1, "value": 0.8}, {"index": 2, "value": 0.4}, {"index": 3, "value": 15}, {"index": 4, "value": 0.5}], "bypass": false}], "strip": {"gain": 1, "pan": 0, "mute": false, "solo": false, "phaseInvert": false}, "sends": [], "output": {"kind": "master"}, "armed": false, "monitoring": "auto", "automation": []}}}
+asset.import {"path": "assets/click_48k.wav"}
+asset.import {"path": "assets/kick_48k.wav"}
+command.apply {"command": {"type": "AddClip", "trackID": 2, "start": 0, "assetID": 4}}
+command.apply {"command": {"type": "AddClip", "trackID": 2, "start": 480, "assetID": 5}}
+render.offline {"from": 0, "to": 2400, "path": "reverb_determinism.wav", "tail": false}
