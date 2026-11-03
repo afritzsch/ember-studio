@@ -5,6 +5,7 @@ Unattended phases started by `/autobuild` (see `.claude/skills/autobuild/SKILL.m
 | Phase | Tasks | Merged | week% start→end | Notes |
 |---|---|---|---|---|
 | 1 | T-032, T-025, T-042, T-035 | all 4 (T-035, T-025, T-042, T-032) | 0 → 10 | Resumed T-025/T-032 on `-r2` branches; one 5-hour pause (~27 min); DW-148 autosave race fixed; T-045 added |
+| 2 | T-023, T-024, T-033, T-036 | all 4 (T-024, T-036, T-033, T-023) | 10 → 23 | 4 h stall: the lead's trial-merge `swift test` hung (DW-168, fixed) through a ~4 h 5-hour-window reset; EACCES flakes fixed (DW-169); `render.offline {loop}` and a facade `peaks` query added; T-026 added |
 
 ## Phase notes
 
@@ -22,3 +23,9 @@ Unattended phases started by `/autobuild` (see `.claude/skills/autobuild/SKILL.m
 ### Phase 2 (2026-11-02)
 - Wave: T-023 sidechain (E, graph), T-024 metronome (D), T-033 arrange canvas (U), T-036 M3 goldens (E, test-only). Earliest milestones first (M2, M3); T-045 (E, graph) waits for next phase because it overlaps T-023 in `Sources/DAWEngine/graph`.
 - Start: week 10%, five-hour window 14%.
+- T-024 merged (5f2ebdc). Added T-026 (project metronome wiring, M+B) as ready.
+- T-036 merged, including the decided render.offline `loop: true` / ExportSpec.followLoop. The hung T-023 trial-merge `swift test` (4 h+, AttachTests waitUntilExit) and the EACCES flakes (ControlSocketServer process-wide umask) are handed to the T-023 worker. From now on every `swift test` / test.sh runs under a timeout wrapper.
+- T-033 merged (peaks query decision logged). T-043 piano roll is now ready.
+- T-023 merged with the DW-168 hang fix and the DW-169 umask fix. Every check ran under a timeout: test.sh 11/11, swift test 3× green. T-071 compressor is now ready.
+- 5-hour window reached 83% about 30 min into the phase (reset ~4 h later). The workers had finished by then, so no pause was needed; the lead's hung test loop was killed after the reset, as the conductor asked.
+- End: week 23%, 5-hour window 17%. main green (test.sh 11/11, timed swift test 3×). No worker session left open.
