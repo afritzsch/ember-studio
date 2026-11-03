@@ -1,0 +1,22 @@
+# delay_tempo_sync (M7, DSP-032, T-072): an impulse through the built-in delay, synced to a 1/8
+# note at 120 bpm, so the echoes land on exact 250 ms (12000-frame) multiples and halve each time.
+# "Echo" plays assets/click_48k.wav (1.0 at frame 0, then silence) at tick 0 through a delay:
+# sync on, note 5 (1/8), time 375 ms (ignored while synced), feedback 0.5, lowpass 20000 Hz (off:
+# the loop is flat), stereo (ping-pong off), mix 0.5. Centre pans on Echo and the master give
+# × 0.5 on each side.
+#   Frame 0 is the dry click: 0.5 · (1 − 0.5) · 1 = 0.25 on both sides. Echo k (k = 1 … 4) is at
+#   frame 12000 · k with 0.5 · 0.5 · 0.5^(k − 1): 0.25, 0.125, 0.0625, 0.03125. Every other sample
+#   is exactly 0.
+# IDs: master 1, Echo 2 (delay insert 3), click asset 4.
+# DelayGoldenTests checks every sample of the reference against these numbers.
+# @expect {"field": "frames", "value": 60000}
+# @expect {"field": "peakDb", "value": -12.041, "tolerance": 0.001, "range": {"start": 0, "end": 1}}
+# @expect {"field": "peakDb", "value": -240, "tolerance": 0.001, "range": {"start": 1, "end": 12000}}
+# @expect {"field": "peakDb", "value": -12.041, "tolerance": 0.001, "range": {"start": 12000, "end": 12001}}
+# @expect {"field": "peakDb", "value": -18.062, "tolerance": 0.001, "range": {"start": 24000, "end": 24001}}
+# @expect {"field": "peakDb", "value": -30.103, "tolerance": 0.001, "range": {"start": 48000, "end": 48001}}
+project.new {"name": "delay_tempo_sync", "sampleRate": 48000}
+command.apply {"command": {"type": "RestoreTrack", "index": 0, "track": {"id": 2, "name": "Echo", "kind": "audio", "color": {"red": 0.5, "green": 0.5, "blue": 0.5}, "clips": [], "takeFolders": [], "inserts": [{"id": 3, "kind": {"format": "builtin", "node": "delay"}, "params": [{"index": 0, "value": 375}, {"index": 1, "value": 1}, {"index": 2, "value": 5}, {"index": 3, "value": 0.5}, {"index": 4, "value": 20000}, {"index": 5, "value": 0}, {"index": 6, "value": 0.5}], "bypass": false}], "strip": {"gain": 1, "pan": 0, "mute": false, "solo": false, "phaseInvert": false}, "sends": [], "output": {"kind": "master"}, "armed": false, "monitoring": "auto", "automation": []}}}
+asset.import {"path": "assets/click_48k.wav"}
+command.apply {"command": {"type": "AddClip", "trackID": 2, "start": 0, "assetID": 4}}
+render.offline {"from": 0, "to": 2400, "path": "delay_tempo_sync.wav", "tail": false}
