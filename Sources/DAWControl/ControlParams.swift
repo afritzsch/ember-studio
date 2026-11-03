@@ -294,6 +294,12 @@ public struct EngineParamInfoParams: Codable, Hashable, Sendable {
     public var kind: NodeKind
 }
 
+/// PLUG-010/015 (T-061): `engine.pluginInfo`. `slot` is the device slot's ID; the result is the
+/// engine's `pluginInfoJSON` (param index i of the slot is `params[i]`).
+public struct EnginePluginInfoParams: Codable, Hashable, Sendable {
+    public var slot: NodeIDValue
+}
+
 // MARK: device.* (DW-115)
 
 public struct DeviceListResult: Codable, Hashable, Sendable {

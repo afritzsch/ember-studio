@@ -256,6 +256,11 @@ public final class Dispatcher {
             let p: EngineParamInfoParams = try decode(params)
             let json = try requireEngine().paramInfoJSON(p.kind)
             return json.isEmpty ? .array([]) : try JSONValue(parsing: Data(json.utf8))
+        case .enginePluginInfo:
+            let p: EnginePluginInfoParams = try decode(params)
+            let json = try requireEngine().pluginInfoJSON(slot: p.slot)
+            return json.isEmpty ? .object(["slot": .int(Int64(p.slot)), "loaded": .bool(false)])
+                : try JSONValue(parsing: Data(json.utf8))
         case .deviceList:
             let _: NoParams = try decode(params)
             return try encode(deviceList())
