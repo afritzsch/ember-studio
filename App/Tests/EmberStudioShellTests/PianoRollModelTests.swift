@@ -179,7 +179,7 @@ struct PianoRollModelTests {
         r.roll.mouseDown(at: free, modifiers: .command)
         r.roll.mouseUp(at: free)
         let second = try #require(r.notes.first { $0.pitch == 60 })
-        #expect(second.start == 2000 && second.length == 720)
+        #expect(second.start == 2005 && second.length == 720, "⌘: off the grid, \(second)")
         // The select tool drags a marquee instead; a double-click there still draws.
         r.roll.tool = .select
         let count = r.notes.count
@@ -268,7 +268,7 @@ struct PianoRollModelTests {
         r.roll.mouseDragged(to: CGPoint(x: down.x - 1000, y: down.y - 5 * 12), modifiers: .command)
         r.roll.mouseUp(at: CGPoint(x: down.x - 1000, y: down.y - 5 * 12), modifiers: .command)
         #expect(r.note(ids[1])?.pitch == 127 && r.note(ids[0])?.pitch == 71, "the highest note stops at 127")
-        #expect(r.note(ids[0])?.start == -clipStart, "no earlier than the timeline start (before the clip is allowed, DW-127)")
+        #expect(r.note(ids[0])?.start.raw == -clipStart, "no earlier than the timeline start (before the clip is allowed, DW-127)")
     }
 
     @Test("UI-020: dragging a note's end or start resizes the selection (snapped, end or start kept); one undo entry each")
@@ -536,7 +536,9 @@ struct PianoRollModelTests {
             return
         }
         #expect(first["pitch"] == .int(60) && first["start"] == .int(0) && first["velocity"] == .int(100))
-        #expect(first["rect"] == .object(["x": .double(48), "y": .double(18 + 12 * 12 + 0.5), "width": .double(48), "height": .double(11)]))
+        let rowTop: Double = 18 + 12 * 12 + 0.5
+        let rect: JSONValue = .object(["x": .double(48), "y": .double(rowTop), "width": .double(48), "height": .double(11)])
+        #expect(first["rect"] == rect)
         #expect(roll["trackMeter"] == .null, "the FakeEngine has no meters")
         let controls = r.window.controls.map(\.id)
         #expect(Set(controls).count == controls.count, "control ids are unique")

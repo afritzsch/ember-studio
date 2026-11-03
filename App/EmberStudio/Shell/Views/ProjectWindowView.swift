@@ -276,10 +276,15 @@ private struct PianoRollPane: View {
                     }
                     .fixedSize()
                     .accessibilityIdentifier("pianoRoll.quantize.grid.menu")
-                    Slider(value: Binding(get: { model.quantizeStrength }, set: { model.quantizeStrength = $0 }), in: 0...1)
-                        .frame(width: 80)
-                        .accessibilityIdentifier("pianoRoll.quantize.strength")
-                    Text("\(Int((model.quantizeStrength * 100).rounded()))%").font(.caption.monospacedDigit()).frame(width: 34)
+                    Menu("Strength: \(Int((model.quantizeStrength * 100).rounded()))%") {
+                        ForEach(PianoRollModel.strengthPresets, id: \.self) { percent in
+                            if let control = controls["pianoRoll.quantize.strength.\(percent)"] {
+                                ControlToggle(control: control, face: "\(percent)%")
+                            }
+                        }
+                    }
+                    .fixedSize()
+                    .accessibilityIdentifier("pianoRoll.quantize.strength.menu")
                     Divider().frame(height: 14)
                     if let down = controls["pianoRoll.transpose.down"] { ControlButton(control: down, systemImage: "arrow.down") }
                     if let up = controls["pianoRoll.transpose.up"] { ControlButton(control: up, systemImage: "arrow.up") }
