@@ -1,0 +1,93 @@
+#pragma once
+// PLUG-010/012/016 (T-061): a facade's Audio Units, per device slot (the auPlugin node's NodeID).
+// It is the NodeKind::auPlugin factory (kindInfo) and what the facade's plugin calls act on
+// (instantiatePlugin, get/setPluginState, pluginInfoJSON).
+//
+// One AU per slot. A slot keeps its AUInstance across node re-creations (a configVersion bump, a
+// change of its param range), so editing the project never resets the plugin's DSP or loses state
+// changed since it was loaded: the new node adopts the AU the slot's last node used. Only these
+// make a new AU:
+//   - the slot is new, or its last AU is gone (the node left the graph and was reclaimed);
+//   - the identifier changed;
+//   - the session rate changed (AUPluginNode::prepare → reinstantiate: the new AU gets the old
+//     one's state, since the old graph may still render the old AU).
+// instantiatePlugin parks an AU for a slot ahead of the graph (on the caller's thread, PLUG-012),
+// so the build adopts it instead of instantiating on daw.compile.
+//
+// State (PLUG-016), most recent intent first, when a node is made:
+//   1. a setPluginState for a slot that had no AU yet (held until one exists);
+//   2. a new AU starts from the configJSON state (a project being opened) or, after a rate change,
+//      the old AU's state;
+//   3. an adopted AU keeps its state unless the configJSON state differs from the one it was made
+//      with (the model replaced the state, e.g. an undo), which is then applied.
+// getPluginState reads the AU's fullState, or for a slot whose plugin couldn't load, the state it
+// was configured with, so saving a project on a machine without the plugin keeps the state.
+//
+// Threads: every call is non-RT and thread-safe (one mutex; instantiation and state I/O run
+// outside it). Failures (a missing component, a prepare that failed) queue up for the facade,
+// which turns them into pluginCrashed events (takeFailures, under its own lock: the host never
+// calls into the facade).
+
+#include <map>
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <vector>
+
+#include "core/Result.h"
+#include "graph/NodeRegistry.h"
+#include "plugins/AUInstance.h"
+
+namespace daw {
+
+class AUPluginHost : public std::enable_shared_from_this<AUPluginHost> {
+public:
+    // The registry entry for NodeKind::auPlugin. Keeps a weak reference to the host.
+    NodeKindInfo kindInfo();
+
+    // PLUG-012, 08 instantiatePlugin: instantiates `identifier` now, on the calling thread, and
+    // parks it for `slot` (replacing an earlier parked one).
+    Result<void> instantiate(NodeID slot, std::string_view identifier);
+
+    // PLUG-016. state: empty when the slot has neither an AU nor a configured state.
+    Result<std::vector<uint8_t>> state(NodeID slot) const;
+    Result<void> setState(NodeID slot, const std::vector<uint8_t>& state);
+
+    // {"slot", "identifier", "loaded", "error"?, "name", "instrument", "midi", "sidechain",
+    //  "inputChannels", "outputChannels", "latencySamples", "tailSeconds",
+    //  "params": [{"index", "address", "id", "name", "unit", "min", "max", "value", "canRamp"}]}
+    // or {"slot": n, "loaded": false} for a slot the host doesn't know.
+    std::string infoJSON(NodeID slot) const;
+
+    struct Failure {
+        NodeID slot;
+        Error error;
+    };
+    std::vector<Failure> takeFailures();
+
+    // For AUPluginNode (non-RT).
+    void reportFailure(NodeID slot, Error error);
+    Result<std::shared_ptr<AUInstance>> reinstantiate(NodeID slot, const std::shared_ptr<AUInstance>& old);
+    // The AU the slot's latest node uses (null if none).
+    std::shared_ptr<AUInstance> instance(NodeID slot) const;
+
+private:
+    Result<std::unique_ptr<Node>> create(const NodeCreateInfo& info);
+
+    struct Slot {
+        std::string identifier;
+        std::weak_ptr<AUInstance> live;
+        std::shared_ptr<AUInstance> parked;
+        std::vector<uint8_t> configState;          // the configJSON state the AU was made with
+        std::optional<std::vector<uint8_t>> pending;  // setPluginState before an AU existed
+        std::optional<Error> error;                // the latest failure
+    };
+
+    mutable std::mutex mutex_;
+    std::map<NodeID, Slot> slots_;
+    std::vector<Failure> failures_;
+};
+
+} // namespace daw
