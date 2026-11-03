@@ -1,5 +1,4 @@
-// Manual reference counting: DAWEngine isn't built with -fobjc-arc. Every ObjC object here is
-// autoreleased inside the pool.
+// ARC (SwiftPM compiles Objective-C++ with -fobjc-arc). The pool drains what Foundation autoreleases.
 #include "plugins/AUPluginConfig.h"
 
 #import <Foundation/Foundation.h>
@@ -33,7 +32,7 @@ Result<AUPluginConfig> AUPluginConfig::parse(std::string_view configJSON) {
         if (state != nil && state != [NSNull null]) {
             if (![state isKindOfClass:[NSString class]]) return invalid("\"state\" is not a string");
             if ([(NSString*)state length] > 0) {
-                NSData* bytes = [[[NSData alloc] initWithBase64EncodedString:state options:0] autorelease];
+                NSData* bytes = [[NSData alloc] initWithBase64EncodedString:state options:0];
                 if (bytes == nil) return invalid("\"state\" is not base64");
                 const auto* p = static_cast<const uint8_t*>(bytes.bytes);
                 config.state.assign(p, p + bytes.length);
@@ -46,9 +45,9 @@ Result<AUPluginConfig> AUPluginConfig::parse(std::string_view configJSON) {
 std::string AUPluginConfig::makeJSON(std::string_view identifier, const std::vector<uint8_t>& state) {
     @autoreleasepool {
         NSMutableDictionary* dict = [NSMutableDictionary dictionary];
-        dict[@"identifier"] = [[[NSString alloc] initWithBytes:identifier.data()
-                                                        length:identifier.size()
-                                                      encoding:NSUTF8StringEncoding] autorelease]
+        dict[@"identifier"] = [[NSString alloc] initWithBytes:identifier.data()
+                                                       length:identifier.size()
+                                                     encoding:NSUTF8StringEncoding]
                                   ?: @"";
         if (!state.empty())
             dict[@"state"] = [[NSData dataWithBytes:state.data() length:state.size()] base64EncodedStringWithOptions:0];

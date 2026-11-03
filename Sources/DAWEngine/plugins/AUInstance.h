@@ -91,7 +91,7 @@ public:
     Result<void> setFullState(const std::vector<uint8_t>& state);
 
     // PLUG-013. Samples at the prepared rate; readable from any thread.
-    uint32_t latencySamples() const { return latency_->samples.load(std::memory_order_acquire); }
+    uint32_t latencySamples() const;
     double tailSeconds() const;
     void setLatencyReporter(LatencyReporter reporter);
 
