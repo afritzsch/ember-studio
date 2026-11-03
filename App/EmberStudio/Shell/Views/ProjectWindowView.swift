@@ -126,7 +126,7 @@ private struct ArrangeArea: View {
             Divider()
             HStack(spacing: 0) {
                 TrackHeaderColumn(model: model)
-                    .frame(width: 200)
+                    .frame(width: 220)
                 Divider()
                 TimelineCanvas(model: model.arrange)
                     .accessibilityIdentifier("arrange.canvas")
@@ -202,8 +202,8 @@ private struct TimelineCanvas: NSViewRepresentable {
     func updateNSView(_ view: TimelineCanvasView, context: Context) {}
 }
 
-/// A track header: its name and kind, then arm (REC-001), the input pair an audio track records
-/// (DW-200: the device's pairs), monitoring (REC-020), mute and solo. Every control is a view-model
+/// A track header: its name, kind, mute and solo, then arm (REC-001), the input pair an audio
+/// track records (DW-200: the device's pairs) and monitoring (REC-020). Every control is a view-model
 /// control (UI-052); the menus hold toggles, like the snap menu.
 private struct TrackHeaderRow: View {
     let track: TrackHeaderModel
@@ -218,11 +218,16 @@ private struct TrackHeaderRow: View {
                 Text(track.kind == .midi ? "MIDI" : "Audio")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Spacer()
+                    .fixedSize()
+                Spacer(minLength: 4)
+                ControlToggle(control: track.muteControl, face: "M").fixedSize()
+                ControlToggle(control: track.soloControl, face: "S").fixedSize()
             }
             HStack(spacing: 4) {
-                ControlToggle(control: track.armControl, face: "●")
+                // Hollow when disarmed: the red tint alone reads almost the same on and off.
+                ControlToggle(control: track.armControl, face: track.armed ? "●" : "○")
                     .tint(.red)
+                    .fixedSize()
                 if !track.inputControls.isEmpty {
                     Menu(TrackHeaderModel.inputTitle(track.inputPair)) {
                         ForEach(track.inputControls) { control in
@@ -240,8 +245,6 @@ private struct TrackHeaderRow: View {
                 .fixedSize()
                 .accessibilityIdentifier("track.\(track.id).monitor.menu")
                 Spacer(minLength: 0)
-                ControlToggle(control: track.muteControl, face: "M")
-                ControlToggle(control: track.soloControl, face: "S")
             }
             .controlSize(.small)
         }
