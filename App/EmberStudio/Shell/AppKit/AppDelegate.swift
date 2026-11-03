@@ -233,6 +233,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         let appMenu = NSMenu(title: name)
         appMenu.addItem(withTitle: "About \(name)", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
         appMenu.addItem(.separator())
+        // UI-040 (T-055): the main window's audio settings (⌘,).
+        appMenu.addItem(controlItem("Settings…", "prefs.audio"))
+        appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Hide \(name)", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         appMenu.addItem(withTitle: "Quit \(name)", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         main.addItem(submenu: appMenu, title: name)

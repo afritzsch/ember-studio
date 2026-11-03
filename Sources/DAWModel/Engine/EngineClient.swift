@@ -81,9 +81,16 @@ public final class EngineClient: EngineProtocol {
 
     public func transport() -> TransportState {
         let t = facade.transport()
-        return TransportState(sample: t.sample, tick: Tick(t.tick), playing: t.playing, recording: t.recording,
-                              loopEnabled: t.loopEnabled, loopStart: Tick(t.loopStart), loopEnd: Tick(t.loopEnd))
+        var state = TransportState(sample: t.sample, tick: Tick(t.tick), playing: t.playing, recording: t.recording,
+                                   loopEnabled: t.loopEnabled, loopStart: Tick(t.loopStart), loopEnd: Tick(t.loopEnd))
+        state.punchEnabled = t.punchEnabled  // REC-005 (T-052)
+        state.punchIn = Tick(t.punchIn)
+        state.punchOut = Tick(t.punchOut)
+        return state
     }
+
+    /// REC-005 (T-052).
+    public func setPunch(enabled: Bool, start: Tick, end: Tick) { facade.setPunch(enabled, start.raw, end.raw) }
 
     // MARK: Assets & jobs
 
@@ -147,6 +154,9 @@ public final class EngineClient: EngineProtocol {
     public func armInput(track: NodeIDValue, inputChannelPair: UInt32, armed: Bool) {
         facade.armInput(track, inputChannelPair, armed)
     }
+
+    /// REC-002 (T-052).
+    public func setRecordingDirectory(_ path: String) { facade.setRecordingDirectory(std.string(path)) }
 
     public func instantiatePlugin(slot: NodeIDValue, _ plugin: PluginDescriptor) -> JobID {
         facade.instantiatePlugin(slot, Self.cxx(plugin))
@@ -239,6 +249,9 @@ public final class EngineClient: EngineProtocol {
         out.processorOverloads = t.processorOverloads
         out.renderOverruns = t.renderOverruns
         out.assetsReloadPending = t.assetsReloadPending  // T-056
+        out.recordDrops = t.recordDrops  // T-052
+        out.deviceInputLatency = t.deviceInputLatency
+        out.armedTracks = t.armedTracks
         return out
     }
 
@@ -388,8 +401,17 @@ public final class EngineClient: EngineProtocol {
                                   deviceID: e.device.deviceID, previousSampleRate: e.device.previousSampleRate,
                                   sampleRate: e.device.sampleRate)
         }
-        return EngineEvent(kind: kind, subject: e.subject, job: e.job, count: e.count, error: error(e.error),
-                           device: device, reload: reload)
+        var event = EngineEvent(kind: kind, subject: e.subject, job: e.job, count: e.count, error: error(e.error),
+                                device: device, reload: reload)
+        // T-052 (REC-004): the finished take.
+        if kind == .recordingFinalized {
+            let r = e.recording
+            event.recording = RecordedTake(
+                track: r.track, file: String(r.file), startSample: r.startSample, frames: r.frames,
+                takeIndex: r.takeIndex, channels: r.channels, sampleRate: r.sampleRate, inputPair: r.inputPair,
+                droppedFrames: r.droppedFrames)
+        }
+        return event
     }
 
     private static func cxx(_ kind: NodeKind) -> daw.NodeKind {

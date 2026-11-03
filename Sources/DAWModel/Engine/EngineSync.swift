@@ -70,6 +70,20 @@ public final class EngineSync {
         }
     }
 
+    /// T-052: asset loads of imported takes not yet waited for (`settleLoads`).
+    private var pendingLoads: [JobID] = []
+    /// REC-001 (T-052): the audio tracks armed in the engine, with their input pair.
+    private var pushedArms: [NodeIDValue: UInt32] = [:]
+    /// REC-002 (T-052): the recordings directory last given to the engine.
+    private var pushedRecordingDirectory: String?
+    /// T-052: the project folder, if it has one (`ProjectStore` points it at `folderURL`).
+    /// Recordings go to `<folder>/Audio/Recordings/` (REC-002), otherwise to a temporary folder
+    /// (`EngineSync.temporaryRecordingsDirectory`), which a save copies into `Audio/` (DW-124).
+    public var projectFolder: @MainActor () -> URL? = { nil }
+    /// REC-004 (T-052): called for each `recordingFinalized` event with a take. `ProjectStore`
+    /// turns it into one undoable `ImportAsset` + `AddClip` (`ProjectStore.importRecording`).
+    public var onRecordingFinalized: (@MainActor (RecordedTake, DAWError?) -> Void)?
+
     private static let log = Logger(subsystem: "dev.emberstudio", category: "model")
 
     /// Allocates every param slot `project` needs, writes their values and applies its graph at
@@ -86,6 +100,7 @@ public final class EngineSync {
         writeParams()
         flush()
         pushLoop()
+        pushArms()
     }
 
     /// Whether a structural change is waiting for its debounce window.
@@ -108,6 +123,7 @@ public final class EngineSync {
         }
         writeParams()
         pushLoop()
+        pushArms()
         let graph = GraphDescriptionBuilder.build(project, runtime: runtime)
         candidate = graph
         if graph != appliedGraph || hasUnusedParams() { scheduleApply() }
@@ -178,6 +194,9 @@ public final class EngineSync {
             }
         case .graphRejected:
             lastError = event.error
+        case .recordingFinalized:
+            // REC-004 (T-052): the store turns the take into ImportAsset + AddClip.
+            if let take = event.recording { onRecordingFinalized?(take, event.error) }
         case .assetsReloaded where event.reload != nil:
             // DW-130 (T-056): the engine's session rate changed. Events can be older than the
             // engine's state (two changes before a poll), so its rate now is what counts.
@@ -200,6 +219,73 @@ public final class EngineSync {
         engineSampleRate = rate
     }
 
+    // MARK: Recording (T-052, REC-001..005)
+
+    /// REC-001: starts or stops the transport's recording, with the recordings directory pushed
+    /// first, so a take lands in the project's `Audio/Recordings/` (or the temporary folder of a
+    /// project without one). Use it instead of `engine.setRecording`.
+    public func setRecording(_ recording: Bool) {
+        guard !isInvalidated else { return }
+        if recording { pushRecordingDirectory() }
+        engine.setRecording(recording)
+    }
+
+    /// REC-002: where takes of a project without a folder go: per project and per process under
+    /// `$TMPDIR` (CONV §9), so parallel test runs never share it. A save copies them into
+    /// `Audio/` (DW-124).
+    public static func temporaryRecordingsDirectory(for project: Project) -> URL {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent("EmberStudio-Recordings", isDirectory: true)
+            .appendingPathComponent("\(project.id.uuidString)-\(ProcessInfo.processInfo.processIdentifier)", isDirectory: true)
+    }
+
+    /// T-052: remembers an asset load (an imported take's) for `settleLoads`.
+    public func trackLoad(_ job: JobID) {
+        if job != 0 { pendingLoads.append(job) }
+    }
+
+    /// T-052: waits for the loads `trackLoad` remembered, so a render that follows hears the
+    /// imported takes (DAWControl's render.offline does this before it settles the graph; their
+    /// `assetLoaded` events then bump the clip players, DW-072).
+    public func settleLoads(timeout: Duration = .seconds(60)) async {
+        let jobs = pendingLoads
+        pendingLoads = []
+        for job in jobs { _ = await engine.waitForJob(job, timeout: timeout) }
+    }
+
+    /// REC-002: `<folder>/Audio/Recordings/`, or the temporary folder.
+    public func recordingsDirectory() -> URL {
+        if let folder = projectFolder() {
+            return folder.appendingPathComponent("Audio", isDirectory: true)
+                .appendingPathComponent("Recordings", isDirectory: true)
+        }
+        return Self.temporaryRecordingsDirectory(for: project)
+    }
+
+    private func pushRecordingDirectory() {
+        let path = recordingsDirectory().path
+        guard path != pushedRecordingDirectory else { return }
+        engine.setRecordingDirectory(path)
+        pushedRecordingDirectory = path
+    }
+
+    /// REC-001, REC-022: arming is structural; each change of an audio track's arm state or
+    /// input pair is an `armInput` call (the engine rebuilds its recording session). A removed
+    /// armed track is disarmed. MIDI tracks' arming is MIDI input (T-053), not device audio.
+    private func pushArms() {
+        var wanted: [NodeIDValue: UInt32] = [:]
+        for track in project.tracks where track.kind == .audio && track.armed { wanted[track.id] = track.inputPair }
+        guard wanted != pushedArms else { return }
+        if !wanted.isEmpty { pushRecordingDirectory() }
+        for (track, pair) in pushedArms.sorted(by: { $0.key < $1.key }) where wanted[track] == nil {
+            engine.armInput(track: track, inputChannelPair: pair, armed: false)
+        }
+        for (track, pair) in wanted.sorted(by: { $0.key < $1.key }) where pushedArms[track] != pair {
+            engine.armInput(track: track, inputChannelPair: pair, armed: true)
+        }
+        pushedArms = wanted
+    }
+
     /// Drains the engine's events, handles them and returns them for the caller to act on too
     /// (BRIDGE-004: the app polls at 60 Hz, the CLI per tick).
     public func pollEvents() -> [EngineEvent] {
@@ -215,6 +301,11 @@ public final class EngineSync {
         pendingApply?.cancel()
         pendingApply = nil
         isInvalidated = true
+        // T-052: an engine that outlives the sync doesn't keep recording for it.
+        for (track, pair) in pushedArms.sorted(by: { $0.key < $1.key }) {
+            engine.armInput(track: track, inputChannelPair: pair, armed: false)
+        }
+        pushedArms = [:]
         for range in runtime.params.values { engine.freeParams(range.first, count: range.count) }
         for range in retired { engine.freeParams(range.first, count: range.count) }
         runtime = RuntimeIDs()

@@ -54,11 +54,13 @@
 #include "nodes/BuiltinNodes.h"
 #include "nodes/ChannelStrip.h"
 #include "nodes/Compressor.h"
+#include "nodes/Delay.h"
 #include "nodes/GainNode.h"
 #include "nodes/Metronome.h"
 #include "nodes/MidiClipPlayer.h"
 #include "nodes/Reverb.h"
 #include "plugins/AUPluginHost.h"
+#include "record/Recorder.h"
 #include "time/TempoMap.h"
 
 
@@ -229,6 +231,14 @@ struct EngineFacade::Impl {
     void finishAssetReload();
     void pushReload(AssetsReloadPhase phase, uint64_t assetID, FacadeError error);
     bool exportBusy() const { return exportRunning || exportActive || !exportQueue.empty(); }
+    // 09 (T-052). With `mutex` held. syncRecordLatency: REC-003's D from the running device, after
+    // every driver start. prepareRecording: a session for the armed tracks (realtime with a
+    // driver only; offline engines have no input). finalizeRecording: ends the take and queues
+    // its recordingFinalized events (REC-004).
+    void syncRecordLatency();
+    void prepareRecording();
+    void finalizeRecording();
+    void pushTakes(std::vector<FinalizedTake> takes);
 
     std::atomic<uint32_t> refs{1};  // BRIDGE-001
     uint64_t instanceID = 0;
@@ -295,6 +305,11 @@ struct EngineFacade::Impl {
     std::condition_variable deviceWake;  // daw.device: stopping
 
     Engine engine;
+    // 09 (T-052): the drivers' InputCapture (driverConfig). Outlives the driver, which ~Impl stops
+    // first. recordInputLatency: the running device's IO-005 input latency (telemetry).
+    Recorder recorder;
+    Recorder* const capture = &recorder;
+    uint32_t recordInputLatency = 0;
     AssetTable assets;
     // IO-034 / UI-011: each loaded asset's peaks (computed on daw.loader), read by `peaks`.
     std::unordered_map<uint64_t, std::shared_ptr<const PeakMipmap>> peaks;
@@ -359,7 +374,11 @@ struct EngineFacade::Impl::DeviceHost final : public DeviceMonitorHost {
     // (1)..(3) together: stopForDeviceChange applies the transport commands once the driver is
     // stopped, so the readout shows "stopped" even when no device comes back.
     void stopTransport() override { (void)impl_.engine.transport().stop(); }
-    void finalizeRecordings() override { (void)impl_.engine.transport().setRecording(false); }  // 09: finalize takes
+    // IO-021 (2), DW-119 (T-052): the take ends and its files are finalized (recordingFinalized).
+    void finalizeRecordings() override {
+        (void)impl_.engine.transport().setRecording(false);
+        impl_.finalizeRecording();
+    }
     void stopDriver() override {
         impl_.driver->stop();
         impl_.driverStarted = false;
@@ -372,6 +391,7 @@ struct EngineFacade::Impl::DeviceHost final : public DeviceMonitorHost {
         impl_.config.sampleRate = config.sampleRate;
         auto started = impl_.driver->start(impl_.engine, impl_.driverConfig());
         impl_.driverStarted = started.ok();
+        impl_.syncRecordLatency();
         return started;
     }
     void deviceChanged(const DeviceSwap& swap) override {
@@ -398,6 +418,7 @@ EngineFacade::Impl::Impl(EngineMode m, const DriverConfigPOD& cfg, FacadeOptions
             if (started) {
                 driverStarted = true;
                 sampleRate = driver->sampleRate();
+                syncRecordLatency();
             } else {
                 pushStartFailed(started.error());
             }
@@ -443,6 +464,7 @@ EngineFacade::Impl::~Impl() {
         std::lock_guard lock(mutex);
         stopping = true;
         if (driver) driver->stop();
+        (void)recorder.finalize();  // the files are closed; nobody hears of them any more
     }
     exportWake.notify_all();
     deviceWake.notify_all();
@@ -460,6 +482,7 @@ DriverConfig EngineFacade::Impl::driverConfig() const {
     out.bufferFrames = config.bufferFrames;
     out.outputChannels = config.outputChannels;
     out.inputChannels = config.inputChannels;
+    out.capture = capture;  // REC-001
     return out;
 }
 
@@ -469,7 +492,49 @@ Result<void> EngineFacade::Impl::restartDriver() {
     driver->stop();
     auto started = driver->start(engine, driverConfig());
     driverStarted = started.ok();
+    syncRecordLatency();
     return started;
+}
+
+// MARK: Recording (09, T-052)
+
+void EngineFacade::Impl::syncRecordLatency() {
+    const DeviceLatency latency = driver ? driver->latency() : DeviceLatency{};
+    const uint64_t total = uint64_t{latency.input} + latency.output;
+    recorder.setLatency(static_cast<uint32_t>(std::min<uint64_t>(total, UINT32_MAX)));  // REC-003
+    recordInputLatency = latency.input;
+}
+
+void EngineFacade::Impl::prepareRecording() {
+    if (!driver) return;
+    syncRecordLatency();
+    pushTakes(recorder.prepare(sampleRate));
+}
+
+void EngineFacade::Impl::finalizeRecording() { pushTakes(recorder.finalize()); }
+
+void EngineFacade::Impl::pushTakes(std::vector<FinalizedTake> takes) {
+    for (FinalizedTake& take : takes) {
+        EngineEventPOD event;
+        event.type = EngineEventType::recordingFinalized;
+        event.subject = take.track;
+        event.count = take.droppedFrames;
+        event.recording.track = take.track;
+        event.recording.file = std::move(take.file);
+        event.recording.startSample = take.startSample;
+        event.recording.frames = take.frames;
+        event.recording.takeIndex = take.takeIndex;
+        event.recording.channels = take.channels;
+        event.recording.sampleRate = take.sampleRate;
+        event.recording.inputPair = take.inputPair;
+        event.recording.droppedFrames = take.droppedFrames;
+        if (take.error)
+            event.error = toFacadeError(*take.error);
+        else if (take.droppedFrames > 0)  // REC-002: the app warns (ToastCenter)
+            event.error = facadeError(FacadeErrorCode::io, "recording dropped " + std::to_string(take.droppedFrames) +
+                                                               " frames (the disk didn't keep up); they are silent");
+        pushEvent(std::move(event));
+    }
 }
 
 void EngineFacade::Impl::pushEvent(EngineEventPOD event) {
@@ -525,6 +590,7 @@ void EngineFacade::Impl::pushStartFailed(const Error& error) {
 void EngineFacade::Impl::stopForDeviceChange() {
     (void)engine.transport().stop();
     if (engine.transport().playhead().recording) (void)engine.transport().setRecording(false);  // 09
+    finalizeRecording();  // IO-021 (2), DW-119
     if (driver) driver->stop();
     driverStarted = false;
     applyTransportCommands();  // nothing renders now, so apply them here
@@ -901,6 +967,7 @@ void EngineFacade::Impl::runExport(JobID jobID, Tick from, Tick to, const Export
             spec.tempo = std::move(map).value();
             // DW-057: one render thread at a time (02), so the device pauses meanwhile.
             if (driver && driver->running()) driver->stop();
+            finalizeRecording();  // DW-064: an export never records; a take running ends here
             exportRunning = true;
             render = true;
         }
@@ -930,6 +997,7 @@ void EngineFacade::Impl::runExport(JobID jobID, Tick from, Tick to, const Export
                 driverStarted = false;
                 pushStartFailed(restarted.error());
             }
+            syncRecordLatency();
         }
     }
     if (auto it = jobs.find(jobID); it != jobs.end()) {
@@ -1060,6 +1128,7 @@ float EngineFacade::getParam(ParamID id) const {
 void EngineFacade::play() {
     std::lock_guard lock(impl_->mutex);
     if (impl_->reloader.active()) return;  // IO-033 (T-056): refused while assets re-convert
+    impl_->prepareRecording();  // REC-001: armed tracks have their FIFOs before the first block
     (void)impl_->engine.transport().play();
     impl_->applyTransportCommands();
 }
@@ -1069,11 +1138,18 @@ void EngineFacade::stop() {
     impl_->previewInbox.releaseAll();  // UI-021: no preview note outlives a stop
     (void)impl_->engine.transport().stop();
     impl_->applyTransportCommands();
+    impl_->finalizeRecording();  // REC-004
 }
 
 void EngineFacade::locate(Tick tick) {
     std::lock_guard lock(impl_->mutex);
     impl_->previewInbox.releaseAll();  // UI-021: nor a locate
+    // T-052: a take is one continuous stretch of the timeline, so a jump ends it (the next one
+    // starts at the new position if the transport still records).
+    if (impl_->recorder.capturing()) {
+        impl_->finalizeRecording();
+        impl_->prepareRecording();
+    }
     (void)impl_->engine.transport().locate(tick);
     impl_->applyTransportCommands();
 }
@@ -1086,8 +1162,33 @@ void EngineFacade::setLoop(bool enabled, Tick start, Tick end) {
 
 void EngineFacade::setRecording(bool recording) {
     std::lock_guard lock(impl_->mutex);
+    if (recording) impl_->prepareRecording();  // REC-001
     (void)impl_->engine.transport().setRecording(recording);
     impl_->applyTransportCommands();
+    if (!recording) impl_->finalizeRecording();  // REC-004 (a manual punch-out)
+}
+
+void EngineFacade::setRecordingDirectory(const std::string& directory) {
+    std::lock_guard lock(impl_->mutex);
+    impl_->recorder.setDirectory(directory);
+    if (!impl_->recorder.capturing()) impl_->prepareRecording();  // an idle session follows
+}
+
+std::string EngineFacade::recordingDirectory() const {
+    std::lock_guard lock(impl_->mutex);
+    return impl_->recorder.directory().string();
+}
+
+void EngineFacade::setPunch(bool enabled, Tick in, Tick out) {
+    std::lock_guard lock(impl_->mutex);
+    PunchRange punch = impl_->recorder.punch();
+    if (enabled && (in < 0 || in >= out)) return;  // REC-005: an empty range would record nothing
+    punch.enabled = enabled;
+    if (enabled || in < out) {
+        punch.in = in;
+        punch.out = out;
+    }
+    impl_->recorder.setPunch(punch);
 }
 
 // UI-021 (T-043): see EngineFacade.h. The inbox (nodes/MidiClipPlayer.h) is lock-free towards
@@ -1109,6 +1210,11 @@ TransportPOD EngineFacade::transport() const {
     out.loopEnabled = ph.loopEnabled;
     out.loopStart = ph.loopStart;
     out.loopEnd = ph.loopEnd;
+    std::lock_guard lock(impl_->mutex);  // REC-005: the control side's copy
+    const PunchRange punch = impl_->recorder.punch();
+    out.punchEnabled = punch.enabled;
+    out.punchIn = punch.in;
+    out.punchOut = punch.out;
     return out;
 }
 
@@ -1201,9 +1307,13 @@ JobStatus EngineFacade::pollJob(JobID job) const {
 
 // DW-067: no live input switch, so input on/off restarts the device. Routing the channel pair
 // to the track is 09 (T-030s).
-void EngineFacade::armInput(NodeID track, uint32_t, bool armed) {
+void EngineFacade::armInput(NodeID track, uint32_t inputChannelPair, bool armed) {
     std::lock_guard lock(impl_->mutex);
     Impl& impl = *impl_;
+    // REC-022 (T-052): arming is structural. A take running ends first, so it keeps the tracks
+    // it started with; the next one starts with the new set.
+    if (impl.recorder.capturing()) impl.finalizeRecording();
+    impl.recorder.setArmed(track, inputChannelPair, armed);
     const bool wasEnabled = !impl.armedTracks.empty();
     if (armed)
         impl.armedTracks.insert(track);
@@ -1212,6 +1322,7 @@ void EngineFacade::armInput(NodeID track, uint32_t, bool armed) {
     if (wasEnabled == impl.armedTracks.empty() && impl.driverStarted) {
         if (auto restarted = impl.restartDriver(); !restarted) impl.pushStartFailed(restarted.error());
     }
+    impl.prepareRecording();  // REC-001: the FIFOs exist before the transport records
 }
 
 // PLUG-012 (T-061): an AU is instantiated right here, on the caller's (non-RT) thread, and parked
@@ -1390,6 +1501,9 @@ TelemetryPOD EngineFacade::telemetry() const {
     t.sampleRate = impl_->sampleRate;
     t.deviceRunning = impl_->driver && impl_->driver->running();
     if (const auto& reload = impl_->reloader.progress(); reload.active) t.assetsReloadPending = reload.total - reload.done;
+    t.recordDrops = impl_->recorder.droppedFrames();  // REC-002 (T-052)
+    t.deviceInputLatency = impl_->driver && impl_->driver->running() ? impl_->recordInputLatency : 0;
+    t.armedTracks = static_cast<uint32_t>(impl_->armedTracks.size());
     if (impl_->driver) {
         t.outputDeviceID = t.deviceRunning ? impl_->driver->current().outputDevice : 0;
         t.processorOverloads = impl_->driver->processorOverloads();
@@ -1435,6 +1549,7 @@ std::string EngineFacade::paramInfoJSON(NodeKind kind) const {
     if (kind == NodeKind::gain) params = GainNode::kParamInfo;            // DW-160 (T-026): sends, MIX-007
     if (kind == NodeKind::metronome) params = Metronome::kParamInfo;      // DW-160 (T-026): TIME-010 slots
     if (kind == NodeKind::reverb) params = Reverb::kParamInfo;            // DSP-041 (T-073)
+    if (kind == NodeKind::delay) params = Delay::kParamInfo;              // DSP-041 (T-072)
     std::string json = "[";
     for (const ParamInfo& p : params) {
         if (json.size() > 1) json += ",";

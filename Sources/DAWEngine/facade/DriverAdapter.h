@@ -17,6 +17,7 @@
 #include "core/Result.h"
 #include "daw/EngineFacade.h"
 #include "io/CoreAudioDeviceListener.h"
+#include "io/DeviceLatency.h"
 #include "io/DeviceNotification.h"
 #include "io/DriverConfig.h"
 #include "io/FakeDeviceDriver.h"
@@ -51,6 +52,9 @@ public:
         }
         return config;
     }
+    // IO-005 of the running device (zeros while stopped), for REC-003's latency compensation
+    // (T-052). The default: none.
+    virtual DeviceLatency latency() const { return {}; }
     // Devices as they are now, for DeviceMonitor (IO-021 (4), (5)).
     virtual bool deviceAlive(AudioDeviceRef) const { return true; }
     virtual AudioDeviceRef defaultOutputDevice() const { return 0; }
@@ -91,6 +95,7 @@ public:
     uint32_t bufferFrames() const override;
     std::vector<DeviceInfoPOD> devices() const override;
     RunningConfig current() const override;
+    DeviceLatency latency() const override;
     bool deviceAlive(AudioDeviceRef device) const override;
     AudioDeviceRef defaultOutputDevice() const override;
     Result<DeviceCaps> outputCaps(AudioDeviceRef device) const override;

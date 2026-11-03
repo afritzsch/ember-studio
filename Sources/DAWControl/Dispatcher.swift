@@ -236,7 +236,7 @@ public final class Dispatcher {
             let label = method == .undo ? store.undoLabel : store.redoLabel
             if method == .undo { store.undo() } else { store.redo() }
             return try encode(HistoryResult(label: label))
-        case .transportPlay, .transportStop, .transportLocate, .transportSetLoop, .transportRecord:
+        case .transportPlay, .transportStop, .transportLocate, .transportSetLoop, .transportRecord, .transportSetPunch:
             return try encode(transport(method, params))
         case .transportWait: return try encode(await transportWait(decode(params)))
         case .transportSetMetronome: return try encode(transportSetMetronome(decode(params)))
@@ -450,10 +450,28 @@ public final class Dispatcher {
             engine.setLoop(enabled: loop?.isEnabled ?? false, start: loop?.start ?? Tick(0), end: loop?.end ?? Tick(0))
         case .transportRecord:
             let p: TransportRecordParams = try decode(params)
-            engine.setRecording(p.enabled)
+            // T-052: through engine sync, which points the engine at the project's recordings
+            // folder first. Finished takes come back as recordingFinalized events and become
+            // clips (REC-004) when the events are drained.
+            if let sync = store?.engineSync { sync.setRecording(p.enabled) } else { engine.setRecording(p.enabled) }
+        case .transportSetPunch:
+            let p: TransportSetPunchParams = try decode(params)
+            let current = engine.transport()
+            let start = p.start ?? current.punchIn, end = p.end ?? current.punchOut
+            if p.enabled {
+                guard start.raw >= 0, start < end else {
+                    throw DAWError.invalidArgument("punch [\(start.raw), \(end.raw)) is empty or negative")
+                }
+            } else if (p.start == nil) != (p.end == nil) {
+                throw ControlError.invalidParams("start and end go together")
+            }
+            engine.setPunch(enabled: p.enabled, start: start, end: end)
         default:
             preconditionFailure("\(method) is not a transport command")
         }
+        // T-052 (REC-004): a stop or record-off finalizes takes; import them before answering, so
+        // the clips are in the project the caller reads next.
+        if method == .transportStop || method == .transportRecord || method == .transportLocate { drainEvents() }
         return engine.transport()
     }
 
@@ -548,6 +566,12 @@ public final class Dispatcher {
     private func settleGraph() async throws {
         let engine = try requireEngine()
         drainEvents()
+        // T-052: takes imported from recordingFinalized load like asset.import's files; wait for
+        // them, then drain again so their assetLoaded events reach the clip players.
+        if let sync = store?.engineSync {
+            await sync.settleLoads(timeout: configuration.graphTimeout)
+            drainEvents()
+        }
         store?.engineSync?.flush()
         let version = engine.graphStatus().submittedVersion
         guard version > 0 else { return }

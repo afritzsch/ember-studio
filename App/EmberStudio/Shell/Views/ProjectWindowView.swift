@@ -12,6 +12,12 @@ struct ProjectWindowView: View {
         VStack(spacing: 0) {
             ToolbarRow(model: model, controls: controls)
             Divider()
+            // UI-040: the audio settings, a strip under the toolbar. In the layout rather than an
+            // overlay: the AppKit canvases (layer-backed, Metal) would draw over a SwiftUI overlay.
+            if model.audioPrefs.isOpen {
+                AudioPreferencesPanel(model: model.audioPrefs, controls: controls)
+                Divider()
+            }
             HSplitView {
                 if model.showsBrowser {
                     PanePlaceholder(title: "Browser", detail: "Files and plugins")
@@ -85,6 +91,10 @@ private struct ToolbarRow: View {
                     .accessibilityIdentifier("transport.signature")
             }
             Spacer()
+            // DW-183: a session-rate change re-converting the project's audio (IO-033).
+            if let reload = model.audioPrefs.reloadText {
+                ReloadProgress(text: reload, fraction: model.audioPrefs.reload?.fraction ?? 0, id: "toolbar.reload")
+            }
             Text(String(format: "CPU %.0f%% · xruns %llu", model.telemetry.dspLoadPercent, model.telemetry.xruns))
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(model.telemetry.xruns > 0 ? Color.orange : Color.secondary)
@@ -95,6 +105,7 @@ private struct ToolbarRow: View {
             if let zoomIn = controls["zoom.in"] { ControlButton(control: zoomIn, systemImage: "plus.magnifyingglass") }
             if let browser = controls["pane.browser"] { ControlToggle(control: browser) }
             if let inspector = controls["pane.inspector"] { ControlToggle(control: inspector) }
+            if let settings = controls["prefs.audio"] { ControlToggle(control: settings, face: "Audio") }
         }
         .labelStyle(.iconOnly)
         .padding(.horizontal, 10)

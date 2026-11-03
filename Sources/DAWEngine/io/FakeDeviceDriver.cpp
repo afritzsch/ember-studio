@@ -372,6 +372,7 @@ Result<void> FakeDeviceDriver::start(const DriverConfig& request) {
     // IO-023: overruns are judged against the device clock, which only real-time pacing has.
     s.renderer.configure(resolved->bufferFrames,
                          s.spec.pacing == FakePacing::realtime ? resolved->sampleRate : 0.0);
+    s.renderer.setCapture(request.capture);  // REC-001 (T-052)
 
     s.config = {};
     s.config.outputDevice = outID;

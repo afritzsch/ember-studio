@@ -218,6 +218,11 @@ public struct TransportState: Hashable, Sendable, Codable {
     public var loopEnabled: Bool
     public var loopStart: Tick
     public var loopEnd: Tick
+    /// REC-005 (T-052): the punch range (`setPunch`); recording writes only inside it while the
+    /// loop is off.
+    public var punchEnabled: Bool = false
+    public var punchIn: Tick = Tick(0)
+    public var punchOut: Tick = Tick(0)
 
     public init(sample: SamplePos = 0, tick: Tick = 0, playing: Bool = false, recording: Bool = false,
                 loopEnabled: Bool = false, loopStart: Tick = 0, loopEnd: Tick = 0) {
@@ -263,6 +268,12 @@ public struct EngineTelemetry: Hashable, Sendable, Codable {
     /// IO-033 (T-056): assets of a running session-rate re-conversion still to come; 0 when none
     /// runs. `play` is refused until then.
     public var assetsReloadPending: UInt32 = 0
+    /// REC-002 (T-052): frames dropped because a recording FIFO was full (the disk didn't keep up).
+    public var recordDrops: UInt64 = 0
+    /// REC-003 (T-052): the running device's input latency in samples (0 without input).
+    public var deviceInputLatency: UInt32 = 0
+    /// REC-001 (T-052): tracks armed for recording (`armInput`).
+    public var armedTracks: UInt32 = 0
 
     public init() {}
 }
@@ -365,6 +376,8 @@ public struct EngineEvent: Hashable, Sendable, Codable {
     public var device: DeviceChange?
     /// `assetsReloaded` (T-056, IO-033): where the session-rate change's re-conversion is.
     public var reload: AssetsReload? = nil
+    /// `recordingFinalized` (T-052, REC-004): the take; `subject` is its track.
+    public var recording: RecordedTake? = nil
 
     public init(kind: Kind, subject: UInt64 = 0, job: JobID = 0, count: UInt64 = 0, error: DAWError? = nil,
                 device: DeviceChange? = nil) {
@@ -587,6 +600,8 @@ public protocol EngineProtocol: AnyObject, Sendable {
     func setLoop(enabled: Bool, start: Tick, end: Tick)
     func setRecording(_ recording: Bool)
     func transport() -> TransportState
+    /// REC-005 (T-052): see the extension at the end of this file (default: ignored).
+    func setPunch(enabled: Bool, start: Tick, end: Tick)
     /// UI-021 (T-043): auditions `pitch` on `track`'s instrument (a MIDI track's sampler or plugin),
     /// whether the transport plays or not. Every note-on needs its note-off; `stop` and `locate`
     /// end any still on. Non-RT; queued lock-free for the audio thread.
@@ -603,6 +618,8 @@ public protocol EngineProtocol: AnyObject, Sendable {
 
     // Recording (09) and plugins (10)
     func armInput(track: NodeIDValue, inputChannelPair: UInt32, armed: Bool)
+    /// REC-002 (T-052): see the extension at the end of this file (default: ignored).
+    func setRecordingDirectory(_ path: String)
     func instantiatePlugin(slot: NodeIDValue, _ plugin: PluginDescriptor) -> JobID
     func pluginState(slot: NodeIDValue) -> Data
     func setPluginState(slot: NodeIDValue, _ state: Data)
@@ -751,4 +768,57 @@ extension EngineProtocol {
     /// latency and its parameters in slot order (param index i of the slot drives `params[i]`).
     /// Engines without plugin hosting return "".
     public func pluginInfoJSON(slot: NodeIDValue) -> String { "" }
+}
+
+// MARK: T-052 (REC-001..005): recording
+
+/// REC-004 (`daw::RecordingPOD`): a finished take, from a `recordingFinalized` event. `startSample`
+/// is where the file's first frame belongs on the timeline, at the session rate, already
+/// compensated for input + output latency (REC-003); it may be negative. With `error` set on the
+/// event and `frames` > 0 the file is still usable (e.g. REC-002 drops, filled with silence); an
+/// empty `file` means nothing could be written.
+public struct RecordedTake: Hashable, Sendable, Codable {
+    public var track: NodeIDValue
+    /// Absolute path of the 32-bit float CAF.
+    public var file: String
+    public var startSample: SamplePos
+    public var frames: Int64
+    /// REC-030 (T-080): 0 until loop takes exist.
+    public var takeIndex: UInt32
+    public var channels: UInt32
+    public var sampleRate: Double
+    /// Input channels 2·inputPair and 2·inputPair + 1.
+    public var inputPair: UInt32
+    public var droppedFrames: UInt64
+
+    public init(track: NodeIDValue, file: String, startSample: SamplePos, frames: Int64, takeIndex: UInt32 = 0,
+                channels: UInt32 = 2, sampleRate: Double, inputPair: UInt32 = 0, droppedFrames: UInt64 = 0) {
+        self.track = track
+        self.file = file
+        self.startSample = startSample
+        self.frames = frames
+        self.takeIndex = takeIndex
+        self.channels = channels
+        self.sampleRate = sampleRate
+        self.inputPair = inputPair
+        self.droppedFrames = droppedFrames
+    }
+}
+
+extension EngineEvent {
+    /// A `recordingFinalized` event (T-052).
+    public init(recording: RecordedTake, error: DAWError? = nil) {
+        self.init(kind: .recordingFinalized, subject: recording.track, count: recording.droppedFrames, error: error)
+        self.recording = recording
+    }
+}
+
+/// T-052 additions to `EngineProtocol`, with defaults so test doubles compile unchanged.
+extension EngineProtocol {
+    /// REC-005: with `enabled` and the loop off, recording writes only [start, end) of the
+    /// timeline. Engines without recording ignore it.
+    public func setPunch(enabled: Bool, start: Tick, end: Tick) {}
+    /// REC-002: where recordings are written (created when needed); "" is the engine's own
+    /// per-process temporary folder. Engines without recording ignore it.
+    public func setRecordingDirectory(_ path: String) {}
 }
