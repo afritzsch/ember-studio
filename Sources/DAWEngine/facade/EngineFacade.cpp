@@ -54,6 +54,7 @@
 #include "nodes/BuiltinNodes.h"
 #include "nodes/ChannelStrip.h"
 #include "nodes/Compressor.h"
+#include "nodes/Delay.h"
 #include "nodes/GainNode.h"
 #include "nodes/Metronome.h"
 #include "nodes/MidiClipPlayer.h"
@@ -1394,6 +1395,7 @@ std::string EngineFacade::paramInfoJSON(NodeKind kind) const {
     if (kind == NodeKind::gain) params = GainNode::kParamInfo;            // DW-160 (T-026): sends, MIX-007
     if (kind == NodeKind::metronome) params = Metronome::kParamInfo;      // DW-160 (T-026): TIME-010 slots
     if (kind == NodeKind::reverb) params = Reverb::kParamInfo;            // DSP-041 (T-073)
+    if (kind == NodeKind::delay) params = Delay::kParamInfo;              // DSP-041 (T-072)
     std::string json = "[";
     for (const ParamInfo& p : params) {
         if (json.size() > 1) json += ",";
