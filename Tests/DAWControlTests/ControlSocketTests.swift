@@ -40,6 +40,41 @@ struct ControlSocketTests {
         #expect(!server.isListening)
     }
 
+    @Test("CTL-030: the socket is 0600 even under a permissive umask, and start() leaves the process umask as it was")
+    func umaskUnchanged() throws {
+        let original = umask(0o000)  // the widest umask a caller could have
+        defer { umask(original) }
+        let path = socketPath()
+        let (server, _) = try server(at: path)
+        defer { server.stop() }
+        #expect(umask(0o000) == 0o000, "start() changed the process umask")
+        #expect(mode(path) & S_IFMT == S_IFSOCK)
+        #expect(mode(path) & 0o777 == 0o600, "owner read/write only, whatever the umask")
+    }
+
+    @Test("CTL-030: starting servers never narrows the umask under another thread (its new directories keep their x bit)")
+    func umaskUntouchedConcurrently() throws {
+        // The EACCES flake (DawctlTests, DispatcherMethodTests, AttachTests): umask is process-wide,
+        // so a directory created while start() had narrowed it came out 0600 and couldn't be
+        // written into. A thread creates directories while this one starts and stops servers.
+        let dir = try TempDir()
+        let probe = DirectoryProbe(root: dir.url.path)
+        let finished = DispatchSemaphore(value: 0)
+        Thread.detachNewThread {
+            probe.run()
+            finished.signal()
+        }
+        while probe.created == 0 { usleep(100) }
+        for _ in 0..<300 {
+            let (server, _) = try server(at: socketPath())
+            server.stop()
+        }
+        probe.stop()
+        finished.wait()
+        #expect(probe.created > 300)
+        #expect(probe.narrowed == 0, "\(probe.narrowed) of \(probe.created) directories lost owner rwx")
+    }
+
     @Test("CTL-030/CTL-011: a request round-trips over the socket; app errors arrive unchanged as `remote`")
     func roundTrip() async throws {
         let path = socketPath()
@@ -217,5 +252,36 @@ struct ControlSocketTests {
         FileManager.default.createFile(atPath: dir.file("Package.swift").path, contents: Data())
         #expect(ControlSocketPath.checkoutRoot(containing: nested)?.path == dir.url.resolvingSymlinksInPath().path)
         #expect(ControlSocketPath.checkoutRoot(containing: URL(fileURLWithPath: "/usr/bin")) == nil)
+    }
+}
+
+/// Creates and removes directories in a loop and counts the ones that came out without owner
+/// rwx (mode 0777 requested, so only the umask can take bits away).
+private final class DirectoryProbe: @unchecked Sendable {
+    private let root: String
+    private let lock = NSLock()
+    private var stopped = false
+    private var counts = (created: 0, narrowed: 0)
+
+    init(root: String) { self.root = root }
+
+    var created: Int { lock.withLock { counts.created } }
+    var narrowed: Int { lock.withLock { counts.narrowed } }
+    func stop() { lock.withLock { stopped = true } }
+
+    func run() {
+        var i = 0
+        while !lock.withLock({ stopped }) {
+            let path = "\(root)/d\(i)"
+            i += 1
+            guard mkdir(path, 0o777) == 0 else { continue }
+            var info = stat()
+            let ok = stat(path, &info) == 0 && info.st_mode & 0o700 == 0o700
+            rmdir(path)
+            lock.withLock {
+                counts.created += 1
+                if !ok { counts.narrowed += 1 }
+            }
+        }
     }
 }
