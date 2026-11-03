@@ -53,3 +53,9 @@ Unattended phases started by `/autobuild` (see `.claude/skills/autobuild/SKILL.m
 - T-056 merged (56b793c): module.modulemap add-only conflict kept both sides; test.sh 11/11, swift test green.
 - T-043 merged (4a35541) after its worker merged main (T-056 conflicts in shared files, kept both) and fixed the arrange peak invalidation (one drop per pass). Marked T-052, T-053, T-061, T-062 `ready` (all deps were done).
 - End: 4/4 merged, M4 complete, main green (plain swift test green after every merge; test.sh failed only on DW-172 flakes), week 49%, no worker session left open.
+
+### Phase 5 (2026-11-03, user-authorized final phase)
+- The user authorized one more phase although week ≥ 50% (WEEK_STOP). This is the last phase of the run.
+- Wave: T-052 audio recording (E+M+B, M5 core), T-061 AU hosting (P, M6), T-055 audio preferences + toasts + session-rate UI, arm/monitor buttons after T-052 (U, M5), T-072 delay (D, M7; closes DW-162's real-tail check).
+- Start: week 50%, five-hour window 42%.
+- Pre-decisions in DECISIONS.md: T-052 additive contract + history-exempt `ArmTrack`/`SetMonitoring`; T-061 configJSON + additive contract, analysis-based golden; T-055 ordering.
