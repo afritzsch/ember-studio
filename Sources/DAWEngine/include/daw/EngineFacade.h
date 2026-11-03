@@ -161,6 +161,9 @@ struct ExportSpecPOD {
     double tailThresholdDb = -90.0;
     double tailQuietSeconds = 1.0;
     double tailMaxSeconds = 10.0;
+    // T-036: keep the transport's loop and wrap at its end (ExportSpec::followLoop); false plays
+    // the range straight through.
+    bool followLoop = false;
 };
 
 // MARK: Graph status (DW-047)

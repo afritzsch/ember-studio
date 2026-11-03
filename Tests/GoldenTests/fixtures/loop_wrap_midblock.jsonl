@@ -1,0 +1,25 @@
+# loop_wrap_midblock (M3, TIME-005, TIME-006, DSP-001, DW-058, DW-073): loop wraps inside a block
+# through the clip player are sample-exact and crossfaded over 64 frames, so they don't click.
+# render.offline {"loop": true} (T-036, ExportSpec.followLoop) keeps the transport's loop: the
+# render is the range's length (ticks 0..960, 24000 frames) of playback from tick 0, wrapping at
+# the loop end like live playback. Without it renders play straight through.
+# assets/tone_441_48k.wav (441 Hz at 0.5, gen_m3_assets.py) is one clip from tick 0 on a
+# centre-panned track (× 0.5 through both strips). The loop is ticks [86, 319) = samples
+# [2150, 7975), 5825 frames, chosen so the tone is near +peak at the loop start and near -peak
+# just before the loop end: a hard cut would jump by 0.5 (-6 dBFS) in one frame.
+# Wraps at frames 7975 (frame 295 of block 15), 13800 (frame 488 of block 26: the crossfade runs
+# 24 frames into this block and 40 into the next) and 19625 (frame 169 of block 38). After a wrap
+# at W, frame W + d plays the loop from 2150 + d; for d < 64 the new pass fades in at (d + 1)/64
+# while the old pass goes on from 7975 + d at (63 - d)/64 (06 DSP-001, AudioClipPlayer).
+# M3GoldenTests checks every sample and the largest frame-to-frame step.
+# @expect {"field": "frames", "value": 24000}
+# @expect {"field": "spectrumPeakHz", "value": 441, "tolerance": 6}
+# @expect {"field": "firstNonSilentSample", "value": 1}
+# @expect {"field": "peakDb", "value": -12.041, "tolerance": 0.01, "range": {"start": 0, "end": 7975}}
+# @expect {"field": "peakDb", "value": -12.041, "tolerance": 0.01, "range": {"start": 8039, "end": 13800}}
+project.new {"name": "loop_wrap_midblock", "sampleRate": 48000}
+command.apply {"command": {"type": "AddTrack", "name": "Tone", "kind": "audio"}}
+asset.import {"path": "assets/tone_441_48k.wav"}
+command.apply {"command": {"type": "AddClip", "trackID": 2, "start": 0, "assetID": 3}}
+transport.setLoop {"enabled": true, "start": 86, "end": 319}
+render.offline {"from": 0, "to": 960, "path": "loop_wrap_midblock.wav", "tail": false, "loop": true}

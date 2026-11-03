@@ -515,8 +515,9 @@ public final class Dispatcher {
             throw DAWError.engine(code: .io, detail: "cannot create \(url.deletingLastPathComponent().path)")
         }
         try await settleGraph()
-        let spec = ExportSpec(path: url.path, fileType: p.format ?? .wav, sampleFormat: p.sampleFormat ?? .float32,
+        var spec = ExportSpec(path: url.path, fileType: p.format ?? .wav, sampleFormat: p.sampleFormat ?? .float32,
                               blockSize: p.blockSize ?? 512, tailEnabled: p.tail ?? true)
+        spec.followLoop = p.loop ?? false  // T-036
         let status = try await finish(engine.renderOffline(from: p.from, to: p.to, spec: spec), "render.offline")
         let render = status.render ?? OfflineRenderResult()
         renderRtViolations += render.rtViolations

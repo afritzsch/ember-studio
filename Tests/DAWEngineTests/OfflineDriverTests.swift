@@ -16,6 +16,9 @@ struct OfflineDriverTests {
     @Test("IO-010, TIME-004/008: plays the range through the transport (loop off, timeline reset once), then restores it")
     func followsTransport() { expectPasses(daw.testing.offlineFollowsTransport()) }
 
+    @Test("T-036, TIME-005: followLoop wraps at the loop end mid-block (and through a loop shorter than a block); loop off is bit-identical")
+    func followsLoop() { expectPasses(daw.testing.offlineFollowsLoop()) }
+
     @Test("IO-010: fails and removes the file when the transport doesn't follow ExportSpec.tempo")
     func transportMismatch() { expectPasses(daw.testing.offlineTransportMismatch()) }
 

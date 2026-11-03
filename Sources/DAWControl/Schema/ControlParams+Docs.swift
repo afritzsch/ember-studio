@@ -64,6 +64,7 @@ extension RenderOfflineParams: JSONSchemaDocumented {
             "sampleFormat": "Default float32; int24/int16 are TPDF-dithered (IO-035)",
             "tail": "Keep rendering past `to` until the output is quiet (IO-012). Default true",
             "blockSize": "1…4096. Default 512",
+            "loop": "Follow the transport's loop: render the range's length of playback from `from`, wrapping at the loop end. Default false (straight through, loop off)",
         ]
     }
 }

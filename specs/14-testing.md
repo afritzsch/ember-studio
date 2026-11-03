@@ -35,6 +35,8 @@
 | `send_ramps` | M2 | MIX-007, ENG-022 (send level/mute ramps) |
 | `clips_fades_tempo_change` | M3 | TIME-001, DSP-001 |
 | `loop_wrap_midblock` | M3 | TIME-005 |
+| `locate_reset` | M3 | TIME-008 |
+| `metronome_click` | M2 | TIME-010, DSP-011 |
 | `sampler_pitch` | M4 | DSP-021 |
 | `midi_locate_no_stuck_notes` | M4 | DSP-003 |
 | `record_loopback_alignment` | M5 | REC-003 |

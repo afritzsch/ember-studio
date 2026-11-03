@@ -573,6 +573,78 @@ CheckResult offlineFollowsTransport() {
     return checks;
 }
 
+CheckResult offlineFollowsLoop() {
+    CheckResult checks;
+    Engine engine;
+    auto node = std::make_unique<TimelineSource>();
+    TimelineSource* probe = node.get();
+    DAW_CHECK(publishOne(engine, std::move(node), {.timelineSources = true}));
+
+    // A loop over beat 4 (72000 ..< 96000), stopped at beat 5, as in offlineFollowsTransport.
+    Transport& transport = engine.transport();
+    DAW_CHECK(transport.setLoop(true, 3 * kPPQ, 4 * kPPQ) && transport.locate(4 * kPPQ));
+    applyTransportCommands(engine);
+
+    // 96000 frames from beat 3: 48000 ..< 96000, then the loop twice. The first wrap is at
+    // frame 48000, inside block 93 (47616 ..< 48128).
+    ExportSpec spec;
+    spec.tail.enabled = false;
+    spec.followLoop = true;
+    Capture capture;
+    spec.sink = capture.sink();
+    OfflineDriver driver;
+    DAW_CHECK(driver.render(engine, 2 * kPPQ, 6 * kPPQ, spec, nullptr).ok());
+    DAW_CHECK(driver.lastRender().framesWritten == 96000);
+    DAW_CHECK(driver.lastRender().rtViolations == 0);
+    DAW_CHECK(probe->resets == 1);
+    DAW_CHECK(probe->firstSample == 48000);
+    // Wraps at export frames 48000 and 72000, and a third at 96000 inside the last block, which
+    // is rendered in full and cut (IO-010).
+    DAW_CHECK(probe->wraps == 3);
+    DAW_CHECK(!probe->contiguous);
+
+    // What a freshly reset node plays along those positions.
+    std::vector<float> expected(96000);
+    double state = 0;
+    for (int64_t i = 0; i < 96000; ++i) {
+        const SamplePos pos = i < 48000 ? 48000 + i : 72000 + (i - 48000) % 24000;
+        state += 0.001 * (static_cast<double>(pos % 4800) / 4800.0 - state);
+        expected[static_cast<size_t>(i)] = static_cast<float>(state);
+    }
+    DAW_CHECK(capture.channels.size() == 2 && capture.channels[0] == expected && capture.channels[1] == expected);
+
+    // Restored as before: stopped at beat 5, the loop unchanged.
+    const TransportPlayhead after = transport.playhead();
+    DAW_CHECK(!after.playing && after.tick == 4 * kPPQ);
+    DAW_CHECK(after.loopEnabled && after.loopStart == 3 * kPPQ && after.loopEnd == 4 * kPPQ);
+
+    // A loop of 100 frames (ticks 0..4) in 512-frame blocks: each block plays the loop end, the
+    // loop once, then a gap (TIME-005: two segments at most). The playhead check follows that.
+    DAW_CHECK(transport.setLoop(true, 0, 4));
+    applyTransportCommands(engine);
+    ExportSpec shortLoop;
+    shortLoop.tail.enabled = false;
+    shortLoop.followLoop = true;
+    DAW_CHECK(driver.render(engine, 0, 2 * kPPQ, shortLoop, nullptr).ok());
+    DAW_CHECK(driver.lastRender().framesWritten == 48000);
+    DAW_CHECK(driver.lastRender().rtViolations == 0);
+
+    // With the loop off, followLoop changes nothing: same bits as the default render.
+    DAW_CHECK(transport.setLoop(false, 0, 4));
+    applyTransportCommands(engine);
+    Capture plain, following;
+    ExportSpec a;
+    a.tail.enabled = false;
+    a.sink = plain.sink();
+    ExportSpec b = a;
+    b.followLoop = true;
+    b.sink = following.sink();
+    DAW_CHECK(driver.render(engine, 2 * kPPQ, 6 * kPPQ, a, nullptr).ok());
+    DAW_CHECK(driver.render(engine, 2 * kPPQ, 6 * kPPQ, b, nullptr).ok());
+    DAW_CHECK(plain.frames() == 96000 && sameBits(plain.channels, following.channels));
+    return checks;
+}
+
 CheckResult offlineRepeatableOnOneEngine() {
     CheckResult checks;
     TempDir dir;

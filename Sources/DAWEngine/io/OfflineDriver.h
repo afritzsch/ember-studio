@@ -12,7 +12,9 @@
 // stopped and its position, loop and output latency are restored. Commands only apply at the
 // start of a block, so the driver also renders a 0-frame block before (to read the real
 // transport state) and after (to apply the restore); these aren't audio blocks and aren't
-// counted in `blocks`. Effects keep their state
+// counted in `blocks`. ExportSpec::followLoop (T-036) keeps the loop on instead, so the export
+// is the range's length of playback wrapping at the loop end (TIME-005 goldens); the per-block
+// playhead check then follows the wrap. Effects keep their state
 // across a locate (TIME-008), so an effect's tail still ringing from an earlier render or
 // playback carries into the next export.
 //

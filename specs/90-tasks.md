@@ -70,7 +70,7 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 | T-033 | U | Arrange canvas: tiles, waveforms (Metal), grid/snap, clip gestures, playhead layer | UI-010..014 | T-032, T-030 | wip(t-033-arrange-canvas) |
 | T-034 | U | Toolbar, transport, keyboard shortcuts | UI-002 | T-032 | ready |
 | T-035 | D | Overlapping-clip crossfades | DSP-002 | T-013 | done |
-| T-036 | E | M3 goldens: clips/fades/tempo change, loop wrap mid-block | TEST (M3 set) | T-030, T-035 | wip(t-036-m3-goldens) |
+| T-036 | E | M3 goldens: clips/fades/tempo change, loop wrap mid-block | TEST (M3 set) | T-030, T-035 | done |
 
 ### M4 — MIDI & Sampler
 | Task | Lane | Title | Requirements | Depends on | Status |
@@ -254,7 +254,7 @@ Recorded by the lead from worker reports.
 | DW-055 | T-009 | Fill the marked seam in `OfflineDriver::render`: `transport.locate(from)` + `play()` before the loop, `stop()` after. Rendering twice on one engine is bit-identical only for stateless nodes, so the pre-render locate must reset timeline nodes even when stopped (TIME-008 covers locate while playing), or IO-011 needs an engine-level reset | E (T-009 follow-up after T-008) | done (T-009) |
 | DW-056 | T-009 | `ExportSpec.blockSize` can't be checked against the published graph's `maxBlock` (Engine doesn't expose it); an oversize block renders silence silently. Add a non-RT `Engine::currentMaxBlock()` or check in the facade. `ExportSpec`/`ProgressFn` were undefined in the specs; T-009 defined them in `io/ExportSpec.h` (carries the TempoMap; now that `RenderGraph::tempoMap()` exists, reconsider) | E / B (T-014) | done (T-014) |
 | DW-057 | T-009 | Facade: map `ExportSpecPOD` → `daw::ExportSpec`, run offline render on a job thread with the device driver stopped, turn `OfflineProgress` into job status. Cancellation would need `ErrorCode::cancelled` | B (T-014) | done (T-014) |
-| DW-058 | T-008 | Goldens `loop_wrap_midblock` (TIME-005) and locate/no-stuck-voices (TIME-008) | E (T-019) | todo |
+| DW-058 | T-008 | Goldens `loop_wrap_midblock` (TIME-005) and locate/no-stuck-voices (TIME-008) | E (T-019) | done (T-036: `loop_wrap_midblock`, `locate_reset`; MIDI no-stuck-notes golden is DW-101) |
 | DW-059 | T-008 | Driver calls `Engine::transport().setOutputLatency(samples)`; facade `TransportPOD` maps from `TransportPlayhead` | E (T-011), B (T-014) | done (T-014) |
 | DW-060 | T-008 | Loops shorter than a block (< 4096 samples) play once then leave a gap (contract allows 2 segments). Model should enforce a minimum loop length | M (T-030 SetLoop) | done in the model (T-030: enabled loops ≥ largest block); tempo edits can still shrink a loop → DW-125 |
 | DW-061 | T-008 | Product question: on a tempo edit the playhead keeps its sample position, so its musical position shifts. Keeping the tick instead needs a decision | user | todo |
@@ -269,7 +269,7 @@ Recorded by the lead from worker reports.
 | DW-070 | T-011 | FakeDeviceDriver can reuse `DeviceRenderer` (device-independent IO cycle) and `publishDeviceLatency()`. Device start/stop/config/latency not reachable via dawctl/dawmcp until the facade + control exist | E (T-050), B (T-017/T-018) | done (T-050, T-051, T-018: dawctl/dawmcp device methods) |
 | DW-071 | T-013 | Facade/telemetry need the NodeID → MeterID map (today only `GraphBuilder::meterOf`, compile thread): publish it with each graph or through GraphCompiler | B (T-014 / T-020) | done (T-014) |
 | DW-072 | T-013 | DW-051 decision: the model must bump a clip player's `configVersion` whenever its track's clips change and when an asset they use finishes loading (facade emits `assetLoaded`) | M (T-016) | done (T-016) |
-| DW-073 | T-013 | Goldens: two adjacent clips with fades (DSP-001), loop wrap mid-block through the clip player (TIME-005/006), locate reset (TIME-008), pan hard-left/centre/right (MIX-005, done T-025 `pan_law`) | E (T-036) | todo |
+| DW-073 | T-013 | Goldens: two adjacent clips with fades (DSP-001), loop wrap mid-block through the clip player (TIME-005/006), locate reset (TIME-008), pan hard-left/centre/right (MIX-005, done T-025 `pan_law`) | E (T-036) | done (T-036: `clips_fades_tempo_change`, `loop_wrap_midblock`, `locate_reset`) |
 | DW-074 | T-013 | DSP-041: `dsp/ParamInfo.h` and `ChannelStrip::kParamInfo` exist but no registry publishes param tables. Gain slot holds linear amplitude, labelled with a dB curve for display | D/E | todo |
 | DW-075 | T-013 | Clip edits during playback swap in a new player instance with no crossfade (can click; fix = per-graph clip data, touches graph/); stop cuts audio with no declick; DSP-040 (NaN guard, silence-tail) not done for clip player / strip | D (later) | todo |
 | DW-076 | T-014 | `DAWError` has no case for engine I/O / out-of-memory / internal errors; `EngineClient` maps them to `.invalidArgument("i/o: …")`. Add `.engine(code:detail:)` | M | done (T-016: `DAWError.engine(code:detail:)`) |
@@ -356,3 +356,6 @@ Recorded by the lead from worker reports.
 | DW-157 | T-032 | Quitting the real app (SIGTERM, parent exit, menu) is verified by hand only; an automated test needs the built app, e.g. a `scripts/test.sh` stage after xcodebuild | B / test | todo |
 | DW-160 | T-024 | Project-level metronome wiring (model setting, command, graph node into master, `transport.setMetronome`, paramInfoJSON for `Metronome`/`GainNode` slots); proposal in T-024's report | M+B (T-026) | todo |
 | DW-161 | T-024 | Optional: add `NodeKind::metronome` to GraphBuilder's `resetsOnLocate` for consistency (the node already self-detects locates) | E | todo |
+| DW-162 | T-036 | TIME-008 "effects keep their tails" with a real tailed effect (delay feedback / reverb) once T-072/T-073 exist; today `locate_reset` uses a SineNode insert's state | D (T-072/T-073 or T-077) | todo |
+| DW-163 | T-036 | dawmcp over stdio answered a pipelined `tools/call` (render.offline) before an earlier `daw_test_fixture` call finished, so the render failed; one at a time works. A pipelined script over dawmcp would race | B | todo |
+| DW-164 | T-036 | Fixtures can't locate mid-render (only at a render's start). If a golden ever needs it, add a scripted transport event to render.offline | E/B | todo |

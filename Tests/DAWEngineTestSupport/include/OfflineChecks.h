@@ -23,6 +23,12 @@ CheckResult offlineTempoMapRange();
 // transport is stopped with its position, loop and output latency restored.
 CheckResult offlineFollowsTransport();
 
+// T-036, TIME-005: with ExportSpec::followLoop the export keeps the transport's loop: the range's
+// length of playback from `from`, wrapping at the loop end mid-block like live playback, with the
+// per-block playhead check following the wrap (also for a loop shorter than a block, which leaves
+// a gap). With the loop off it is bit-identical to the default render.
+CheckResult offlineFollowsLoop();
+
 // IO-010: the render fails (and removes the file) when the transport doesn't follow
 // ExportSpec.tempo: another rate or tempo than the graph's map, blocks above the graph's
 // maxBlock, or no graph.
