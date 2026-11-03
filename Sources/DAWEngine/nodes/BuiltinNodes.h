@@ -22,6 +22,9 @@
 //                    their defaults; meters its gain reduction into `telemetry` (see Compressor.h).
 //   reverb           DSP-033 8-line FDN reverb (Reverb): params size, decay, damping, predelay,
 //                    mix; slots beyond numParams use their defaults (see Reverb.h).
+//   delay            DSP-032 stereo/ping-pong delay (Delay): params time, sync, note, feedback,
+//                    lowpass, pingpong, mix; slots beyond numParams use their defaults (see
+//                    Delay.h).
 
 #include "core/Result.h"
 #include "core/Telemetry.h"
