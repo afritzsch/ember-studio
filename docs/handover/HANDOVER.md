@@ -1,38 +1,36 @@
-You are AUTOBUILD phase lead 5. You run in the main checkout /Users/artem/dev/macDAW on branch main. Read CLAUDE.md, then `.claude/skills/autobuild/SKILL.md` (Phase lead), then follow "Orchestrating with Patchbay" in specs/90-tasks.md with the skill's overrides. Use the Patchbay MCP tools for workers, never the Agent tool. The run log is `docs/autobuild/RUN.md` and the decisions taken without the user are in `docs/autobuild/DECISIONS.md`.
+Autobuild stopped: user-authorized final phase done. The run ended after phase 5 (the user authorized it although week usage was ≥ 50%). A future lead is started by the user (`/autobuild` for a new run, which continues the phase numbering with 6, or a manual lead session). Read CLAUDE.md, then `.claude/skills/autobuild/SKILL.md` if it is an autobuild run, then follow "Orchestrating with Patchbay" in specs/90-tasks.md. Use the Patchbay MCP tools for workers, never the Agent tool. The run log is `docs/autobuild/RUN.md` (its *Summary for the user* covers phases 1–5) and the decisions taken without the user are in `docs/autobuild/DECISIONS.md`.
 
-## State at handoff (2026-11-03, end of autobuild phase 4; main @ the "Autobuild phase 4: handover" commit, pushed; clean; no worker sessions running)
-- Phase 4 merged all four wave tasks. **M4 (MIDI & Sampler) is complete.**
-  - **T-044** M4 goldens: `sampler_pitch`, `midi_loop_wrap`, `midi_locate_no_stuck_notes` (per-sample oracle from 06), and `midi_tempo` through EngineClient (`MidiTempoEngineTests`, DW-096 for MIDI). Test-only.
-  - **T-073** reverb (DSP-033): 8-line FDN with Hadamard mixing, deterministic float math, silence snaps to exact 0; golden `reverb_determinism` (two fresh engines, bit-identical). ParamInfo via `paramInfoJSON`.
-  - **T-056** session-rate change (IO-033, `SetSessionSampleRate`): the facade's `AssetReloader` re-converts assets on `daw.loader` with `reload` progress on `assetsReloaded` events; play is refused while a pass runs, exports wait (≤ 600 s). `SetSessionSampleRate` is history-exempt and rescales clip offsets/zone loops; the document follows engine-side rate changes (DW-130). `loadAsset` takes a peak-cache dir (DW-077). Contract deltas in 08 and 13.
-  - **T-043** piano roll (UI-020) + audition (UI-021): `previewNote(source, pitch, velocity, on)` into the track's MIDI clip player through a lock-free `MidiPreviewInbox`; releaseAll on stop/locate/offline. Open with double-click, right-click → Open in Piano Roll, or `P`. Arrange now drops peaks once per rate-change pass.
-- Done & merged (48): T-001..T-026, T-030..T-036, T-040..T-045, T-050, T-051, T-056, T-060, T-071, T-073, T-085..T-087.
+## State at handoff (2026-11-04, end of autobuild phase 5; main @ the "Autobuild phase 5: handover" commit, pushed; clean; no worker sessions running)
+- Phase 5 merged all four wave tasks (plus follow-ups):
+  - **T-052** audio recording (REC-001..005): per-track `RecordFifo`s fed through an `InputCapture` seam in the device drivers, `Recorder` + `daw.diskwrite` writing 32-bit float CAF into `<project>/Audio/Recordings/` (unsaved projects: `$TMPDIR/EmberStudio-Recordings/<uuid>-<pid>/`), latency compensation (golden `record_loopback_alignment`, exact to the sample), punch range (`transport.setPunch`), finalize on stop/device loss/arm change (DW-119). Model: `Track.inputPair`, history-exempt `ArmTrack`/`SetMonitoring`, `recordingFinalized` → one undoable "Record" (ImportAsset + AddClip) imported by `ProjectStore`. Contract deltas in 08, 09, 13.
+  - **T-072** delay (DSP-032): ms or tempo-synced, ping-pong, LP in the loop, 20 ms crossfade on time/tempo changes; golden `delay_tempo_sync`; a locate keeps the tail (DW-162). Follow-up: the DW-148 autosave tests now wait on the store (`autosaveIdle()`, `afterAutosaveIO` test seam in `ProjectStore`) and MODEL-041's crash-test spin runs off the main actor, which removed most DAWModelTests wall-clock flakes (DW-172; DW-201 left).
+  - **T-055** audio preferences (UI-040: device, rate, buffer, inputs, latency; `prefs.audio.*` control ids, ⌘,), session-rate UI with re-conversion progress (DW-183), device toasts with an "Audio Settings…" action, track-header arm/monitor/input controls, recording toasts, record through `EngineSync.setRecording` (DW-198), only existing input pairs (DW-200).
+  - **T-061** AU hosting (PLUG-010, 012..016 for AU): `plugins/` (`AUInstance`, `AUPluginNode`, `AUPluginHost`: one AU per slot that survives node re-creation), configJSON `{identifier, state}`, facade `instantiatePlugin`/`get/setPluginState`/`pluginInfoJSON`, `engine.pluginInfo`, latency KVO → PDC, aux bus ← sidechain, render-thread param/MIDI events with 0 RT violations (no exemption needed). Golden: AUSampler nulls against AVAudioEngine at −156 dBFS (no stored reference). App and Dispatcher capture live plugin state on save (DW-143).
+- Done & merged (52): T-001..T-026, T-030..T-036, T-040..T-045, T-050..T-052, T-055, T-056, T-060, T-061, T-071..T-073, T-085..T-087.
 - No `wip` tasks.
-- **Ready (13):** T-052 audio recording (E, M5), T-053 CoreMIDI + MIDI recording (E, M5), T-055 audio preferences + device toasts (U, M5), T-061 AU hosting (P, M6), T-062 VST3 hosting (P, M6), T-070 EQ (D, M7), T-072 delay (D, M7), T-076 mixer view (U), T-082 export dialog (U).
-  - T-052, T-053, T-061 and T-062 were left `todo` by earlier leads although all their dependencies were done; phase 4 marked them `ready`.
-- Discovered work runs DW-001..DW-191. New this phase: DW-182..191 (T-056: rate-change golden, rate UI, a blocking control wait, restore JSON keys, rejected-graph-at-new-rate; T-043: two spec-text items, headless `engine.previewNote`, preview retrigger on graph rebuild, piano-roll perf + per-asset peak refresh). DW-172 now notes that DW-148 also fails ~1 in 4–5 runs on base: fix it first.
-- `scripts/test.sh` on the last trial merge was 10/11 (only the DW-172 flakes DW-148 and CTL-031 in the swift-test step); plain `swift test` was green after every merge.
-- Phase 4 week usage: 34% → 49%.
+- **Ready (9):** T-053 CoreMIDI + MIDI recording (E, M5), T-054 input monitoring (E, M5), T-062 VST3 hosting (P, M6), T-064 host bypass/NaN guard/crash marker (P, M6), T-070 EQ (D, M7), T-074 automation (E+M, M7), T-076 mixer view (U), T-080 loop takes/comping (E+M, M8), T-082 export dialog (U).
+- Discovered work runs DW-001..DW-205. New this phase: DW-192..205 (telemetry input latency/buffer, device caps, `device.set` buffer reset, 13 `prefs.audio.*` ids, ParamInfo step/enum metadata, `locate_reset` with a real tail, inputPair validation, main-actor stalls in DAWModelTests, mixer arm/monitor controls, take-import result, plugin → model params, async AU re-instantiation).
+- Last trial merge (T-061): `scripts/test.sh` 11/11. All four phase-5 merges ended with test.sh 11/11, except T-072's first merge (only DW-172 load flakes).
+- Phase 5 week usage: 50% → 75% (two 5-hour pauses, a Mac sleep, and four follow-ups).
 
 ## Suggested next wave
-Critical path / earliest milestone first (M5 recording, then M6 plugins):
-- **T-052** (E, M5): audio recording. The core of M5; T-054 and T-080 depend on it.
-- **T-061** (P, M6): AU hosting. Unblocks T-063/T-064/T-074 (automation, AUTO-009). T-062 (VST3, P) is the same lane; run one P task per wave or give them disjoint folders.
-- **T-055** (U, M5): audio preferences + device toasts. Can also take DW-183 (session-rate UI + progress).
-- **T-070** or **T-072** (D, M7): EQ or delay. T-072 also lets `routing` (DW-096) and DW-162 move; both are needed for T-077 with T-074.
-- Small items worth folding into a worker that finishes early: DW-172/DW-148 (autosave poll flake, the most frequent), DW-187/188 (spec text), DW-189 (headless previewNote).
+- **T-054** input monitoring (E, M5) or **T-053** CoreMIDI (E, M5): both finish M5's recording side; one E task per wave (both touch record/ and io/).
+- **T-062** VST3 hosting (P, M6): mirror T-061's design (one instance per slot, configJSON, host in `plugins/`). Unblocks T-063 (editors).
+- **T-074** automation (E+M, M7): T-061 provides the AU param path (AUTO-009).
+- **T-070** EQ (D, M7): the last built-in effect; then the `routing` fixture (DW-096) can run.
+- Small lead items: DW-187/188/195 (spec text), DW-069/116 (04 Interfaces, user).
 
 ## Decisions taken this phase (see docs/autobuild/DECISIONS.md)
-- T-043: `previewNote` added to the facade (additive, defaulted protocol method), pre-decided in the briefing.
-- T-056: `SetSessionSampleRate` is history-exempt (like `SetMetronome`) and also applied when the engine changes rate by itself (DW-130).
-- T-056: additive progress events / facade method pre-accepted; it shipped `reload` fields on `assetsReloaded` and `assetsReloadPending` in telemetry (no new event type).
-- Not logged as a user decision: T-073 changed one token in `Tests/DAWEngineTestSupport/FacadeChecks.cpp` and one in `EngineClientTests.swift` (their "kind with no params" checks used `reverb`, which now has params); accepted at review.
+- T-052: additive contract (event, telemetry `recordDrops`, facade methods, `Track.inputPair`) pre-accepted; `ArmTrack`/`SetMonitoring` history-exempt.
+- T-061: AU identifier + state in `NodeDesc.configJSON`, additive facade/protocol pre-accepted; analysis-based golden (no stored reference of a system AU).
+- T-055: arm/monitor buttons after T-052 merged (it did, in the same phase).
+- Not logged as user decisions (accepted at review): T-072 crossfade (not glide) on delay-time changes, with its defaults listed in 06 "Delay semantics"; T-061 maps param slot i to the AU's i-th `allParameters` entry, NaN = leave the AU's value.
 
 ## Sessions only the user can close
-- In the sidebar: "macDAW" sessions (the conductor and an older "push to main" session). Phase lead 4 closed all its own workers.
+- In the sidebar: the "macDAW" sessions (the conductor and older sessions). Phase lead 5 closed all its own workers.
 - Worktrees left on disk: removing them needs `--force` (submodules), which auto mode denies. All are merged or superseded:
-  - `~/.patchbay/worktrees/macDAW/t-023-sidechain`, `t-024-metronome`, `t-025-m2-goldens`, `t-025-m2-goldens-r2`, `t-026-project-metronome`, `t-031-persistence`, `t-032-app-shell`, `t-032-app-shell-r2`, `t-033-arrange-canvas`, `t-034-toolbar-transport`, `t-035-crossfades`, `t-036-m3-goldens`, `t-042-note-commands`, `t-045-midi-routing`, `t-071-compressor`;
-  - new this phase: `t-043-piano-roll`, `t-044-m4-goldens`, `t-056-session-rate`, `t-073-reverb`.
+  - `~/.patchbay/worktrees/macDAW/t-023-sidechain`, `t-024-metronome`, `t-025-m2-goldens`, `t-025-m2-goldens-r2`, `t-026-project-metronome`, `t-031-persistence`, `t-032-app-shell`, `t-032-app-shell-r2`, `t-033-arrange-canvas`, `t-034-toolbar-transport`, `t-035-crossfades`, `t-036-m3-goldens`, `t-042-note-commands`, `t-043-piano-roll`, `t-044-m4-goldens`, `t-045-midi-routing`, `t-056-session-rate`, `t-071-compressor`, `t-073-reverb`;
+  - new this phase: `t-052-audio-recording`, `t-055-audio-prefs`, `t-061-au-hosting`, `t-072-delay`.
   - Remove them with `git worktree remove --force <path>`, then `git branch -D <branch>`. The old remote WIP branches `origin/t-025-m2-goldens`, `t-031-persistence` and `t-032-app-shell` can be deleted too.
 
 ## Environment note: CoreAudio
@@ -97,6 +95,11 @@ Critical path / earliest milestone first (M5 recording, then M6 plugins):
 - **Check `todo` tasks whose deps are all done** when you pick a wave; phase 4 found four that should have been `ready` (T-052, T-053, T-061, T-062).
 - **Budget (phase 4):** the 5-hour window went 12% → 86% in ~45 min with four workers (paused ~4 h until the reset); the week went 34% → 49% for the whole phase. One 4-worker phase costs ~15 week-%.
 - **`list_sessions` output is huge** (it echoes each worker's whole briefing). Prefer `wait_for(session, timeout: 5)` per worker to check status.
+- **The Mac can sleep mid-phase (phase 5).** Every worker turn died with "API Error: Your computer went to sleep mid-response", and background watch loops stop firing. After waking: read_output each worker, `send_input` "Continue where you left off…", and restart the watcher. Tell workers to commit after each piece that builds, so a cut-off turn loses little.
+- **Merging a U task in two parts works (phase 5):** T-055 merged its preferences part first, then `git merge main` after T-052 and added the controls that needed T-052's commands. The same branch can be trial-merged twice.
+- **Finished workers make good flake hunters:** T-072's follow-up found that MODEL-041's crash test blocked the main actor for up to 30 s (the root of most DAWModelTests DW-172 flakes) and made the autosave tests wait on the store. Ask for a mutation check (reintroduce the bug, see the test fail).
+- **Budget (phase 5):** four workers took the 5-hour window from 42% to 89% in ~20 min; the phase needed two pauses (~4 h and ~1.5 h). The week went 50% → 75%, the most of any phase (larger tasks plus follow-ups).
+- **zsh doesn't word-split `$(…)`:** stage a merge's files with `git diff --cached --name-only HEAD | xargs git add --`, not `git add $F`.
 
 ## Open questions for the user (not yet answered)
 - DW-061: on a tempo edit, should the playhead keep its sample position (current behaviour) or its tick position (recommended; what most DAWs do)?
@@ -121,8 +124,13 @@ Critical path / earliest milestone first (M5 recording, then M6 plugins):
   - Review the three phase-4 decisions in `docs/autobuild/DECISIONS.md` (T-043 `previewNote`; T-056 undo + DW-130; T-056 additive events).
   - T-043 UX choices: open the piano roll with double-click / right-click / `P`; quantize strength is a preset menu (25/50/75/100 %), because a raw Slider isn't `ui.perform`-able (UI-052).
   - T-056: `play()` is refused (not deferred) while assets re-convert; an export waits up to 600 s.
+- New in autobuild phase 5:
+  - Review the five phase-5 decisions in `docs/autobuild/DECISIONS.md` (T-052 contract and undo, T-061 contract and golden, T-055 ordering).
+  - T-072's delay choices (06 "Delay semantics"): max 4 s, feedback ≤ 0.95, LP 20 kHz = off, ping-pong input as ½(L+R) on the left, defaults (sync 1/8, feedback 0.35, LP 8 kHz, mix 0.3), crossfade instead of glide.
+  - DW-196: `ParamInfo` step/enum metadata (06 Interfaces change).
+  - T-055 UX: the audio panel is a strip under the toolbar (not a sheet); track headers are two lines in a 220 pt column.
 
 ## Your first job
-1. Run `usage.sh`. If `week ≥ 50`, don't start a phase: write the stop handover (skill *Stop the run*).
-2. Otherwise `list_sessions`, pick the wave (see *Suggested next wave*), mark it `wip(...)`, commit, and start the workers with `.git/autobuild/common.txt` (edit `watch.sh`'s glob for your tasks).
-3. Follow the skill: review, trial merge, timed tests, merge, close each worker, then hand over and push.
+1. The run is stopped. If the user starts a new autobuild run, its conductor numbers the next phase 6; the phase lead runs `usage.sh` and follows the skill.
+2. Otherwise (manual lead): `list_sessions`, pick the wave (see *Suggested next wave*), mark it `wip(...)`, commit, and start the workers with `.git/autobuild/common.txt` (edit `watch.sh`/`watch5.sh`'s glob for your tasks).
+3. Review, trial merge, timed tests, merge, close each worker, then hand over and push.

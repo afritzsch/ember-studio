@@ -8,6 +8,7 @@ Unattended phases started by `/autobuild` (see `.claude/skills/autobuild/SKILL.m
 | 2 | T-023, T-024, T-033, T-036 | all 4 (T-024, T-036, T-033, T-023) | 10 → 23 | 4 h stall: the lead's trial-merge `swift test` hung (DW-168, fixed) through a ~4 h 5-hour-window reset; EACCES flakes fixed (DW-169); `render.offline {loop}` and a facade `peaks` query added; T-026 added |
 | 3 | T-045, T-071, T-026, T-034 | all 4 (T-045, T-071, T-026, T-034) | 23 → 33 | MIDI edges audible (A5 at 880 Hz), compressor + `sidechain_compressor` golden, project metronome (export excludes the click; not undoable), toolbar/shortcuts; one 5-hour pause (~4 h, only T-034's follow-up waited); load flakes logged (DW-172) |
 | 4 | T-044, T-073, T-056, T-043 | all 4 (T-044, T-073, T-056, T-043) | 34 → 49 | M4 complete (M4 goldens, piano roll + previewNote); reverb + `reverb_determinism`; session-rate change with asset re-conversion; one 5-hour pause (~4 h); T-052/053/061/062 found `ready` |
+| 5 | T-052, T-061, T-055, T-072 | all 4 (T-055 part 1, T-072, T-052, T-072 follow-up, T-055 follow-up, T-061) | 50 → 75 | User-authorized final phase (week ≥ 50%). Recording (REC-001..005), AU hosting, audio prefs + arm/monitor, delay; DW-148/DW-172 autosave flakes fixed at the root (MODEL-041 blocked the main actor); two 5-hour pauses and a Mac sleep |
 
 ## Phase notes
 
@@ -59,3 +60,43 @@ Unattended phases started by `/autobuild` (see `.claude/skills/autobuild/SKILL.m
 - Wave: T-052 audio recording (E+M+B, M5 core), T-061 AU hosting (P, M6), T-055 audio preferences + toasts + session-rate UI, arm/monitor buttons after T-052 (U, M5), T-072 delay (D, M7; closes DW-162's real-tail check).
 - Start: week 50%, five-hour window 42%.
 - Pre-decisions in DECISIONS.md: T-052 additive contract + history-exempt `ArmTrack`/`SetMonitoring`; T-061 configJSON + additive contract, analysis-based golden; T-055 ordering.
+- 5-hour window hit 89% at 1793713776 (epoch), ~20 min into the phase (week 56%). All four workers paused until the reset at 1793728800 + 120 s.
+- Resumed all four workers at 1793729332 (five-hour window 0%, week 57%).
+- 1793736878: the Mac slept ~19:20; all four workers' turns died ('computer went to sleep'). Sent each 'continue' at five 29%, week 61%.
+- T-055 part 1 merged (f98f2e0): audio preferences, device toasts, session-rate UI. test.sh 11/11; plain swift test only DW-172 flakes. The worker stays open for the arm/monitor buttons after T-052.
+- T-072 merged (1fc9162). T-052 reported (test.sh 11/11 on its branch); trial merge clean. 5-hour window hit 85% at 1793741071: T-061 and T-072 (follow-up: DW-148 test seam) paused until 1793746800 + 120 s; T-055 idle (queued).
+- T-052 merged (46d17e7): test.sh 11/11. Worker closed. T-054 and T-080 now ready.
+- Resumed T-061 and T-072 at 1793746900 (five 0%, week 69%); T-055 started its follow-up (arm/monitor buttons, recording toasts, DW-198, DW-200).
+- T-072 follow-up merged (3b6bcb1): DW-148 autosave tests now deterministic, MODEL-041 spin off the main actor; test.sh 11/11. Worker closed.
+- T-055 follow-up merged (94450af): track-header arm/monitor/input controls, recording toasts, DW-198/200; test.sh 11/11. T-055 done; worker closed.
+- T-061 merged (c943dbf) after a small app follow-up (app saves capture live AU state, DW-143): test.sh 11/11. T-064 and T-074 now ready. Worker closed.
+- End: 4/4 merged, main green (test.sh 11/11 on the last trial merge), week 75%, five-hour window 46%, no worker session left open. Run stopped as the user asked (final phase).
+
+## Summary for the user
+
+The run had five phases (2026-11-02 → 2026-11-04). The week went 0% → 75%; phase 5 ran past WEEK_STOP because you authorized it.
+
+**Merged in this run (20 tasks, all to `main`, pushed):**
+- Phase 1: T-032 app shell, T-025 M2 goldens, T-042 note commands + instrument slot, T-035 crossfades.
+- Phase 2: T-024 metronome node, T-036 M3 goldens (+ loop-following render), T-033 arrange canvas (+ facade `peaks`), T-023 sidechain.
+- Phase 3: T-045 MIDI edge routing, T-071 compressor + sidechain golden, T-026 project metronome, T-034 toolbar/shortcuts.
+- Phase 4: T-044 M4 goldens, T-073 reverb, T-056 session-rate change, T-043 piano roll + audition. **M4 complete.**
+- Phase 5: T-052 audio recording, T-072 delay, T-055 audio preferences + arm/monitor controls, T-061 AU hosting.
+- Milestones: M2, M3 and M4 are complete. M5 needs T-053 (CoreMIDI) and T-054 (monitoring). M6 needs T-062 (VST3), T-063 and T-064. M7 needs T-070 (EQ), T-074/075 and T-077.
+- Flake fixes along the way: DW-148 autosave race (phase 1), DW-168 test hang and DW-169 EACCES (phase 2), DW-148/DW-172 autosave tests made deterministic plus MODEL-041 off the main actor (phase 5).
+
+**Decisions to review:** `docs/autobuild/DECISIONS.md` has 18 rows (phases 1–5), all taken without you. Each says what to change if you disagree. The biggest ones:
+- the contract additions (`peaks`, `previewNote`, `followLoop`, the T-052 recording API, the T-061 AU configJSON);
+- the history-exempt commands (`SetMetronome`, `SetSessionSampleRate`, `ArmTrack`, `SetMonitoring`);
+- the metronome being excluded from exports;
+- analysis-based AU goldens.
+
+The open questions only you can answer are listed in `docs/handover/HANDOVER.md` → *Open questions for the user*.
+
+**Tasks parked:** none. No task was stopped unfinished, and there are no `wip` tasks or WIP branches. 9 tasks are `ready` (T-053, T-054, T-062, T-064, T-070, T-074, T-076, T-080, T-082).
+
+**Permission prompts that blocked work:**
+- `git worktree remove --force` (worktrees contain submodules) is denied in auto mode. That's why the merged worktrees are still on disk; the list is in HANDOVER → *Sessions only the user can close*. Allowlisting it, or removing them by hand, would clean up.
+- No other prompt blocked a worker. One worker command in phase 5 was "Not run · auto mode's check had no usable answer" during the Mac sleep; the worker took another route.
+
+**Sessions you should close:** the conductor ("macDAW") and older "macDAW"/"garminWatch" sessions in the sidebar. Every autobuild worker and phase lead 1–4 is closed; this lead (5) is closed by the conductor.
