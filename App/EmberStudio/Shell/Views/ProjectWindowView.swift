@@ -126,7 +126,7 @@ private struct ArrangeArea: View {
             Divider()
             HStack(spacing: 0) {
                 TrackHeaderColumn(model: model)
-                    .frame(width: 200)
+                    .frame(width: 220)
                 Divider()
                 TimelineCanvas(model: model.arrange)
                     .accessibilityIdentifier("arrange.canvas")
@@ -202,22 +202,54 @@ private struct TimelineCanvas: NSViewRepresentable {
     func updateNSView(_ view: TimelineCanvasView, context: Context) {}
 }
 
+/// A track header: its name, kind, mute and solo, then arm (REC-001), the input pair an audio
+/// track records (DW-200: the device's pairs) and monitoring (REC-020). Every control is a view-model
+/// control (UI-052); the menus hold toggles, like the snap menu.
 private struct TrackHeaderRow: View {
     let track: TrackHeaderModel
 
     var body: some View {
-        HStack(spacing: 6) {
-            ControlButton(control: track.selectControl, face: track.name)
-                .buttonStyle(.plain)
-                .font(.headline)
-            Text(track.kind == .midi ? "MIDI" : "Audio")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Spacer()
-            ControlToggle(control: track.muteControl, face: "M")
-            ControlToggle(control: track.soloControl, face: "S")
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                ControlButton(control: track.selectControl, face: track.name)
+                    .buttonStyle(.plain)
+                    .font(.headline)
+                    .lineLimit(1)
+                Text(track.kind == .midi ? "MIDI" : "Audio")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize()
+                Spacer(minLength: 4)
+                ControlToggle(control: track.muteControl, face: "M").fixedSize()
+                ControlToggle(control: track.soloControl, face: "S").fixedSize()
+            }
+            HStack(spacing: 4) {
+                // Hollow when disarmed: the red tint alone reads almost the same on and off.
+                ControlToggle(control: track.armControl, face: track.armed ? "●" : "○")
+                    .tint(.red)
+                    .fixedSize()
+                if !track.inputControls.isEmpty {
+                    Menu(TrackHeaderModel.inputTitle(track.inputPair)) {
+                        ForEach(track.inputControls) { control in
+                            ControlToggle(control: control, face: control.label.replacingOccurrences(of: "Input ", with: ""))
+                        }
+                    }
+                    .fixedSize()
+                    .accessibilityIdentifier("track.\(track.id).input.menu")
+                }
+                Menu("Mon: \(TrackHeaderModel.monitoringTitle(track.monitoring))") {
+                    ForEach(track.monitorControls) { control in
+                        ControlToggle(control: control, face: control.label.replacingOccurrences(of: "Monitoring ", with: ""))
+                    }
+                }
+                .fixedSize()
+                .accessibilityIdentifier("track.\(track.id).monitor.menu")
+                Spacer(minLength: 0)
+            }
+            .controlSize(.small)
         }
         .padding(.horizontal, 10)
+        .frame(maxHeight: .infinity)
         .background(track.isSelected ? Color.accentColor.opacity(0.15) : Color.clear)
     }
 }

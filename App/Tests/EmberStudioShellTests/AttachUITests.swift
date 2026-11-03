@@ -32,7 +32,7 @@ struct AttachUITests {
         #expect(w["zoom"]?["pixelsPerBeat"]?.doubleValue == 64)
         #expect(w["scroll"]?["y"]?.doubleValue == 0 && w["visibleTracks"] == [.int(Int64(track))])
         #expect(w["tracks"]?[0] == ["id": .int(Int64(track)), "name": "Gtr", "kind": "audio", "mute": false, "solo": false,
-                                    "selected": true])
+                                    "selected": true, "armed": false, "inputPair": 0, "monitoring": "auto"])
         #expect(w["transport"]?["playing"] == false)
         #expect(w["toasts"]?[0]?["kind"] == "overload" && w["toasts"]?[0]?["count"] == 3)
         let mute = w["controls"]?.arrayValue?.first { $0["id"] == .string("track.\(track).mute") }

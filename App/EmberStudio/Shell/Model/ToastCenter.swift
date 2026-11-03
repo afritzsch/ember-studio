@@ -6,6 +6,8 @@ import Observation
 struct Toast: Identifiable, Equatable {
     enum Kind: String, Codable, Sendable {
         case deviceChanged, overload, pluginCrashed, assetLoadFailed, graphRejected, assetsReloaded, recordingDropped
+        /// T-055: takes recorded and added to the project; a take that couldn't be saved or added.
+        case recordingFinalized, recordingFailed
         case recoveryAvailable, offlineAssets, repairs, info, error
     }
 
@@ -45,6 +47,11 @@ final class ToastCenter {
     @ObservationIgnored var now: @MainActor () -> Date
     /// Names a device for "switched to …" (the engine's device list); nil shows its ID.
     @ObservationIgnored var deviceName: @MainActor (UInt32) -> String? = { _ in nil }
+    /// UI-004 (T-055): names a track for recording toasts; nil shows its ID.
+    @ObservationIgnored var trackName: @MainActor (NodeIDValue) -> String? = { _ in nil }
+    /// REC-004: whether a finished take is in the project now (the store imports it before the
+    /// window sees the event). Without a project to ask, every take counts as added.
+    @ObservationIgnored var takeImported: @MainActor (RecordedTake) -> Bool = { _ in true }
     /// UI-040 (T-055): opens the window's audio settings; device toasts then offer it as their action.
     @ObservationIgnored var openAudioSettings: (@MainActor () -> Void)?
     @ObservationIgnored private var nextID = 1
@@ -98,7 +105,16 @@ final class ToastCenter {
     /// UI-004: one toast per event that a person should hear about; asset loads, jobs and the like
     /// pass silently. Overloads coalesce into the toast already showing.
     func handle(_ events: [EngineEvent]) {
-        for event in events { handle(event) }
+        // Takes that ended together (every armed track stops at once) share one toast.
+        var recorded: [RecordedTake] = []
+        for event in events {
+            if event.kind == .recordingFinalized, event.error == nil, let take = event.recording, isAdded(take) {
+                recorded.append(take)
+            } else {
+                handle(event)
+            }
+        }
+        if !recorded.isEmpty { postRecorded(recorded) }
     }
 
     func handle(_ event: EngineEvent) {
@@ -125,8 +141,7 @@ final class ToastCenter {
         case .assetsReloaded:
             assetsReloaded(event)
         case .recordingFinalized:
-            guard let error = event.error else { return }
-            post(.recordingDropped, .warning, title: "Recording dropped audio", message: "\(error)")
+            recordingFinalized(event)
         case .assetLoaded, .jobFinished:
             return
         }
@@ -183,6 +198,59 @@ final class ToastCenter {
             post(.assetsReloaded, .info, title: "Audio converted to \(Self.khz(reload.sampleRate))",
                  message: "\(n) audio file\(n == 1 ? "" : "s") re-converted from the originals.")
         }
+    }
+
+    // MARK: Recording (UI-004, REC-002/004, T-055)
+
+    private func isAdded(_ take: RecordedTake) -> Bool { take.frames > 0 && !take.file.isEmpty && takeImported(take) }
+
+    private func track(_ id: NodeIDValue) -> String { trackName(id) ?? "Track \(id)" }
+
+    private func seconds(_ frames: Int64, _ rate: Double) -> String {
+        String(format: "%.1f s", rate > 0 ? Double(frames) / rate : 0)
+    }
+
+    /// A finished take: added (info, shared by takes that ended together), with dropped audio
+    /// (warning: the gaps are silent), not written (error), empty, or not added (warning: the file
+    /// is kept).
+    private func recordingFinalized(_ event: EngineEvent) {
+        guard let take = event.recording else {
+            // An engine without takes (before T-052): only an error says anything.
+            if let error = event.error { post(.recordingDropped, .warning, title: "Recording dropped audio", message: "\(error)") }
+            return
+        }
+        let name = track(take.track)
+        if take.file.isEmpty {
+            post(.recordingFailed, .error, title: "Recording not saved",
+                 message: "\(name): \(event.error.map { "\($0)" } ?? "the take couldn't be written.")")
+            return
+        }
+        if take.frames == 0 {
+            post(.recordingFinalized, .info, title: "Nothing recorded", message: "\(name): the take is empty.")
+            return
+        }
+        let added = takeImported(take)
+        if take.droppedFrames > 0 || event.error != nil {
+            let lost = take.droppedFrames > 0
+                ? "\(take.droppedFrames) frames (\(Self.ms(take.droppedFrames, take.sampleRate))) were lost; the gaps are silent."
+                : event.error.map { "\($0)" } ?? ""
+            let file = added ? "" : " The take wasn't added to the project; its file is at \(take.file)."
+            post(.recordingDropped, .warning, title: "Recording dropped audio", message: "\(name): \(lost)\(file)")
+        } else if added {
+            postRecorded([take])
+        } else {
+            post(.recordingFailed, .warning, title: "Take not added",
+                 message: "\(name): the take couldn't be added to the project. Its file is at \(take.file).")
+        }
+    }
+
+    private static func ms(_ frames: UInt64, _ rate: Double) -> String {
+        String(format: "%.0f ms", rate > 0 ? Double(frames) * 1000 / rate : 0)
+    }
+
+    private func postRecorded(_ takes: [RecordedTake]) {
+        let list = takes.map { "\(track($0.track)) (\(seconds($0.frames, $0.sampleRate)))" }.joined(separator: ", ")
+        post(.recordingFinalized, .info, title: takes.count == 1 ? "Take recorded" : "\(takes.count) takes recorded", message: list)
     }
 
     private func name(_ id: UInt32) -> String {

@@ -90,7 +90,7 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 | T-052 | E | Audio recording: FIFOs, disk writer, latency comp, finalize, punch | REC-001..005 | T-050, T-009 | done |
 | T-053 | E | CoreMIDI input + MIDI recording | REC-010..012 | T-040 | ready |
 | T-054 | E | Input monitoring modes | REC-020..022 | T-052 | ready |
-| T-055 | U | Audio preferences, device toasts, arm/monitor buttons | UI-040, UI-004 | T-051, T-034 | wip(t-055-audio-prefs) |
+| T-055 | U | Audio preferences, device toasts, arm/monitor buttons | UI-040, UI-004 | T-051, T-034 | done |
 | T-056 | E+M | Session sample-rate change (re-convert assets, re-prepare) | IO-033, MODEL-005 (`SetSessionSampleRate`) | T-051 | done |
 
 ### M6 — Plugins
@@ -394,7 +394,9 @@ Recorded by the lead from worker reports.
 | DW-195 | T-055 | 13's `ui.*` paragraph should list the `prefs.audio.*` control ids and `ui.state.windows[].audioPreferences` (documented in 12 *Audio preferences details*), like DW-188 | spec (lead) | todo |
 | DW-196 | T-072 | `ParamInfo` has no step/enum metadata: the delay's `note` (0…13, labels in `Delay::kNotes`) and its `sync`/`pingpong` switches reach the model/UI as linear floats. A `steps`/value-label field is an 06 Interfaces change | spec (user) + D/U | todo |
 | DW-197 | T-072 | The `locate_reset` golden could use a real delay/reverb tail now (DW-162 is covered at unit level) | D (T-077) | todo |
-| DW-198 | T-052 | `ProjectWindowModel` calls `engine.setRecording` directly; it should go through `store.engineSync?.setRecording(_:)` so takes of an unsaved project land in the per-project temp folder | U (T-055) | todo |
+| DW-198 | T-052 | `ProjectWindowModel` calls `engine.setRecording` directly; it should go through `store.engineSync?.setRecording(_:)` so takes of an unsaved project land in the per-project temp folder | U (T-055) | done (T-055) |
 | DW-199 | T-052 | `Project.validate()` doesn't check `Track.inputPair ≤ 15` (ArmTrack refuses it, a hand-edited project.json isn't checked; the engine clamps) | M | todo |
-| DW-200 | T-052 | An input pair beyond the device's input channels records silence with no warning; the UI should offer only existing pairs | U (T-055) / E | todo |
+| DW-200 | T-052 | An input pair beyond the device's input channels records silence with no warning; the UI should offer only existing pairs | U (T-055) / E | done (T-055) |
 | DW-201 | T-072 | DAWModelTests' `@MainActor` tests still finish together (8–15 s): something else synchronous holds the main actor; candidates are the real-engine tests calling the blocking `EngineClient.waitForGraph` on it. Confirm with a per-test timing pass or `sample` | M/B | todo |
+| DW-202 | T-055 | Mixer channel strips (UI-030) need the same arm/monitor/input controls (logic in `TrackHeaderModel`, reusable) | U (T-076) | todo |
+| DW-203 | T-055 | `ProjectStore.connectRecording` only logs a take it couldn't import; the app infers it from the project's assets (`ProjectWindowModel.containsTake`). An import-result callback/event would be more direct | M | todo |
