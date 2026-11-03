@@ -6,6 +6,7 @@ Unattended phases started by `/autobuild` (see `.claude/skills/autobuild/SKILL.m
 |---|---|---|---|---|
 | 1 | T-032, T-025, T-042, T-035 | all 4 (T-035, T-025, T-042, T-032) | 0 → 10 | Resumed T-025/T-032 on `-r2` branches; one 5-hour pause (~27 min); DW-148 autosave race fixed; T-045 added |
 | 2 | T-023, T-024, T-033, T-036 | all 4 (T-024, T-036, T-033, T-023) | 10 → 23 | 4 h stall: the lead's trial-merge `swift test` hung (DW-168, fixed) through a ~4 h 5-hour-window reset; EACCES flakes fixed (DW-169); `render.offline {loop}` and a facade `peaks` query added; T-026 added |
+| 3 | T-045, T-071, T-026, T-034 | all 4 (T-045, T-071, T-026, T-034) | 23 → 33 | MIDI edges audible (A5 at 880 Hz), compressor + `sidechain_compressor` golden, project metronome (export excludes the click; not undoable), toolbar/shortcuts; one 5-hour pause (~4 h, only T-034's follow-up waited); load flakes logged (DW-172) |
 
 ## Phase notes
 
@@ -37,3 +38,5 @@ Unattended phases started by `/autobuild` (see `.claude/skills/autobuild/SKILL.m
 - All four workers reported within ~25 min. T-045 merged (4ba14f9), then T-071 (61dccc0; GR-meter encoding decision), then T-026 (c283f6c). The add-only conflicts (module.modulemap, EngineFacade.cpp includes + paramInfoJSON) were resolved by keeping both sides.
 - test.sh's swift-test step failed on the T-045 trial merge only on wall-clock load flakes (UI-010 perf smoke, MODEL-044/DW-148 autosave) while four workers tested in parallel; plain swift test was 2× green, and the later trial merges were fully green (DW-172).
 - 5-hour window hit 85% at 1793678717 (epoch), ~45 min into the phase. T-034 (finished, waiting for its metronome-button follow-up) paused until the reset at 1793692800 + 120 s.
+- Resumed T-034 at 1793692983 (five-hour window 0%). It merged main and added the `transport.metronome` toolbar toggle. T-034 merged (190deac). T-055 is now ready.
+- End: 4/4 merged, main green (test.sh 11/11, timed swift test 2×), no worker session left open.
