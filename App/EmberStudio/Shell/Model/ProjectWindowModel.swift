@@ -66,6 +66,21 @@ final class ProjectWindowModel: Identifiable {
     /// The engine's telemetry as of the last poll (the toolbar's CPU and xrun readout).
     private(set) var telemetry = EngineTelemetry()
 
+    /// Play/record states asked of the engine that its transport doesn't show yet: a realtime
+    /// engine applies transport commands at its next block (TIME-004), so reading it right after
+    /// would undo a quick second press (Space twice). Cleared when a poll shows them, or after
+    /// `pendingPollLimit` polls (an engine that never applies them, e.g. no running device).
+    private(set) var requestedPlaying: Bool?
+    private(set) var requestedRecording: Bool?
+    @ObservationIgnored private var pendingPolls = 0
+    /// How a poll reads the engine's transport (tests stand in for a realtime engine's lag).
+    @ObservationIgnored var readTransport: @MainActor (any EngineProtocol) -> TransportState = { $0.transport() }
+    static let pendingPollLimit = 30
+
+    /// Playing as far as the controls are concerned: what was last asked for, else the engine's state.
+    var isPlaying: Bool { requestedPlaying ?? transport.playing }
+    var isRecording: Bool { requestedRecording ?? transport.recording }
+
     /// UI-010..014: the arrange canvas (snap, gestures, waveforms, playhead).
     let arrange = ArrangeModel()
 
@@ -91,6 +106,8 @@ final class ProjectWindowModel: Identifiable {
         selectedClips = []
         transport = TransportState()
         telemetry = EngineTelemetry()
+        requestedPlaying = nil
+        requestedRecording = nil
         scrollY = 0
     }
 
@@ -156,14 +173,14 @@ final class ProjectWindowModel: Identifiable {
     var controls: [UIControl] {
         let hasEngine = engine != nil
         var controls: [UIControl] = [
-            .button("transport.play", "Play", enabled: hasEngine && !transport.playing) { [weak self] in self?.play() },
+            .button("transport.play", "Play", enabled: hasEngine && !isPlaying) { [weak self] in self?.play() },
             .button("transport.stop", "Stop", enabled: hasEngine) { [weak self] in self?.stop() },
             // UI-002: Space.
-            .button("transport.playStop", transport.playing ? "Stop" : "Play", enabled: hasEngine) { [weak self] in
+            .button("transport.playStop", isPlaying ? "Stop" : "Play", enabled: hasEngine) { [weak self] in
                 self?.playStop()
             },
             // UI-002: R. Arms the transport's record state only; recording itself is M5 (09).
-            .toggle("transport.record", "Record", isOn: transport.recording, enabled: hasEngine) { [weak self] in
+            .toggle("transport.record", "Record", isOn: isRecording, enabled: hasEngine) { [weak self] in
                 self?.toggleRecord()
             },
             // UI-002: L. The project's loop (SetLoop), which engine sync gives the transport (DW-123).
@@ -217,24 +234,34 @@ final class ProjectWindowModel: Identifiable {
     }
 
     func play() {
-        engine?.play()
-        pollTransport()
+        guard let engine else { return }
+        engine.play()
+        request(playing: true)
     }
 
     func stop() {
-        engine?.stop()
-        pollTransport()
-    }
-
-    /// Space: stops if the engine is playing now (not as of the last poll), else plays.
-    func playStop() {
         guard let engine else { return }
-        if engine.transport().playing { stop() } else { play() }
+        engine.stop()
+        request(playing: false)
     }
 
+    /// Space: stops if playing (or asked to play), else plays.
+    func playStop() {
+        if isPlaying { stop() } else { play() }
+    }
+
+    /// R: arms or disarms the transport's record state.
     func toggleRecord() {
         guard let engine else { return }
-        engine.setRecording(!engine.transport().recording)
+        let recording = !isRecording
+        engine.setRecording(recording)
+        request(recording: recording)
+    }
+
+    private func request(playing: Bool? = nil, recording: Bool? = nil) {
+        if let playing { requestedPlaying = playing }
+        if let recording { requestedRecording = recording }
+        pendingPolls = 0
         pollTransport()
     }
 
@@ -290,9 +317,18 @@ final class ProjectWindowModel: Identifiable {
 
     func pollTransport() {
         // Only a change is assigned, so a stopped transport doesn't invalidate the views 30 times a second.
-        let transport = engine?.transport() ?? TransportState()
+        let transport = engine.map(readTransport) ?? TransportState()
         if transport != self.transport { self.transport = transport }
         let telemetry = engine?.telemetry() ?? EngineTelemetry()
         if telemetry != self.telemetry { self.telemetry = telemetry }
+        if requestedPlaying == transport.playing { requestedPlaying = nil }
+        if requestedRecording == transport.recording { requestedRecording = nil }
+        if requestedPlaying != nil || requestedRecording != nil {
+            pendingPolls += 1
+            if pendingPolls > Self.pendingPollLimit {
+                requestedPlaying = nil
+                requestedRecording = nil
+            }
+        }
     }
 }

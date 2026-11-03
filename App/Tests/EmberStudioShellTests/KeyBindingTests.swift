@@ -14,6 +14,12 @@ private func press(_ model: ProjectWindowModel, _ chord: KeyChord, repeat isRepe
     model.handleKey(chord, isRepeat: isRepeat)
 }
 
+/// The transport state a stand-in realtime engine has applied so far.
+@MainActor
+private final class AppliedTransport {
+    var state = TransportState()
+}
+
 @MainActor
 @Suite("Keyboard shortcuts (UI-002)")
 struct KeyBindingTests {
@@ -35,6 +41,32 @@ struct KeyBindingTests {
         #expect(!engine.transport().recording)
         #expect(engine.calls.filter { if case .setRecording = $0 { true } else { false } }.count == 2)
         #expect(!model.store.canUndo, "arming record isn't a document edit")
+    }
+
+    @Test("UI-002: a quick second Space/R acts on what was asked, not on a realtime transport that hasn't applied it yet")
+    func pendingTransport() throws {
+        let (model, engine) = try makeWindow()
+        // A realtime engine applies transport commands at its next block; until then it reads as before.
+        let applied = AppliedTransport()
+        model.readTransport = { _ in applied.state }
+        #expect(press(model, KeyChord("r")))
+        #expect(engine.transport().recording && !model.transport.recording, "asked, not applied yet")
+        #expect(model.isRecording && model.requestedRecording == true)
+        #expect(try model.control("transport.record").isOn == true)
+        #expect(press(model, KeyChord("r")), "the second R disarms instead of arming again")
+        #expect(!model.isRecording && engine.calls.last == .setRecording(false))
+
+        #expect(press(model, KeyChord(.space)))
+        #expect(model.isPlaying && !model.transport.playing)
+        #expect(try model.control("transport.playStop").label == "Stop" && !model.control("transport.play").isEnabled)
+        applied.state.playing = true  // the block arrives
+        model.pollTransport()
+        #expect(model.requestedPlaying == nil && model.isPlaying)
+
+        #expect(press(model, KeyChord(.space)))
+        for _ in 0...ProjectWindowModel.pendingPollLimit { model.pollTransport() }
+        #expect(model.requestedPlaying == nil && model.isPlaying,
+                "an engine that never applies a request doesn't pin it: the engine's state wins again")
     }
 
     @Test("UI-002: L makes a loop (4 bars from the playhead's bar, or around the selected clips) and toggles it through SetLoop")
