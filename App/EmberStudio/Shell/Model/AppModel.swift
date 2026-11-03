@@ -66,9 +66,6 @@ final class AppModel {
     func addWindow(_ store: ProjectStore) -> ProjectWindowModel {
         let window = ProjectWindowModel(id: nextWindowID, store: store, toasts: ToastCenter(now: now))
         nextWindowID += 1
-        window.toasts.deviceName = { [weak window] id in
-            window?.engine?.devices().first { $0.id == id }?.name
-        }
         windows.append(window)
         presenter?.show(window)
         becameMain(window.id)

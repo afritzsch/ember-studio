@@ -99,6 +99,8 @@ enum KeyBindings {
         KeyBinding(chord: KeyChord("−", .command), controlID: "zoom.out", repeats: true),
         // UI-020 (T-043): P opens the selected MIDI clip in the piano roll.
         KeyBinding(chord: KeyChord("p"), controlID: "pianoRoll.open"),
+        // UI-040 (T-055): ⌘, opens (and closes) the audio settings, macOS's Settings shortcut.
+        KeyBinding(chord: KeyChord(",", .command), controlID: "prefs.audio"),
     ]
 
     /// UI-020 (T-043): while the piano roll has focus these come first (the arrows transpose in

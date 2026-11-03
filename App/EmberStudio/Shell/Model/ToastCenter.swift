@@ -45,6 +45,8 @@ final class ToastCenter {
     @ObservationIgnored var now: @MainActor () -> Date
     /// Names a device for "switched to …" (the engine's device list); nil shows its ID.
     @ObservationIgnored var deviceName: @MainActor (UInt32) -> String? = { _ in nil }
+    /// UI-040 (T-055): opens the window's audio settings; device toasts then offer it as their action.
+    @ObservationIgnored var openAudioSettings: (@MainActor () -> Void)?
     @ObservationIgnored private var nextID = 1
 
     /// How long a toast stays, by severity; errors and toasts with an action stay until dismissed.
@@ -60,9 +62,9 @@ final class ToastCenter {
 
     @discardableResult
     func post(_ kind: Toast.Kind, _ severity: Toast.Severity, title: String, message: String = "",
-              action: Toast.Action? = nil, count: UInt64? = nil) -> Int {
+              action: Toast.Action? = nil, count: UInt64? = nil, sticky: Bool? = nil) -> Int {
         let at = now()
-        let sticky = action != nil || severity == .error
+        let sticky = sticky ?? (action != nil || severity == .error)
         let toast = Toast(id: nextID, kind: kind, severity: severity, title: title, message: message, action: action,
                           count: count, postedAt: at,
                           expiresAt: sticky ? nil : at.addingTimeInterval(Self.lifetime[severity] ?? 8))
@@ -121,8 +123,7 @@ final class ToastCenter {
             post(.graphRejected, .error, title: "The engine refused a change",
                  message: event.error.map { "\($0)" } ?? "Graph \(event.subject) was rejected.")
         case .assetsReloaded:
-            guard let error = event.error else { return }
-            post(.assetsReloaded, .warning, title: "Audio not reloaded", message: "\(error)")
+            assetsReloaded(event)
         case .recordingFinalized:
             guard let error = event.error else { return }
             post(.recordingDropped, .warning, title: "Recording dropped audio", message: "\(error)")
@@ -131,32 +132,56 @@ final class ToastCenter {
         }
     }
 
+    /// UI-040: "Audio Settings…" on device toasts, when the window has them. It doesn't make a
+    /// toast sticky; errors are anyway.
+    private var settingsAction: Toast.Action? {
+        openAudioSettings.map { open in Toast.Action(label: "Audio Settings…", perform: open) }
+    }
+
+    private func postDevice(_ severity: Toast.Severity, title: String, message: String) {
+        post(.deviceChanged, severity, title: title, message: message, action: settingsAction, sticky: severity == .error)
+    }
+
     private func deviceChanged(_ event: EngineEvent) {
         guard let change = event.device else {
-            post(.deviceChanged, event.error == nil ? .info : .error, title: "Audio device changed",
-                 message: event.error.map { "\($0)" } ?? "")
+            postDevice(event.error == nil ? .info : .error, title: "Audio device changed", message: event.error.map { "\($0)" } ?? "")
             return
         }
         let to = name(change.deviceID)
         let rate = change.sampleRate != change.previousSampleRate && change.sampleRate > 0
             ? " Session rate is now \(Self.khz(change.sampleRate))." : ""
         if let error = event.error, change.deviceID == 0 || change.reason == .startFailed {
-            post(.deviceChanged, .error, title: "No audio device running", message: "\(error)")
+            postDevice(.error, title: "No audio device running", message: "\(error)")
             return
         }
         switch change.reason {
         case .deviceLost:
-            post(.deviceChanged, .warning, title: "Audio device lost",
+            postDevice(.warning, title: "Audio device lost",
                  message: "\(name(change.previousDeviceID)) went away; playback stopped. Now using \(to).\(rate)")
         case .sampleRateChanged:
-            post(.deviceChanged, .warning, title: "Sample rate changed",
+            postDevice(.warning, title: "Sample rate changed",
                  message: "\(to) moved from \(Self.khz(change.previousSampleRate)) to \(Self.khz(change.sampleRate)); playback stopped.")
         case .defaultOutputChanged:
-            post(.deviceChanged, .info, title: "Output device changed", message: "Following the system default: \(to).\(rate)")
+            postDevice(.info, title: "Output device changed", message: "Following the system default: \(to).\(rate)")
         case .deviceAvailable:
-            post(.deviceChanged, .info, title: "Audio device available", message: "Now using \(to).\(rate)")
+            postDevice(.info, title: "Audio device available", message: "Now using \(to).\(rate)")
         case .startFailed:
-            post(.deviceChanged, .error, title: "Audio device didn't start", message: event.error.map { "\($0)" } ?? to)
+            postDevice(.error, title: "Audio device didn't start", message: event.error.map { "\($0)" } ?? to)
+        }
+    }
+
+    /// IO-033 (DW-183): a session-rate change's re-conversion. Its progress shows in the toolbar
+    /// (`AudioPreferencesModel.reload`); the toast says when it is done, or what failed.
+    private func assetsReloaded(_ event: EngineEvent) {
+        let reload = event.reload
+        guard reload?.phase ?? .finished == .finished else { return }
+        if let error = event.error {
+            let failed = reload.map { $0.failed > 0 ? "\($0.failed) of \($0.total) audio files didn't convert: " : "" } ?? ""
+            post(.assetsReloaded, .warning, title: "Audio not reloaded", message: failed + "\(error)")
+        } else if let reload, reload.total > 0 {
+            let n = reload.total
+            post(.assetsReloaded, .info, title: "Audio converted to \(Self.khz(reload.sampleRate))",
+                 message: "\(n) audio file\(n == 1 ? "" : "s") re-converted from the originals.")
         }
     }
 

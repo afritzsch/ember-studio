@@ -379,7 +379,7 @@ Recorded by the lead from worker reports.
 | DW-180 | T-034 | Toolbar tempo/signature are display only; editing them (`SetTempoEvent` / `SetTimeSignature`) from the toolbar is a possible follow-up | U | todo |
 | DW-181 | T-034 | The NSEvent → `KeyMonitor` path has no automated test (posting key events needs Accessibility); manual check in the app: Space, R, L, ⌘E, ⌫, ⌘T | U / user | todo |
 | DW-182 | T-056 | Golden for a session-rate change (CONV §5.4 gap; checks live in `SessionRateTests`/`SessionRateControlTests`); `GoldenEngine.swift` doesn't map the `reload` event or `assetsReloadPending` | D/test | todo |
-| DW-183 | T-056 | App has no UI to change the session rate or show re-conversion progress | U (T-055 or later) | todo |
+| DW-183 | T-056 | App has no UI to change the session rate or show re-conversion progress | U (T-055 or later) | done (T-055) |
 | DW-184 | T-056 | Control: a method or `wait` flag on `command.apply` that blocks until re-conversion finishes, with CTL-031 progress (today clients poll `engine.telemetry.assetsReloadPending`) | B | todo |
 | DW-185 | T-056 | `RestoreSessionSampleRate` JSON requires `clipOffsets`/`zoneLoops` even when empty (hand-written scripts must pass `[]`) | M (minor) | todo |
 | DW-186 | T-051/T-056 | If the latest graph description is rejected during a rate change, the old-rate graph keeps rendering until the next accepted description | E | todo |
@@ -388,3 +388,7 @@ Recorded by the lead from worker reports.
 | DW-189 | T-043 | Headless `engine.previewNote` in dawctl/dawmcp so agents can check instruments without the app (today only `ui.perform pianoRoll.key.<n>` in attach mode) | B | todo |
 | DW-190 | T-043 | A held preview note is cut and retriggered when its player is re-created (graph rebuild while a key is held); no hang | E (low) | todo |
 | DW-191 | T-043 | Piano roll 60 fps check with Instruments on a dense clip; per-asset peak refresh during a re-conversion pass (today waveforms update once at `finished`) | U | todo |
+| DW-192 | T-055 | Telemetry has no input latency (IO-005 `inputLatency`) and no buffer size the device actually runs: the audio panel shows output latency only and the last requested buffer. Add `TelemetryPOD.inputLatency`/`bufferFrames` (additive 08 delta) | E+B | todo |
+| DW-193 | T-055 | `AudioDeviceInfo` doesn't list a device's supported rates / buffer range, so the panel offers every IO-003 value and the engine refuses what the device can't run. Expose `DeviceCaps.rates` + buffer range | E+B | todo |
+| DW-194 | T-055 | `Dispatcher.deviceSet` builds the next config from `engine.mode` (the creation config), so `device.set` after a buffer change resets the buffer. The facade could report its current `DriverConfigPOD` | B | todo |
+| DW-195 | T-055 | 13's `ui.*` paragraph should list the `prefs.audio.*` control ids and `ui.state.windows[].audioPreferences` (documented in 12 *Audio preferences details*), like DW-188 | spec (lead) | todo |
