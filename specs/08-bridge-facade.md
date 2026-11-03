@@ -121,6 +121,20 @@ per-block playhead check follows the wrap. The Swift mirror is `ExportSpec.follo
 Affected: T-036 (implements it and the `loop_wrap_midblock` golden), T-033 (shares
 `facade/` and `EngineProtocol.swift`; nothing existing moved).
 
+### Contract delta (T-033, accepted (autobuild, see DECISIONS.md))
+UI-011 draws waveforms from the IO-034 peak mipmaps, which the facade didn't expose. One **additive, read-only, non-RT** query:
+```cpp
+using FloatVector = std::vector<float>;
+inline constexpr uint32_t kPeakLevelCount = 4;     // PeakMipmap::kBlockSizes: 256, 1024, 4096, 16384
+struct PeakLevelPOD { bool found; uint64_t assetID; uint32_t channels; double sampleRate; int64_t frames;
+                      uint32_t blockSize; int64_t blockCount;
+                      FloatVector minMax; };        // channel-major pairs: [(c × blockCount + b) × 2] = min, +1 = max
+PeakLevelPOD peaks(uint64_t assetID, uint32_t level) const;   // found == false until the asset has loaded
+```
+The facade computes the mipmap on `daw.loader` when an asset loads (before `assetLoaded` is queued) and `peaks` copies one level out. Swift: `EngineProtocol.peaks(_ assetID: ModelID, level: Int) -> PeakLevel?`, with a default `nil` in a protocol extension so test doubles compile unchanged; `FakeEngine` returns a deterministic made-up envelope for loaded assets.
+
+Affected: T-033 (arrange canvas). No other task's calls change.
+
 ## Status
 | ID | status | test |
 |---|---|---|

@@ -15,7 +15,12 @@ import Foundation
 ///        "tracks": [{"id", "name", "kind", "mute", "solo", "selected"}],
 ///        "transport": {"playing", "recording", "tick"},
 ///        "toasts": [{"id", "kind", "severity", "title", "message", "action"?, "count"?}],
-///        "controls": [{"id", "kind", "label", "isOn"?, "enabled"}]}]}
+///        "controls": [{"id", "kind", "label", "isOn"?, "enabled"}],
+///        "arrange": {"snap", "pixelsPerBeat", "size", "visibleTicks", "visibleRows", "clipCount",
+///                    "visibleClips": [{"id", "track", "kind", "start", "length", "selected", "rect",
+///                                      audio: "assetID", "gain", "fadeIn", "fadeOut", "waveformLevel" | null;
+///                                      midi: "notes"}],
+///                    "selection", "marquee", "gesture", "playhead": {"tick", "x"}}}]}
 @MainActor
 enum UIStateDumper {
     static func dump(_ app: AppModel) -> JSONValue {
@@ -65,6 +70,51 @@ enum UIStateDumper {
             ],
             "toasts": .array(window.toasts.toasts.map(dump)),
             "controls": .array(window.controls.map(dump)),
+            "arrange": dump(window.arrange),
+        ]
+    }
+
+    /// UI-010..014: the arrange canvas: snap, zoom, what is visible (through the interval index) and
+    /// how each visible clip is drawn, the gesture in progress and the playhead.
+    static func dump(_ arrange: ArrangeModel) -> JSONValue {
+        let g = arrange.geometry
+        let visible = g.visibleTicks
+        let rows = g.visibleRows(of: arrange.tracks.count)
+        let selection = arrange.selection
+        let playhead = arrange.playheadTick()
+        return [
+            "snap": .string(arrange.snap.rawValue),
+            "pixelsPerBeat": .double(g.pixelsPerBeat),
+            "size": ["width": .double(g.size.width), "height": .double(g.size.height)],
+            "visibleTicks": ["from": .int(visible.from.raw), "to": .int(visible.to.raw)],
+            "visibleRows": ["from": .int(Int64(rows.lowerBound)), "to": .int(Int64(rows.upperBound))],
+            "clipCount": .int(Int64(arrange.index.clipCount)),
+            "visibleClips": .array(arrange.visibleClips.map { entry in
+                let rect = g.rect(start: entry.clip.start, length: entry.clip.length, row: entry.row)
+                var json: [String: JSONValue] = [
+                    "id": .int(Int64(bitPattern: entry.id)), "track": .int(Int64(bitPattern: entry.trackID)),
+                    "start": .int(entry.start), "length": .int(entry.clip.length.raw), "selected": .bool(selection.contains(entry.id)),
+                    "rect": ["x": .double(rect.minX), "y": .double(rect.minY), "width": .double(rect.width), "height": .double(rect.height)],
+                ]
+                switch entry.clip {
+                case .audio(let audio):
+                    json["kind"] = "audio"
+                    json["assetID"] = .int(Int64(bitPattern: audio.assetID))
+                    json["gain"] = .double(Double(audio.gain))
+                    json["fadeIn"] = .int(audio.fadeIn.raw)
+                    json["fadeOut"] = .int(audio.fadeOut.raw)
+                    json["waveformLevel"] = arrange.waveformLevel(audio).map { .int(Int64($0)) } ?? .null
+                case .midi(let midi):
+                    json["kind"] = "midi"
+                    json["notes"] = .int(Int64(midi.notes.count))
+                }
+                return .object(json)
+            }),
+            "selection": ids(selection.sorted()),
+            "marquee": arrange.marquee.map { ["x": .double($0.minX), "y": .double($0.minY), "width": .double($0.width),
+                                              "height": .double($0.height)] } ?? .null,
+            "gesture": arrange.activeGesture.map { .string($0) } ?? .null,
+            "playhead": ["tick": .int(playhead.raw), "x": .double(g.x(playhead))],
         ]
     }
 

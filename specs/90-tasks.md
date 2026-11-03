@@ -67,7 +67,7 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 | T-030 | M | Clip + tempo/signature + loop commands | MODEL-005 (clip/tempo subset) | T-022 | done |
 | T-031 | M | Persistence: folder format, atomic save, migrations, autosave, recovery, offline assets | MODEL-040..046 | T-030 | done |
 | T-032 | U+B | App shell, window, view-model pattern, toasts, ControlSocketServer, attach mode, UI dump/snapshot | UI-001, 003, 004, 050..052, CTL-011, 023, 030, 031 | T-018 | done |
-| T-033 | U | Arrange canvas: tiles, waveforms (Metal), grid/snap, clip gestures, playhead layer | UI-010..014 | T-032, T-030 | wip(t-033-arrange-canvas) |
+| T-033 | U | Arrange canvas: tiles, waveforms (Metal), grid/snap, clip gestures, playhead layer | UI-010..014 | T-032, T-030 | done |
 | T-034 | U | Toolbar, transport, keyboard shortcuts | UI-002 | T-032 | ready |
 | T-035 | D | Overlapping-clip crossfades | DSP-002 | T-013 | done |
 | T-036 | E | M3 goldens: clips/fades/tempo change, loop wrap mid-block | TEST (M3 set) | T-030, T-035 | done |
@@ -78,7 +78,7 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 | T-040 | D | MidiClipPlayer, hanging-note handling | DSP-003 | T-008, T-012 | done |
 | T-041 | D | Sampler (zones, Hermite, voices, ADSR, CC64, bend) | DSP-020..023 | T-040, T-010 | done |
 | T-042 | M | Note commands, instrument slot on MIDI tracks | MODEL-005 (note subset) | T-030 | done |
-| T-043 | U | Piano roll + velocity lane + audition (`previewNote` facade addition) | UI-020, 021 | T-033, T-042 | todo |
+| T-043 | U | Piano roll + velocity lane + audition (`previewNote` facade addition) | UI-020, 021 | T-033, T-042 | ready |
 | T-044 | D | M4 goldens | TEST (M4 set) | T-041, T-042, T-045 | todo |
 | T-045 | E | MIDI edge routing in RenderGraph/GraphBuilder: player → instrument MIDI data, frame-ordered merge, fixed-capacity storage, MIDI delay for PDC; makes a MIDI track with a sampler audible | DW-099 (DSP-003, MIX-001, MIX-021 for MIDI) | T-040, T-041 | ready |
 
@@ -350,7 +350,7 @@ Recorded by the lead from worker reports.
 | DW-151 | T-042 | dawmcp started at worktree setup doesn't know commands the worker adds (`unknownCommandType`); same root as DW-147. Note it in 14's *Agent verification recipe* or let dawmcp restart when its binary is stale | B / lead (14) | todo |
 | DW-152 | T-042 | 07 *Persistence*: say that autosave bookkeeping follows the queue order of file operations and that an edit made during a save still gets its debounced autosave (DW-148 fix) | lead (07) | todo |
 | DW-153 | T-032 | `EmberStudioShell` is a SwiftPM target with no product; the Xcode app compiles the same files through its synchronized group, so they build twice. A library product the app links would change 01's product list (Interfaces) | lead/user (01) | todo |
-| DW-154 | T-032 | UI-051: once the arrange canvas has its `CAMetalLayer`, `WindowSnapshotter` needs the offscreen Metal path (`cacheDisplay` doesn't capture Metal layers) | U (T-033) | todo |
+| DW-154 | T-032 | UI-051: once the arrange canvas has its `CAMetalLayer`, `WindowSnapshotter` needs the offscreen Metal path (`cacheDisplay` doesn't capture Metal layers) | U (T-033) | done (T-033: offscreen Metal render composited by `WindowSnapshotter`) |
 | DW-155 | T-032 | `project.open` through the app's socket swaps the document but doesn't toast its load report (recovery available, offline assets); File > Open does | U | todo |
 | DW-156 | T-032 | Every project window gets its own engine; with `--engine coreAudio` several windows each open the device. Needs a policy (one live engine for the main window, others offline?) | lead/user | todo |
 | DW-157 | T-032 | Quitting the real app (SIGTERM, parent exit, menu) is verified by hand only; an automated test needs the built app, e.g. a `scripts/test.sh` stage after xcodebuild | B / test | todo |
@@ -359,3 +359,6 @@ Recorded by the lead from worker reports.
 | DW-162 | T-036 | TIME-008 "effects keep their tails" with a real tailed effect (delay feedback / reverb) once T-072/T-073 exist; today `locate_reset` uses a SineNode insert's state | D (T-072/T-073 or T-077) | todo |
 | DW-163 | T-036 | dawmcp over stdio answered a pipelined `tools/call` (render.offline) before an earlier `daw_test_fixture` call finished, so the render failed; one at a time works. A pipelined script over dawmcp would race | B | todo |
 | DW-164 | T-036 | Fixtures can't locate mid-render (only at a render's start). If a golden ever needs it, add a scripted transport event to render.offline | E/B | todo |
+| DW-165 | T-033 | Keyboard: ⌫ delete and ⌘E split at the playhead aren't bound yet; bind them to `ArrangeModel.deleteSelection` / `splitSelection(at:)` (controls `edit.delete` / `edit.split`) | U (T-034) | todo |
+| DW-166 | T-033 | UI-010's 60 fps with 1,000 clips on M1 still needs an Instruments run on the real app (only a debug smoke test was measured) | U / user | todo |
+| DW-167 | T-033 | Trimming with snap on can shrink a clip to 1 tick; a minimum of one grid step may feel better (UX choice) | U | todo |

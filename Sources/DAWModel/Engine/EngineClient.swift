@@ -85,6 +85,19 @@ public final class EngineClient: EngineProtocol {
         facade.loadAsset(assetID, std.string(path))
     }
 
+    public func peaks(_ assetID: ModelID, level: Int) -> PeakLevel? {
+        guard level >= 0, level < PeakLevel.blockSizes.count else { return nil }
+        let pod = facade.peaks(assetID, UInt32(level))
+        guard pod.found else { return nil }
+        let count = Int(pod.minMax.size())
+        let minMax = [Float](unsafeUninitializedCapacity: count) { buffer, initialized in
+            for i in 0..<count { buffer[i] = pod.minMax[i] }
+            initialized = count
+        }
+        return PeakLevel(assetID: assetID, channels: Int(pod.channels), sampleRate: pod.sampleRate, frames: pod.frames,
+                         blockSize: Int(pod.blockSize), blockCount: Int(pod.blockCount), minMax: minMax)
+    }
+
     public func pollJob(_ job: JobID) -> EngineJobStatus {
         let s = facade.pollJob(job)
         var status = EngineJobStatus(job: job, progress: s.progress, error: Self.error(s.error))

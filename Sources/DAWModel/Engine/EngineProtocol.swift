@@ -398,6 +398,42 @@ public enum PluginDescriptor: Hashable, Sendable, Codable {
     case vst3(VST3Descriptor)
 }
 
+// MARK: Peaks (IO-034, UI-011)
+
+/// One level of a loaded asset's peak mipmap (`daw::PeakLevelPOD`, autobuild decision, see
+/// DECISIONS.md): min/max pairs over blocks of `blockSize` frames, at the asset's rate in RAM.
+/// The arrange canvas draws waveforms from it, choosing the level by pixels per sample.
+public struct PeakLevel: Hashable, Sendable {
+    /// Frames per block at each level, finest first (IO-034, `PeakMipmap::kBlockSizes`).
+    public static let blockSizes: [Int] = [256, 1024, 4096, 16384]
+
+    public var assetID: ModelID
+    public var channels: Int
+    public var sampleRate: Double
+    public var frames: Int64
+    public var blockSize: Int
+    public var blockCount: Int
+    /// Channel-major pairs: `[(c × blockCount + b) × 2]` is the min, the next float the max.
+    public var minMax: [Float]
+
+    public init(assetID: ModelID, channels: Int, sampleRate: Double, frames: Int64, blockSize: Int, blockCount: Int,
+                minMax: [Float]) {
+        self.assetID = assetID
+        self.channels = channels
+        self.sampleRate = sampleRate
+        self.frames = frames
+        self.blockSize = blockSize
+        self.blockCount = blockCount
+        self.minMax = minMax
+    }
+
+    /// The (min, max) of block `block` in `channel`.
+    public func peak(channel: Int, block: Int) -> (min: Float, max: Float) {
+        let i = (channel * blockCount + block) * 2
+        return (minMax[i], minMax[i + 1])
+    }
+}
+
 // MARK: Jobs (BRIDGE-002)
 
 public struct LoadedAssetInfo: Hashable, Sendable, Codable {
@@ -550,6 +586,9 @@ public protocol EngineProtocol: AnyObject, Sendable {
     // Assets (IO-031)
     func loadAsset(_ assetID: ModelID, path: String) -> JobID
     func pollJob(_ job: JobID) -> EngineJobStatus
+    /// IO-034 / UI-011: `level` (an index into `PeakLevel.blockSizes`) of the asset's peaks; nil
+    /// until it has loaded. Read-only, non-RT; copies the level, so callers cache it.
+    func peaks(_ assetID: ModelID, level: Int) -> PeakLevel?
 
     // Recording (09) and plugins (10)
     func armInput(track: NodeIDValue, inputChannelPair: UInt32, armed: Bool)
@@ -580,6 +619,9 @@ public protocol EngineProtocol: AnyObject, Sendable {
 }
 
 extension EngineProtocol {
+    /// Engines without peaks (test doubles) report none; the canvas then draws clips without waveforms.
+    public func peaks(_ assetID: ModelID, level: Int) -> PeakLevel? { nil }
+
     /// Polls (BRIDGE-002) until `job` finishes or `timeout` passes, and returns its last status.
     public func waitForJob(_ job: JobID, timeout: Duration = .seconds(60)) async -> EngineJobStatus {
         let clock = ContinuousClock()

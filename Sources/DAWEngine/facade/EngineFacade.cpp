@@ -33,6 +33,7 @@
 #include <set>
 #include <span>
 #include <thread>
+#include <unordered_map>
 #include <utility>
 
 #include "core/Engine.h"
@@ -48,6 +49,7 @@
 #include "io/DriverConfig.h"
 #include "io/ExportSpec.h"
 #include "io/OfflineDriver.h"
+#include "io/PeakMipmap.h"
 #include "nodes/BuiltinNodes.h"
 #include "nodes/ChannelStrip.h"
 #include "time/TempoMap.h"
@@ -67,6 +69,7 @@ constexpr std::size_t kNotificationBatch = 64;
 // DW-067: graphs must be prepared for the device's whole buffer, or its blocks render silence.
 // GraphCompiler prepares for kMaxBlock, above any buffer a driver accepts (IO-003).
 static_assert(kMaxBlock >= kMaxDeviceBuffer);
+static_assert(kPeakLevelCount == PeakMipmap::kBlockSizes.size());
 
 // BRIDGE-001 diagnostics: the facades alive in this process.
 std::mutex liveMutex;
@@ -269,6 +272,8 @@ struct EngineFacade::Impl {
 
     Engine engine;
     AssetTable assets;
+    // IO-034 / UI-011: each loaded asset's peaks (computed on daw.loader), read by `peaks`.
+    std::unordered_map<uint64_t, std::shared_ptr<const PeakMipmap>> peaks;
     MeterMap meters;
     // Waiters outside `mutex` copy it first; replaced only by changeSessionRate.
     std::shared_ptr<GraphCompiler> compiler;
@@ -954,6 +959,7 @@ JobID EngineFacade::loadAsset(uint64_t assetID, const std::string& path) {
     // Outside the facade lock: the completion takes it, on daw.loader.
     Impl* impl = impl_;
     impl_->loader.submit(std::move(request), [impl, jobID, assetID](Result<LoadedAudio> loaded) {
+        std::shared_ptr<const PeakMipmap> peaks;
         EngineEventPOD event;
         event.subject = assetID;
         event.job = jobID;
@@ -962,6 +968,8 @@ JobID EngineFacade::loadAsset(uint64_t assetID, const std::string& path) {
             const AudioAsset& asset = *loaded->asset;
             info = AssetInfoPOD{assetID, asset.channels, asset.frames, asset.sampleRate,
                                 loaded->fileSampleRate, loaded->fileFrames, loaded->resampled};
+            // IO-034 / UI-011: here on daw.loader, before anyone hears the asset loaded.
+            peaks = std::make_shared<const PeakMipmap>(PeakMipmap::compute(asset));
             impl->assets.put(assetID, std::move(loaded->asset));
             event.type = EngineEventType::assetLoaded;
         } else {
@@ -969,6 +977,7 @@ JobID EngineFacade::loadAsset(uint64_t assetID, const std::string& path) {
             event.error = toFacadeError(loaded.error());
         }
         std::lock_guard lock(impl->mutex);
+        if (peaks) impl->peaks[assetID] = std::move(peaks);
         if (auto it = impl->jobs.find(jobID); it != impl->jobs.end()) {
             it->second.asset = info;
             impl->finishJob(it->second, event.error);
@@ -976,6 +985,32 @@ JobID EngineFacade::loadAsset(uint64_t assetID, const std::string& path) {
         impl->pushEvent(std::move(event));
     });
     return jobID;
+}
+
+PeakLevelPOD EngineFacade::peaks(uint64_t assetID, uint32_t level) const {
+    PeakLevelPOD out;
+    std::shared_ptr<const PeakMipmap> mipmap;
+    {
+        std::lock_guard lock(impl_->mutex);
+        auto it = impl_->peaks.find(assetID);
+        if (it == impl_->peaks.end() || level >= kPeakLevelCount) return out;
+        mipmap = it->second;
+    }
+    // Immutable once shared, so the copy happens outside the lock.
+    const PeakMipmap::Level& source = mipmap->levels()[level];
+    out.found = true;
+    out.assetID = assetID;
+    out.channels = mipmap->channels();
+    out.sampleRate = mipmap->sampleRate();
+    out.frames = mipmap->frames();
+    out.blockSize = source.blockSize;
+    out.blockCount = source.blockCount;
+    out.minMax.resize(source.peaks.size() * 2);
+    for (size_t i = 0; i < source.peaks.size(); ++i) {
+        out.minMax[2 * i] = source.peaks[i].min;
+        out.minMax[2 * i + 1] = source.peaks[i].max;
+    }
+    return out;
 }
 
 JobStatus EngineFacade::pollJob(JobID job) const {

@@ -64,10 +64,14 @@ final class ProjectWindowModel: Identifiable {
     /// The engine's transport as of the last poll.
     private(set) var transport = TransportState()
 
+    /// UI-010..014: the arrange canvas (snap, gestures, waveforms, playhead).
+    let arrange = ArrangeModel()
+
     init(id: Int, store: ProjectStore, toasts: ToastCenter = ToastCenter()) {
         self.id = id
         self.store = store
         self.toasts = toasts
+        arrange.window = self
     }
 
     var project: Project { store.project }
@@ -78,7 +82,9 @@ final class ProjectWindowModel: Identifiable {
     /// Dispatcher); the window now shows `store`. Selection and transport belong to the old one.
     func replace(store: ProjectStore) {
         guard store !== self.store else { return }
+        arrange.finishDrag()
         self.store = store
+        arrange.peaks.invalidate(nil)
         selectedTracks = []
         selectedClips = []
         transport = TransportState()
@@ -139,6 +145,7 @@ final class ProjectWindowModel: Identifiable {
             }
         }
         controls += trackHeaders.flatMap(\.controls)
+        controls += arrange.controls
         controls += toasts.controls
         return controls
     }
@@ -170,6 +177,12 @@ final class ProjectWindowModel: Identifiable {
     func stop() {
         engine?.stop()
         pollTransport()
+    }
+
+    /// UI-004 toasts and UI-011 waveforms (newly loaded audio) from the engine's events.
+    func engineEventsArrived(_ events: [EngineEvent]) {
+        toasts.handle(events)
+        arrange.engineEventsArrived(events)
     }
 
     func pollTransport() {
