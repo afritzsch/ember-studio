@@ -88,6 +88,8 @@ final class ProjectWindowModel: Identifiable {
     let arrange = ArrangeModel()
     /// UI-020/021: the piano roll (bottom pane) and its audition.
     let pianoRoll = PianoRollModel()
+    /// UI-040 (T-055): device, sample rate, buffer, input channels, latency; re-conversion progress.
+    let audioPrefs = AudioPreferencesModel()
 
     init(id: Int, store: ProjectStore, toasts: ToastCenter = ToastCenter()) {
         self.id = id
@@ -95,6 +97,11 @@ final class ProjectWindowModel: Identifiable {
         self.toasts = toasts
         arrange.window = self
         pianoRoll.window = self
+        audioPrefs.window = self
+        audioPrefs.refreshDevices()
+        // UI-004: device toasts name devices (also ones that are gone) and offer the audio settings.
+        toasts.deviceName = { [weak self] id in self?.audioPrefs.name(of: id) }
+        toasts.openAudioSettings = { [weak self] in self?.audioPrefs.isOpen = true }
     }
 
     var project: Project { store.project }
@@ -116,6 +123,7 @@ final class ProjectWindowModel: Identifiable {
         requestedPlaying = nil
         requestedRecording = nil
         scrollY = 0
+        audioPrefs.engineReplaced()
     }
 
     // MARK: Derived
@@ -220,6 +228,7 @@ final class ProjectWindowModel: Identifiable {
         controls += trackHeaders.flatMap(\.controls)
         controls += arrange.controls
         controls += pianoRoll.controls
+        controls += audioPrefs.controls
         controls += toasts.controls
         return controls
     }
@@ -329,6 +338,7 @@ final class ProjectWindowModel: Identifiable {
 
     /// UI-004 toasts and UI-011 waveforms (newly loaded audio) from the engine's events.
     func engineEventsArrived(_ events: [EngineEvent]) {
+        audioPrefs.engineEventsArrived(events)
         toasts.handle(events)
         arrange.engineEventsArrived(events)
     }

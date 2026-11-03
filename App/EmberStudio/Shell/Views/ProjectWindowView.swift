@@ -38,6 +38,13 @@ struct ProjectWindowView: View {
             Divider()
             BottomTabs(controls: controls)
         }
+        .overlay(alignment: .top) {
+            // UI-040: the audio settings, over the arrange area.
+            if model.audioPrefs.isOpen {
+                AudioPreferencesPanel(model: model.audioPrefs, controls: controls)
+                    .padding(.top, 48)
+            }
+        }
         .overlay(alignment: .bottomTrailing) {
             ToastStack(center: model.toasts)
                 .padding(12)
@@ -85,6 +92,10 @@ private struct ToolbarRow: View {
                     .accessibilityIdentifier("transport.signature")
             }
             Spacer()
+            // DW-183: a session-rate change re-converting the project's audio (IO-033).
+            if let reload = model.audioPrefs.reloadText {
+                ReloadProgress(text: reload, fraction: model.audioPrefs.reload?.fraction ?? 0, id: "toolbar.reload")
+            }
             Text(String(format: "CPU %.0f%% · xruns %llu", model.telemetry.dspLoadPercent, model.telemetry.xruns))
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(model.telemetry.xruns > 0 ? Color.orange : Color.secondary)
@@ -95,6 +106,7 @@ private struct ToolbarRow: View {
             if let zoomIn = controls["zoom.in"] { ControlButton(control: zoomIn, systemImage: "plus.magnifyingglass") }
             if let browser = controls["pane.browser"] { ControlToggle(control: browser) }
             if let inspector = controls["pane.inspector"] { ControlToggle(control: inspector) }
+            if let settings = controls["prefs.audio"] { ControlToggle(control: settings, face: "Audio") }
         }
         .labelStyle(.iconOnly)
         .padding(.horizontal, 10)
