@@ -25,12 +25,20 @@
 // Latency compensation at the source (MIX-023): the graph knows its total latency (the master's
 // path latency); Engine::render gives the steps flagged `timeline` a TransportBlock that many
 // samples ahead of the one the other steps get. See Engine.h.
-// MIDI routing isn't modelled yet: nodes get an empty midiIn and a writer that accepts nothing.
+// MIDI (T-045, DW-099) is pulled, not pushed: a step whose node writes MIDI owns fixed storage of
+// `midiCapacity` events (0: its writer accepts nothing), allocated in create() and never resized,
+// so a node that keeps room for its note-offs (MidiClipPlayer) can rely on it. A consumer's
+// midiIn is gathered right before it runs: with one undelayed MIDI input it points straight at
+// the upstream writer's written() span (no copy); with several it is their k-way merge in frame
+// order (stable: equal frames keep input order) in the step's own merge storage, sized for the
+// sum of its inputs, so a merge never drops anything. A delayed MIDI input (MIX-021) goes through
+// a MidiDelayLine first, co-owned and carried over by edge ID like a DelayLine.
 //
 // Lifetime: the graph co-owns its nodes (shared_ptr, see NodePool) so a node outlives every
 // snapshot that uses it, but the audio thread only ever sees raw pointers. Graphs are destroyed
 // on daw.reclaim (ENG-012), which is also where a node's last reference is usually dropped.
 
+#include <atomic>
 #include <cstdint>
 #include <limits>
 #include <memory>
@@ -41,6 +49,7 @@
 #include "core/AudioBufferPool.h"
 #include "core/AudioBufferView.h"
 #include "core/Node.h"
+#include "core/NodeIO.h"
 #include "core/Realtime.h"
 #include "core/Result.h"
 #include "core/Telemetry.h"
@@ -89,6 +98,80 @@ private:
     std::unique_ptr<float[]> samples_;  // numChannels × capacity
 };
 
+// MIX-021 for MIDI edges (T-045): a fixed delay for one edge's MIDI. Events are queued with the
+// frame they are due at (block start + frameOffset + delay, never earlier than the event queued
+// before them, so the queue stays in order) and leave in the block that frame falls in. Non-RT
+// to create; process() is RT, called once per block by the one graph rendering it, so contents
+// carry over a rebuild when the next graph gets the same line (keyed by edge ID, GraphBuilder).
+// Its capacity bounds events in flight, not the delay, so one line serves any delay: a changed
+// delay keeps the line and its queue (events already queued keep their due frame; new ones may
+// wait behind them, so a shrinking delay plays a few late, never reordered or lost).
+//
+// Overflow policy (05 "MIDI routing"): the queue never drops a note-off or a pedal-up for a note
+// or pedal it let through. It counts the notes (per channel and key) and sustain pedals (CC 64)
+// whose on/down it queued and whose off/up it hasn't seen yet, and keeps that many slots free:
+// a note-on or pedal-down is queued only if room stays for itself and its own release, and any
+// other event only if it leaves the reserve intact. Dropped events are counted (dropped()). CC
+// 120/123 (All Sound/Notes Off) clear the channel's held notes; CC 121 clears its pedal.
+// At most maxOut() events leave per block; the rest stay queued and leave at frame 0 of the next
+// block (late, never lost), so a consumer's merge storage can be sized from maxOut().
+class MidiDelayLine {
+public:
+    static constexpr uint32_t kMaxCapacity = 1u << 16;
+
+    // `capacity` (1...kMaxCapacity) is rounded up to a power of two; maxOut >= 1.
+    MidiDelayLine(uint32_t capacity, uint32_t maxOut);
+    MidiDelayLine(const MidiDelayLine&) = delete;
+    MidiDelayLine& operator=(const MidiDelayLine&) = delete;
+
+    uint32_t capacity() const DAW_RT { return mask_ + 1; }
+    uint32_t maxOut() const DAW_RT { return maxOut_; }
+
+    // Queues `in` (frame offsets into this block, in frame order) `delay` frames later and returns
+    // the events due in this block's `numFrames` frames, in order, with frame offsets into this
+    // block. The span is valid until the next process().
+    MidiEventSpan process(MidiEventSpan in, uint32_t delay, uint32_t numFrames) DAW_RT;
+
+    // Events the overflow policy dropped so far (any thread).
+    uint64_t dropped() const { return dropped_.load(std::memory_order_relaxed); }
+    // Diagnostics and tests, not while a block renders: events queued, and notes/pedals the
+    // queue keeps room for.
+    uint32_t queued() const { return count_; }
+    uint32_t reserved() const { return numHeld_ + numPedals_; }
+
+private:
+    struct Pending {
+        int64_t due;
+        MidiEvent event;
+    };
+    bool admit(const MidiEvent& e) DAW_RT;  // applies the overflow policy; true: queue it
+    void drain(uint32_t numFrames) DAW_RT;  // moves due events into out_
+
+    uint32_t mask_ = 0;
+    uint32_t maxOut_;
+    std::unique_ptr<Pending[]> queue_;
+    std::unique_ptr<MidiEvent[]> out_;
+    // Audio thread only.
+    uint32_t head_ = 0, count_ = 0, numOut_ = 0;
+    int64_t now_ = 0;      // frames processed so far
+    int64_t lastDue_ = 0;  // due frame of the last event queued
+    uint32_t lastOutFrame_ = 0;
+    uint32_t numHeld_ = 0, numPedals_ = 0;
+    std::unique_ptr<uint16_t[]> held_;  // [channel × 128 + key]
+    bool pedal_[16] = {};
+    std::atomic<uint64_t> dropped_{0};
+};
+
+// One MIDI input of a step: the events step `fromStep` (earlier in the order) wrote this block,
+// through `delayLine` when there is one (required when delay > 0; a line serves one input per
+// graph). GraphBuilder keeps a MIDI edge's line once it has one, even at delay 0, so events still
+// in flight after a latency change are delivered.
+struct RenderMidiInputDesc {
+    uint32_t fromStep = 0;
+    uint32_t delay = 0;
+    std::shared_ptr<MidiDelayLine> delayLine = nullptr;
+};
+
 // After its node processes, a step copies (`add` false) or adds its output into `buffer`. The
 // builder makes the first feed into a buffer in each block a copy, so nothing needs clearing.
 // MIX-021: with `delay` > 0 the output goes through `delayLine` (required then, with
@@ -115,6 +198,10 @@ struct RenderStepDesc {
     // process() hands it the latency-compensated TransportBlock. GraphBuilder sets it for
     // audioClipPlayer, midiClipPlayer and metronome.
     bool timeline = false;
+    // T-045: room for this many MIDI events per block in NodeIO::midiOut (0: none), and the
+    // MIDI inputs gathered into NodeIO::midiIn, merged in this order on equal frames.
+    uint32_t midiCapacity = 0;
+    std::vector<RenderMidiInputDesc> midiInputs;
 };
 
 struct RenderGraphDesc {
@@ -179,6 +266,11 @@ public:
     // The master bus for the block just processed; empty when the graph has none.
     AudioBufferView master(uint32_t numFrames) const DAW_RT;
 
+    // T-045: step `step`'s MIDI output capacity, and the events it wrote in the block just
+    // processed (empty for a step without MIDI storage).
+    uint32_t midiCapacity(uint32_t step) const DAW_RT { return steps_[step].midiCapacity; }
+    MidiEventSpan midiOutput(uint32_t step) const DAW_RT;
+
 private:
     struct Step {
         Node* node;
@@ -189,6 +281,18 @@ private:
         uint32_t numFeeds;
         bool resetOnLocate;
         bool timeline;
+        // T-045
+        MidiEvent* midiOut;      // midiCapacity events, or null
+        uint32_t midiCapacity;
+        uint32_t firstMidiInput; // into midiInputs_
+        uint32_t numMidiInputs;
+        MidiEvent* midiMerge;    // mergeCapacity events when numMidiInputs > 1, else null
+        uint32_t mergeCapacity;
+    };
+    struct MidiInput {
+        uint32_t fromStep;
+        uint32_t delay;
+        MidiDelayLine* delayLine;  // co-owned through midiLines_, or null
     };
     struct Feed {
         uint32_t buffer;
@@ -200,6 +304,7 @@ private:
     RenderGraph() = default;
     AudioBufferView input(uint32_t buffer, uint32_t numFrames) const DAW_RT;
     void feed(const Step& step, uint32_t numFrames) const DAW_RT;
+    MidiEventSpan gatherMidi(const Step& step, uint32_t numFrames) const DAW_RT;
 
     double sampleRate_ = 0;
     uint32_t maxBlock_ = 0;
@@ -214,6 +319,15 @@ private:
     std::vector<NodeLatency> nodeLatencies_;
     std::vector<std::shared_ptr<Node>> owned_;
     std::vector<std::shared_ptr<DelayLine>> lines_;
+    // T-045: every step's MIDI output and merge storage, one allocation made in create(); the
+    // events each step wrote this block (written on the audio thread, read by later steps);
+    // scratch for one merge (max MIDI fan-in spans and cursors).
+    std::vector<MidiInput> midiInputs_;
+    std::vector<std::shared_ptr<MidiDelayLine>> midiLines_;
+    std::unique_ptr<MidiEvent[]> midiStorage_;
+    std::unique_ptr<uint32_t[]> midiSizes_;
+    std::unique_ptr<MidiEventSpan[]> mergeSpans_;
+    std::unique_ptr<uint32_t[]> mergeCursors_;
 };
 
 } // namespace daw

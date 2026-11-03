@@ -192,7 +192,7 @@ Result<std::unique_ptr<RenderGraph>> GraphBuilder::build(const GraphDescription&
     planEdges.reserve(desc.edges.size());
     for (uint32_t i = 0; i < desc.edges.size(); ++i) {
         const EdgeDesc& e = desc.edges[i];
-        if (e.kind == EdgeKind::midi) continue;  // T-040 routes MIDI
+        if (e.kind == EdgeKind::midi) continue;  // MIDI isn't in buffers (T-045, below)
         const TopoEdge& t = topoEdges[i];
         const auto delay = static_cast<uint32_t>(arrival[t.to] - path[t.from]);  // MIX-021
         planEdges.push_back({stepOf[t.from], stepOf[t.to], e.kind == EdgeKind::sidechain, delay});
@@ -218,6 +218,34 @@ Result<std::unique_ptr<RenderGraph>> GraphBuilder::build(const GraphDescription&
             lines[e.edgeID] = EdgeDelay{e.from, e.to, std::move(line)};
         }
 
+    // MARK: MIDI edges (T-045, DW-099)
+
+    // A node with an outgoing MIDI edge writes into kMidiCapacity events per block; every
+    // consumer pulls from that storage (RenderGraph.h). Inputs keep description order, which is
+    // the tie order of a merge. MIX-021: a MIDI edge is delayed like an audio one; its line is
+    // kept by edge ID for the same endpoints whatever the delay (a MidiDelayLine's capacity
+    // doesn't depend on it), even at delay 0, so in-flight events, note-offs included, still
+    // arrive after a latency change.
+    std::vector<uint32_t> midiCapacity(numNodes, 0);
+    std::vector<std::vector<RenderMidiInputDesc>> midiInputs(numNodes);
+    std::unordered_map<uint64_t, MidiEdgeDelay> midiLines;
+    for (uint32_t i = 0; i < desc.edges.size(); ++i) {
+        const EdgeDesc& e = desc.edges[i];
+        if (e.kind != EdgeKind::midi) continue;
+        const TopoEdge& t = topoEdges[i];
+        midiCapacity[t.from] = kMidiCapacity;
+        RenderMidiInputDesc input;
+        input.fromStep = stepOf[t.from];
+        input.delay = static_cast<uint32_t>(arrival[t.to] - path[t.from]);
+        if (auto old = midiDelayLines_.find(e.edgeID);
+            old != midiDelayLines_.end() && old->second.from == e.from && old->second.to == e.to)
+            input.delayLine = old->second.line;
+        else if (input.delay > 0)
+            input.delayLine = std::make_shared<MidiDelayLine>(kMidiDelayCapacity, kMidiCapacity);
+        if (input.delayLine) midiLines[e.edgeID] = MidiEdgeDelay{e.from, e.to, input.delayLine};
+        midiInputs[t.to].push_back(std::move(input));
+    }
+
     // MARK: Assemble
 
     RenderGraphDesc graph;
@@ -238,6 +266,8 @@ Result<std::unique_ptr<RenderGraph>> GraphBuilder::build(const GraphDescription&
         step.feeds = std::move(b.feeds);
         step.resetOnLocate = resetsOnLocate(desc.nodes[n].kind);
         step.timeline = readsTimeline(desc.nodes[n].kind);
+        step.midiCapacity = midiCapacity[n];
+        step.midiInputs = std::move(midiInputs[n]);
         graph.steps.push_back(std::move(step));
         // MIX-020: telemetry's per-node table lists the latent nodes.
         if (const uint32_t latency = nodes[n]->latencySamples(); latency > 0)
@@ -252,6 +282,7 @@ Result<std::unique_ptr<RenderGraph>> GraphBuilder::build(const GraphDescription&
     // MIX-022: lines this graph doesn't use are dropped here; graphs still rendering them hold
     // their own references.
     delayLines_ = std::move(lines);
+    midiDelayLines_ = std::move(midiLines);
 
     // Forget nodes the description dropped. Graphs that still render them hold their own
     // references, so they're released on daw.reclaim once those graphs are gone (ENG-013).
