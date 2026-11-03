@@ -628,17 +628,21 @@ void EngineFacade::Impl::submitReload(AssetReloader::Request request) {
 
 void EngineFacade::Impl::reloadCompleted(const AssetReloader::Request& request, AssetReloader::Staged staged,
                                          FacadeError error) {
+    const uint32_t failedBefore = reloader.progress().failed;
     const AssetReloader::Outcome outcome = reloader.complete(request, std::move(staged));
     if (outcome == AssetReloader::Outcome::stale) return;
-    if (!error.ok()) {
+    // A superseded asset (loaded again since the pass began) isn't counted as failed: its newer
+    // load stands.
+    const bool failed = reloader.progress().failed > failedBefore;
+    if (failed) {
         // Like a failed first load: the asset is dropped at the swap and its clips are silent.
-        EngineEventPOD failed;
-        failed.type = EngineEventType::assetLoadFailed;
-        failed.subject = request.assetID;
-        failed.error = error;
-        pushEvent(std::move(failed));
+        EngineEventPOD event;
+        event.type = EngineEventType::assetLoadFailed;
+        event.subject = request.assetID;
+        event.error = error;
+        pushEvent(std::move(event));
     }
-    pushReload(AssetsReloadPhase::progress, request.assetID, std::move(error));
+    pushReload(AssetsReloadPhase::progress, request.assetID, failed ? std::move(error) : FacadeError{});
     if (outcome == AssetReloader::Outcome::finished) finishAssetReload();
 }
 
