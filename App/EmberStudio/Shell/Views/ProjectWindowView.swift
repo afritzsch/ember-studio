@@ -53,7 +53,9 @@ private struct ToolbarRow: View {
         HStack(spacing: 8) {
             if let play = controls["transport.play"] { ControlButton(control: play, systemImage: "play.fill") }
             if let stop = controls["transport.stop"] { ControlButton(control: stop, systemImage: "stop.fill") }
-            if let record = controls["transport.record"] { ControlToggle(control: record, face: "●").foregroundStyle(.red) }
+            // The default toggle look (filled when on, like loop): a red tint renders on and off
+            // almost alike in the dark appearance.
+            if let record = controls["transport.record"] { ControlToggle(control: record, face: "●") }
             if let loop = controls["transport.loop"] { ControlToggle(control: loop, face: "⟲") }
             // T-026: the metronome toggle (`transport.metronome`) goes here.
             Divider().frame(height: 18)
