@@ -59,7 +59,7 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 | T-023 | E | Sidechain edges and ports | MIX-008 | T-021 | done |
 | T-024 | D | Metronome node | TIME-010, DSP-011 | T-008 | done |
 | T-025 | E | M2 goldens: pan law, bus/send sum, PDC null | TEST (M2 set) | T-020, T-021, T-022, T-019 (harness) | done |
-| T-026 | M+B | Project metronome: `Project.metronome {enabled, level, accent}` (persisted), `SetMetronome` command, GraphDescriptionBuilder emits one metronome node straight into the master (not soloed/muted with tracks; toggles are slot writes), `transport.setMetronome` + dawmcp tool, facade `paramInfoJSON` publishes `Metronome::kParamInfo` (and `GainNode`). Open for the user (T-024 Qs): export includes the click? (recommended: no, unless `includeMetronome: true`); toggle undoable? (recommended: a command that doesn't enter undo history). Toolbar button: T-034 | TIME-010 (project part), DW-160 | T-024 | ready |
+| T-026 | M+B | Project metronome: `Project.metronome {enabled, level, accent}` (persisted), `SetMetronome` command, GraphDescriptionBuilder emits one metronome node straight into the master (not soloed/muted with tracks; toggles are slot writes), `transport.setMetronome` + dawmcp tool, facade `paramInfoJSON` publishes `Metronome::kParamInfo` (and `GainNode`). Open for the user (T-024 Qs): export includes the click? (recommended: no, unless `includeMetronome: true`); toggle undoable? (recommended: a command that doesn't enter undo history). Toolbar button: T-034 | TIME-010 (project part), DW-160 | T-024 | wip(t-026-project-metronome) |
 
 ### M3 — Timeline, persistence, app shell
 | Task | Lane | Title | Requirements | Depends on | Status |
@@ -68,7 +68,7 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 | T-031 | M | Persistence: folder format, atomic save, migrations, autosave, recovery, offline assets | MODEL-040..046 | T-030 | done |
 | T-032 | U+B | App shell, window, view-model pattern, toasts, ControlSocketServer, attach mode, UI dump/snapshot | UI-001, 003, 004, 050..052, CTL-011, 023, 030, 031 | T-018 | done |
 | T-033 | U | Arrange canvas: tiles, waveforms (Metal), grid/snap, clip gestures, playhead layer | UI-010..014 | T-032, T-030 | done |
-| T-034 | U | Toolbar, transport, keyboard shortcuts | UI-002 | T-032 | ready |
+| T-034 | U | Toolbar, transport, keyboard shortcuts | UI-002 | T-032 | wip(t-034-toolbar-transport) |
 | T-035 | D | Overlapping-clip crossfades | DSP-002 | T-013 | done |
 | T-036 | E | M3 goldens: clips/fades/tempo change, loop wrap mid-block | TEST (M3 set) | T-030, T-035 | done |
 
@@ -80,7 +80,7 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 | T-042 | M | Note commands, instrument slot on MIDI tracks | MODEL-005 (note subset) | T-030 | done |
 | T-043 | U | Piano roll + velocity lane + audition (`previewNote` facade addition) | UI-020, 021 | T-033, T-042 | ready |
 | T-044 | D | M4 goldens | TEST (M4 set) | T-041, T-042, T-045 | todo |
-| T-045 | E | MIDI edge routing in RenderGraph/GraphBuilder: player → instrument MIDI data, frame-ordered merge, fixed-capacity storage, MIDI delay for PDC; makes a MIDI track with a sampler audible | DW-099 (DSP-003, MIX-001, MIX-021 for MIDI) | T-040, T-041 | ready |
+| T-045 | E | MIDI edge routing in RenderGraph/GraphBuilder: player → instrument MIDI data, frame-ordered merge, fixed-capacity storage, MIDI delay for PDC; makes a MIDI track with a sampler audible | DW-099 (DSP-003, MIX-001, MIX-021 for MIDI) | T-040, T-041 | wip(t-045-midi-routing) |
 
 ### M5 — Recording & devices
 | Task | Lane | Title | Requirements | Depends on | Status |
@@ -109,7 +109,7 @@ DSP effects (T-070..073) depend only on the Node API and can be **pulled forward
 | Task | Lane | Title | Requirements | Depends on | Status |
 |---|---|---|---|---|---|
 | T-070 | D | EQ | DSP-030, 040, 041 | T-004, T-005 | ready |
-| T-071 | D | Compressor (+ sidechain) | DSP-031, 040, 041 | T-005, T-023 | ready |
+| T-071 | D | Compressor (+ sidechain) | DSP-031, 040, 041 | T-005, T-023 | wip(t-071-compressor) |
 | T-072 | D | Delay (tempo sync) | DSP-032, 040, 041 | T-008 | ready |
 | T-073 | D | Reverb (FDN, deterministic) | DSP-033, 040, 041 | T-004, T-005 | ready |
 | T-074 | E+M | Automation lanes model + AutomationPlayer + plugin param path | AUTO-001..005, 008..010 | T-030, T-061/T-062 (for AUTO-009) | todo |

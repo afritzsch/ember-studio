@@ -29,3 +29,8 @@ Unattended phases started by `/autobuild` (see `.claude/skills/autobuild/SKILL.m
 - T-023 merged with the DW-168 hang fix and the DW-169 umask fix. Every check ran under a timeout: test.sh 11/11, swift test 3× green. T-071 compressor is now ready.
 - 5-hour window reached 83% about 30 min into the phase (reset ~4 h later). The workers had finished by then, so no pause was needed; the lead's hung test loop was killed after the reset, as the conductor asked.
 - End: week 23%, 5-hour window 17%. main green (test.sh 11/11, timed swift test 3×). No worker session left open.
+
+### Phase 3 (2026-11-03)
+- Wave: T-045 MIDI edge routing (E, M4 critical), T-034 toolbar/transport (U, M3), T-026 project metronome (M+B, M2 remainder), T-071 compressor + sidechain golden (D, M7; the only D task with a merged dependency chain into M2's sidechain).
+- Start: week 23%, five-hour window 19%.
+- T-026's two open questions decided up front (DECISIONS.md): export excludes the click unless `includeMetronome: true`; `SetMetronome` is persisted but not undoable.
