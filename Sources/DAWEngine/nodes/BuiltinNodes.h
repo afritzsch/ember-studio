@@ -15,6 +15,8 @@
 //                    GraphBuilder::meterOf); a null `telemetry` means no metering.
 //   gain             MIX-007 send (GainNode): level and mute, numParams GainNode::kNumParams; a
 //                    plain gain with numParams 1 has no mute; 0 is invalidArgument.
+//   metronome        TIME-010 / DSP-011 click (Metronome): params on, level, accent; slots
+//                    beyond numParams use their defaults (see Metronome.h).
 
 #include "core/Result.h"
 #include "core/Telemetry.h"

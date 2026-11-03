@@ -57,8 +57,9 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 | T-021 | E | PDC: path latency, delay insertion, delay-line carry-over, source pre-roll | MIX-020..025 | T-012 | done |
 | T-022 | M | Routing commands (tracks, buses, sends, outputs) + cycle rejection + validation | MODEL-005 (routing subset), MODEL-030..032 | T-016 | done |
 | T-023 | E | Sidechain edges and ports | MIX-008 | T-021 | wip(t-023-sidechain) |
-| T-024 | D | Metronome node | TIME-010, DSP-011 | T-008 | wip(t-024-metronome) |
+| T-024 | D | Metronome node | TIME-010, DSP-011 | T-008 | done |
 | T-025 | E | M2 goldens: pan law, bus/send sum, PDC null | TEST (M2 set) | T-020, T-021, T-022, T-019 (harness) | done |
+| T-026 | M+B | Project metronome: `Project.metronome {enabled, level, accent}` (persisted), `SetMetronome` command, GraphDescriptionBuilder emits one metronome node straight into the master (not soloed/muted with tracks; toggles are slot writes), `transport.setMetronome` + dawmcp tool, facade `paramInfoJSON` publishes `Metronome::kParamInfo` (and `GainNode`). Open for the user (T-024 Qs): export includes the click? (recommended: no, unless `includeMetronome: true`); toggle undoable? (recommended: a command that doesn't enter undo history). Toolbar button: T-034 | TIME-010 (project part), DW-160 | T-024 | ready |
 
 ### M3 — Timeline, persistence, app shell
 | Task | Lane | Title | Requirements | Depends on | Status |
@@ -280,7 +281,7 @@ Recorded by the lead from worker reports.
 | DW-082 | T-021 | Expose `GraphCompiler::takeEvents()` (latency change, MIX-024) as `EngineEventType::latencyChanged`; needs a PROPOSED delta to 08 events (`include/daw/`) | B | todo |
 | DW-083 | T-021 | `MasterNode::clippedSamples()` → telemetry: new Telemetry counter + `TelemetryPOD` field | E (core) + B | todo |
 | DW-084 | T-021 | Goldens `pdc_alignment_null` (MIX-021) and click-on-beat-1 behind a latent master insert (MIX-023); need T-019's harness + a test-only FakeLatencyNode in golden builds | E (T-019 / T-025) | done (T-025 `pdc_alignment_null`) |
-| DW-085 | T-021 | Metronome is already a timeline node (scheduled `latency` ahead); T-024 should confirm and decide whether it resets on locate | D (T-024) | todo |
+| DW-085 | T-021 | Metronome is already a timeline node (scheduled `latency` ahead); T-024 should confirm and decide whether it resets on locate | D (T-024) | done (T-024: timeline node, latency ahead; resets on locate by detecting non-continuing segments, 64-frame fade) |
 | DW-086 | T-021 | Pre-roll renders `latency` frames inside the first block of a run: a CPU spike that can overrun a live callback when latency is large; a mid-run latency change jumps timeline nodes with no new pre-roll. Consider spreading pre-roll over blocks (output silent) | E | todo |
 | DW-087 | T-021 | `Engine.cpp` duplicates the `makeSegment` helper (from `time/TransportSegments.h`); dawmcp check on `graphLatency` once a latent node is reachable over the protocol | E (small), B (T-018+) | telemetry part done (T-018: `graphLatency`/`nodeLatencies` in `daw_engine_telemetry`); no latent node reachable over the protocol yet; `makeSegment` duplicate todo |
 | DW-088 | T-050 | Move `RunningConfig` from `io/CoreAudioDriver.h` to `io/DriverConfig.h` (FakeDeviceDriver includes CoreAudioDriver.h only for it) | E (small, T-051) | done (T-051) |
@@ -353,3 +354,5 @@ Recorded by the lead from worker reports.
 | DW-155 | T-032 | `project.open` through the app's socket swaps the document but doesn't toast its load report (recovery available, offline assets); File > Open does | U | todo |
 | DW-156 | T-032 | Every project window gets its own engine; with `--engine coreAudio` several windows each open the device. Needs a policy (one live engine for the main window, others offline?) | lead/user | todo |
 | DW-157 | T-032 | Quitting the real app (SIGTERM, parent exit, menu) is verified by hand only; an automated test needs the built app, e.g. a `scripts/test.sh` stage after xcodebuild | B / test | todo |
+| DW-160 | T-024 | Project-level metronome wiring (model setting, command, graph node into master, `transport.setMetronome`, paramInfoJSON for `Metronome`/`GainNode` slots); proposal in T-024's report | M+B (T-026) | todo |
+| DW-161 | T-024 | Optional: add `NodeKind::metronome` to GraphBuilder's `resetsOnLocate` for consistency (the node already self-detects locates) | E | todo |

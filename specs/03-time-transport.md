@@ -68,4 +68,5 @@ public struct TempoMap: Codable, Sendable { ... same API ... }
 | TIME-007 | done (T-008) | `TransportTests` (block spanning a tempo change runs at start tempo; events exact) |
 | TIME-008 | partial (T-008) | `TransportTests` (locate while playing resets timeline nodes once; effects keep state). Loop wraps don't reset (TIME-006 handles them). Golden pending (T-019) |
 | TIME-009 | done (T-008) | `TransportTests` (latency-compensated playhead, clamped at play start, unwrapped after wrap; seqlock, never torn) |
+| TIME-010 | done (T-024) | `MetronomeTests` (clicks sample-exact over tempo changes and 3/4 → 4/4 → 6/8, accented bar starts, random blocks; on switch + levels latched per click; locate cuts a click with a 64-frame fade; loop wrap mid-block; scheduled graph-latency ahead); golden `metronome_click` + `MetronomeGoldenTests` (every onset exact). Project-level toggle/command/UI: T-026 |
 | TIME-* (rest) | todo | |

@@ -80,5 +80,6 @@ class NodeRegistry { public: static std::span<const ParamInfo> paramInfo(NodeKin
 | DSP-021 | done (T-041) | `SamplerTests` "Hermite resampling; rate 1 bit-exact, A4 root playing A5 peaks at 880 Hz ±1 Hz" (FFT). Golden `sampler_pitch` waits for MIDI routing + zone config in the model (DW-139) |
 | DSP-022 | done (T-041) | `SamplerTests` (sample-accurate ADSR in any block size, velocity curve; 40 notes → 32 voices, released notes stolen first, 5 ms steal fades, no clicks) |
 | DSP-023 | done (T-041) | `SamplerTests` (sustain pedal, CC 123 All Notes Off per channel (DW-100), pitch bend ±2 semitones) |
+| DSP-011 | done (T-024) | `MetronomeTests` (click shapes, param table/defaults, clamping/NaN, 0-frame blocks, reset fade; see TIME-010); golden `metronome_click`. `nodes/Metronome.h`: slots `on` 0 (switch, default 1), `level` 1 (default 0.25), `accent` 2 (default 2); latched per click; beat = 1/den note, signature events are downbeats; wraps ring out, locate/stop fade over 64 frames (DW-085) |
 | DSP-010 | done (T-013, T-020) | `ChannelStripTests` (gain, pan, mute, phase, meters; clip player → strip → master through the Engine); `SendTests` (GainNode) |
 | DSP-* (rest) | todo | |
