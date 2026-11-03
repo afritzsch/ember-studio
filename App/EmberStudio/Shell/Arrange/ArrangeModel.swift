@@ -174,6 +174,16 @@ final class ArrangeModel {
         }
     }
 
+    /// UI-020: a double-click on a MIDI clip opens it in the piano roll. True if it did.
+    @discardableResult
+    func doubleClick(at point: CGPoint) -> Bool {
+        guard let hit = hitTest(point), case .midi = project.clip(hit.clipID) else { return false }
+        finishDrag()
+        selection = [hit.clipID]
+        window?.pianoRoll.open(hit.clipID)
+        return true
+    }
+
     func mouseDragged(to point: CGPoint, modifiers: CanvasModifiers = []) {
         guard var drag else { return }
         if !drag.started {
