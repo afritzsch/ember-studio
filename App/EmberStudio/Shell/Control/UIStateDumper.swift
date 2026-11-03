@@ -14,6 +14,9 @@ import Foundation
 ///        "visibleTracks": [ids],
 ///        "tracks": [{"id", "name", "kind", "mute", "solo", "selected"}],
 ///        "transport": {"playing", "recording", "tick"},
+///        "toolbar": {"position", "time", "tempo", "signature", "loop": {"enabled", "start", "end"} | null,
+///                    "metronome", "dspLoadPercent", "xruns"},
+///        "keyBindings": [{"keys": "⇧⌘T", "control": "track.add.midi"}],
 ///        "toasts": [{"id", "kind", "severity", "title", "message", "action"?, "count"?}],
 ///        "controls": [{"id", "kind", "label", "isOn"?, "enabled"}],
 ///        "arrange": {"snap", "pixelsPerBeat", "size", "visibleTicks", "visibleRows", "clipCount",
@@ -68,9 +71,27 @@ enum UIStateDumper {
                 "recording": .bool(window.transport.recording),
                 "tick": .int(window.transport.tick.raw),
             ],
+            "toolbar": toolbar(window),
+            "keyBindings": .array(KeyBindings.all.map { ["keys": .string($0.chord.description), "control": .string($0.controlID)] }),
             "toasts": .array(window.toasts.toasts.map(dump)),
             "controls": .array(window.controls.map(dump)),
             "arrange": dump(window.arrange),
+        ]
+    }
+
+    /// 12 *Layout*: what the toolbar reads out (UI-002's transport state is in `transport`/`controls`).
+    static func toolbar(_ window: ProjectWindowModel) -> JSONValue {
+        [
+            "position": .string(window.positionBBT),
+            "time": .string(window.positionTime),
+            "tempo": .double(window.tempo),
+            "signature": .string(window.signature),
+            "loop": window.project.loop.map { loop in
+                ["enabled": .bool(loop.isEnabled), "start": .int(loop.start.raw), "end": .int(loop.end.raw)]
+            } ?? .null,
+            "metronome": .bool(window.metronomeEnabled),
+            "dspLoadPercent": .double(Double(window.telemetry.dspLoadPercent)),
+            "xruns": .int(Int64(clamping: window.telemetry.xruns)),
         ]
     }
 

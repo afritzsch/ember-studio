@@ -68,7 +68,7 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 | T-031 | M | Persistence: folder format, atomic save, migrations, autosave, recovery, offline assets | MODEL-040..046 | T-030 | done |
 | T-032 | U+B | App shell, window, view-model pattern, toasts, ControlSocketServer, attach mode, UI dump/snapshot | UI-001, 003, 004, 050..052, CTL-011, 023, 030, 031 | T-018 | done |
 | T-033 | U | Arrange canvas: tiles, waveforms (Metal), grid/snap, clip gestures, playhead layer | UI-010..014 | T-032, T-030 | done |
-| T-034 | U | Toolbar, transport, keyboard shortcuts | UI-002 | T-032 | wip(t-034-toolbar-transport) |
+| T-034 | U | Toolbar, transport, keyboard shortcuts | UI-002 | T-032 | done |
 | T-035 | D | Overlapping-clip crossfades | DSP-002 | T-013 | done |
 | T-036 | E | M3 goldens: clips/fades/tempo change, loop wrap mid-block | TEST (M3 set) | T-030, T-035 | done |
 
@@ -359,7 +359,7 @@ Recorded by the lead from worker reports.
 | DW-162 | T-036 | TIME-008 "effects keep their tails" with a real tailed effect (delay feedback / reverb) once T-072/T-073 exist; today `locate_reset` uses a SineNode insert's state | D (T-072/T-073 or T-077) | todo |
 | DW-163 | T-036 | dawmcp over stdio answered a pipelined `tools/call` (render.offline) before an earlier `daw_test_fixture` call finished, so the render failed; one at a time works. A pipelined script over dawmcp would race | B | todo |
 | DW-164 | T-036 | Fixtures can't locate mid-render (only at a render's start). If a golden ever needs it, add a scripted transport event to render.offline | E/B | todo |
-| DW-165 | T-033 | Keyboard: ⌫ delete and ⌘E split at the playhead aren't bound yet; bind them to `ArrangeModel.deleteSelection` / `splitSelection(at:)` (controls `edit.delete` / `edit.split`) | U (T-034) | todo |
+| DW-165 | T-033 | Keyboard: ⌫ delete and ⌘E split at the playhead aren't bound yet; bind them to `ArrangeModel.deleteSelection` / `splitSelection(at:)` (controls `edit.delete` / `edit.split`) | U (T-034) | done (T-034) |
 | DW-166 | T-033 | UI-010's 60 fps with 1,000 clips on M1 still needs an Instruments run on the real app (only a debug smoke test was measured) | U / user | todo |
 | DW-167 | T-033 | Trimming with snap on can shrink a clip to 1 tick; a minimum of one grid step may feel better (UX choice) | U | todo |
 | DW-158 | T-023 | Golden `@node` doesn't know the `sidechainMix` test node yet (`TestNodeType::sidechainMix` is in GoldenEngineSupport.h); adding it lets a fixture prove MIX-008 through the model before T-071 | E (T-071 / GoldenTests) | won't do (T-071: the real-compressor golden `sidechain_compressor` proves MIX-008 through the model) |
@@ -375,3 +375,6 @@ Recorded by the lead from worker reports.
 | DW-176 | T-071 | TEST-008 perf (64 × EQ + Comp ≥ 20× realtime): the compressor does a per-sample `log10` + `exp` in double, unmeasured. If too slow, add a below-knee fast path | D (T-077 / T-084) | todo |
 | DW-177 | T-026 | Export dialog (T-082) must leave the click out by default: go through `render.offline` (which does it) or set `store.engineSync?.isMetronomeSuppressed = true` around `renderOffline`; an "Include metronome" checkbox maps to `includeMetronome` | U (T-082) | todo |
 | DW-178 | T-026 | `paramInfoJSON(.gain)` now publishes GainNode's 2 slots, so a device slot of built-in kind `.gain` gets level/mute slots (it had none). Sends are unaffected (`ParamLayout.Send`). Check when insert chains land (DW-149) | M | todo |
+| DW-179 | T-034 | Arrow keys aren't bound to `clip.nudge.left|right|up|down`; `KeyChord` drops function keys today (UX choice) | U | todo |
+| DW-180 | T-034 | Toolbar tempo/signature are display only; editing them (`SetTempoEvent` / `SetTimeSignature`) from the toolbar is a possible follow-up | U | todo |
+| DW-181 | T-034 | The NSEvent → `KeyMonitor` path has no automated test (posting key events needs Accessibility); manual check in the app: Space, R, L, ⌘E, ⌫, ⌘T | U / user | todo |
