@@ -58,6 +58,7 @@
 #include "nodes/Metronome.h"
 #include "nodes/MidiClipPlayer.h"
 #include "nodes/Reverb.h"
+#include "plugins/AUPluginHost.h"
 #include "time/TempoMap.h"
 
 
@@ -237,6 +238,9 @@ struct EngineFacade::Impl {
     // UI-021 (T-043): preview notes for the tracks' MidiClipPlayers. Declared before `engine`, so
     // it outlives every node that reads it.
     MidiPreviewInbox previewInbox;
+    // PLUG-010 (T-061): the session's Audio Units by device slot, and the auPlugin factory.
+    // Declared before `engine`, so it outlives the nodes (they only hold it weakly anyway).
+    std::shared_ptr<AUPluginHost> plugins = std::make_shared<AUPluginHost>();
 
     // Declaration order is destruction order in reverse: the loader and compiler threads stop
     // before the state their callbacks touch, and the engine outlives everything rendering
@@ -400,6 +404,13 @@ EngineFacade::Impl::Impl(EngineMode m, const DriverConfigPOD& cfg, FacadeOptions
         }
     }
     if (!(sampleRate >= kMinSampleRate && sampleRate <= kMaxSampleRate)) sampleRate = 48000.0;
+
+    // PLUG-010 (T-061): hosted Audio Units. Registered before the creator's hook (which may replace
+    // the kind) and kept in registerNodes for rate changes.
+    registerNodes = [hook = std::move(registerNodes), host = plugins](NodeRegistry& r) -> Result<void> {
+        if (auto set = r.set(NodeKind::auPlugin, host->kindInfo()); !set) return set;
+        return hook ? hook(r) : Result<void>{};
+    };
 
     // UI-021 (T-043): MIDI players read preview notes from previewInbox. Registered before the
     // creator's hook, which may still replace the kind; kept in registerNodes for rate changes.
@@ -731,6 +742,16 @@ void EngineFacade::Impl::pump() {
             std::sort(keep.begin(), keep.end());
             meters.retain(keep);
         }
+    }
+
+    // PLUG-010/012 (T-061): an AU that couldn't be instantiated or prepared (its node renders as
+    // absent) or a state that didn't apply.
+    for (AUPluginHost::Failure& failure : plugins->takeFailures()) {
+        EngineEventPOD event;
+        event.type = EngineEventType::pluginCrashed;
+        event.subject = failure.slot;
+        event.error = toFacadeError(failure.error);
+        pushEvent(std::move(event));
     }
 
     // IO-023: the driver counts xruns into telemetry; surface them as events.
@@ -1193,16 +1214,36 @@ void EngineFacade::armInput(NodeID track, uint32_t, bool armed) {
     }
 }
 
-JobID EngineFacade::instantiatePlugin(NodeID, const PluginDescriptorPOD&) {
+// PLUG-012 (T-061): an AU is instantiated right here, on the caller's (non-RT) thread, and parked
+// for `slot`; the graph build that brings the slot's auPlugin node adopts it. The job is finished
+// when this returns. VST3 is T-062.
+JobID EngineFacade::instantiatePlugin(NodeID slot, const PluginDescriptorPOD& plugin) {
+    FacadeError error;
+    if (plugin.format != PluginFormatPOD::audioUnit) {
+        error = facadeError(FacadeErrorCode::unsupported, "VST3 hosting is not implemented yet (T-062)");
+    } else if (auto made = impl_->plugins->instantiate(slot, plugin.identifier); !made) {
+        error = toFacadeError(made.error());
+    }
     std::lock_guard lock(impl_->mutex);
-    const JobID job = impl_->addJob(JobKind::instantiatePlugin, JobState::queued);
-    impl_->finishJob(impl_->jobs[job], facadeError(FacadeErrorCode::unsupported,
-                                                   "plugin hosting is not implemented yet (10)"));
+    const JobID job = impl_->addJob(JobKind::instantiatePlugin, JobState::running);
+    impl_->finishJob(impl_->jobs[job], std::move(error));
     return job;
 }
 
-ByteVector EngineFacade::getPluginState(NodeID) { return {}; }
-void EngineFacade::setPluginState(NodeID, const ByteVector&) {}
+// PLUG-016 (T-061): the AU's fullState as a binary plist, off the audio thread. Empty for a slot
+// without an AU or state; a slot whose plugin failed to load returns the state it was given.
+ByteVector EngineFacade::getPluginState(NodeID slot) {
+    auto state = impl_->plugins->state(slot);
+    return state ? std::move(state).value() : ByteVector{};
+}
+
+// PLUG-016 (T-061): applies `state` to the slot's AU (or holds it for the slot's first AU). A
+// state the AU refuses is reported as a pluginCrashed event with the error.
+void EngineFacade::setPluginState(NodeID slot, const ByteVector& state) {
+    if (auto set = impl_->plugins->setState(slot, state); !set) impl_->plugins->reportFailure(slot, set.error());
+}
+
+std::string EngineFacade::pluginInfoJSON(NodeID slot) const { return impl_->plugins->infoJSON(slot); }
 void* EngineFacade::createPluginView(NodeID) { return nullptr; }
 void EngineFacade::destroyPluginView(NodeID) {}
 
