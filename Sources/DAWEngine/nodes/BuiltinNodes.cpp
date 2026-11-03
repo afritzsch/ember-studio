@@ -10,6 +10,7 @@
 #include "nodes/GainNode.h"
 #include "nodes/Metronome.h"
 #include "nodes/MidiClipPlayer.h"
+#include "nodes/Reverb.h"
 #include "nodes/Sampler.h"
 
 namespace daw {
@@ -37,6 +38,7 @@ Result<void> registerBuiltinNodes(NodeRegistry& registry, AssetLookup lookup, Te
     if (auto r = registry.set(NodeKind::channelStrip, std::move(stripInfo)); !r) return r;
 
     if (auto r = registry.set(NodeKind::compressor, Compressor::kindInfo(telemetry)); !r) return r;  // DSP-031
+    if (auto r = registry.set(NodeKind::reverb, Reverb::kindInfo()); !r) return r;  // DSP-033
 
     auto gain = [](const NodeCreateInfo& info) -> Result<std::unique_ptr<Node>> {
         if (info.desc.numParams < GainNode::kMinNumParams)
