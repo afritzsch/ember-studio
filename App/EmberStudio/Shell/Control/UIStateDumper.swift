@@ -12,7 +12,7 @@ import Foundation
 ///        "selection": {"tracks": [ids], "clips": [ids]},
 ///        "zoom": {"pixelsPerBeat": 32}, "scroll": {"x": 0, "y": 0, "viewportHeight": 480},
 ///        "visibleTracks": [ids],
-///        "tracks": [{"id", "name", "kind", "mute", "solo", "selected"}],
+///        "tracks": [{"id", "name", "kind", "mute", "solo", "selected", "armed", "inputPair", "monitoring"}],
 ///        "transport": {"playing", "recording", "tick"},
 ///        "toolbar": {"position", "time", "tempo", "signature", "loop": {"enabled", "start", "end"} | null,
 ///                    "metronome", "dspLoadPercent", "xruns"},
@@ -65,6 +65,9 @@ enum UIStateDumper {
                 [
                     "id": .int(Int64(bitPattern: track.id)), "name": .string(track.name), "kind": .string(track.kind.rawValue),
                     "mute": .bool(track.mute), "solo": .bool(track.solo), "selected": .bool(track.isSelected),
+                    // T-055 (REC-001, REC-020): arm, input pair, monitoring.
+                    "armed": .bool(track.armed), "inputPair": .int(Int64(track.inputPair)),
+                    "monitoring": .string(track.monitoring.rawValue),
                 ]
             }),
             "transport": [

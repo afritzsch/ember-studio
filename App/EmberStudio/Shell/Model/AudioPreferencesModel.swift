@@ -90,6 +90,15 @@ final class AudioPreferencesModel {
         return devices.map(\.inputChannels).max() ?? 0
     }
 
+    /// DW-200: input channel pairs a track can record from: the device's inputs, as many as the
+    /// engine captures (`inputChannels`, the device's first N), in pairs (an odd last channel
+    /// makes a pair of its own). 0 without a device.
+    var inputPairCount: UInt32 {
+        guard let config else { return 0 }
+        let channels = min(maxInputChannels, config.inputChannels)
+        return (channels + 1) / 2
+    }
+
     /// The counts the input-channel menu offers: powers of two up to the device's, the device's
     /// own count and whatever is set now.
     var inputChannelChoices: [UInt32] {

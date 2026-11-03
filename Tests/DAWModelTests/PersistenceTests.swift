@@ -46,6 +46,40 @@ private func eventually(timeout: Duration = .seconds(30), _ condition: () -> Boo
     return true
 }
 
+/// Parks the autosave file-operation queue on request (`ProjectStore.afterAutosaveIO`), so a test
+/// can act in the window after a file operation and before the store resumes (DW-148), without a
+/// clock (DW-172).
+private actor AutosaveIOGate {
+    private var armed = false
+    private var parked: CheckedContinuation<Void, Never>?
+    private var parkWaiters: [CheckedContinuation<Void, Never>] = []
+
+    /// The next file operation parks after its I/O until `release()`.
+    func arm() { armed = true }
+
+    /// The hook. Parks the operation that finds the gate armed; any other passes straight through.
+    func pass() async {
+        guard armed else { return }
+        armed = false
+        await withCheckedContinuation { continuation in
+            parked = continuation
+            for waiter in parkWaiters { waiter.resume() }
+            parkWaiters = []
+        }
+    }
+
+    /// Returns once an operation is parked.
+    func waitUntilParked() async {
+        if parked != nil { return }
+        await withCheckedContinuation { parkWaiters.append($0) }
+    }
+
+    func release() {
+        parked?.resume()
+        parked = nil
+    }
+}
+
 @Suite("Persistence (MODEL-040..046)")
 @MainActor
 struct PersistenceTests {
@@ -292,7 +326,8 @@ struct PersistenceTests {
 
     // MARK: MODEL-044
 
-    @Test("MODEL-044: an edit is autosaved after the debounce into autosave/; project.json is never touched")
+    @Test("MODEL-044: an edit is autosaved after the debounce into autosave/; project.json is never touched",
+          .timeLimit(.minutes(1)))
     func debouncedAutosave() async throws {
         let temp = try TempFolder("persist")
         defer { temp.remove() }
@@ -307,8 +342,11 @@ struct PersistenceTests {
         let main = try Data(contentsOf: folder.appending(path: "project.json"))
         let autosave = folder.appending(path: "autosave/project.json")
 
+        // DW-172: wait for the store's own autosave work (debounce, then the queued write), not a
+        // clock, so a loaded machine only makes it slower.
         try store.perform(AddTrack(name: "Unsaved", kind: .audio))
-        #expect(await eventually { exists(autosave) })
+        await store.autosaveIdle()
+        #expect(exists(autosave))
         #expect(try Data(contentsOf: folder.appending(path: "project.json")) == main, "never overwrites the main file")
         let saved = try ProjectFile.decode(Data(contentsOf: autosave)).project
         #expect(saved.tracks.map(\.name) == ["Synth", "Unsaved"])
@@ -317,22 +355,24 @@ struct PersistenceTests {
 
         // Back at the saved state, the autosave this store wrote goes away.
         store.undo()
-        #expect(await eventually { !exists(autosave) })
+        await store.autosaveIdle()
+        #expect(!exists(autosave))
 
         // A save removes it too.
         try store.perform(AddTrack(name: "Again", kind: .audio))
-        #expect(await eventually { exists(autosave) })
+        await store.autosaveIdle()
+        #expect(exists(autosave))
         try await store.save(to: nil)
         #expect(!exists(folder.appending(path: "autosave")))
     }
 
-    @Test("DW-148: an edit made while an autosave is being removed is still autosaved")
+    @Test("DW-148: an edit made while an autosave is being removed is still autosaved", .timeLimit(.minutes(1)))
     func editDuringAutosaveRemoval() async throws {
         // The race behind DW-148: back at the saved state, a debounced autosave removes autosave/
         // off the main actor. An edit performed after the file is gone but before that autosave
-        // resumes on the main actor must still get its own autosave. Polling with Task.yield
-        // checks the file between almost every main-actor job, so the edit often lands in that
-        // window.
+        // resumes on the main actor must still get its own autosave. The afterAutosaveIO hook
+        // parks the removal exactly there, so every round lands in the window, and the test waits
+        // on the store's own work (autosaveIdle), not on a clock (DW-172).
         let temp = try TempFolder("persist")
         defer { temp.remove() }
         let folder = temp.url.appending(path: "A.dawproject")
@@ -340,33 +380,34 @@ struct PersistenceTests {
         store.autosavePolicy = AutosavePolicy(interval: .seconds(3600), debounce: .zero)
         try await store.save(to: folder)
         let autosave = folder.appending(path: "autosave/project.json")
-        func poll(_ condition: () -> Bool) async -> Bool {
-            let deadline = ContinuousClock.now + .seconds(10)
-            while !condition() {
-                if ContinuousClock.now > deadline { return false }
-                await Task.yield()
-            }
-            return true
-        }
-        for round in 0..<200 {
+        let gate = AutosaveIOGate()
+        store.afterAutosaveIO = { await gate.pass() }
+        for round in 0..<10 {
             try store.perform(AddTrack(name: "t\(round)", kind: .audio))
-            #expect(await poll { exists(autosave) }, "round \(round): the edit is autosaved")
+            await store.autosaveIdle()
+            #expect(exists(autosave), "round \(round): the edit is autosaved")
+
+            await gate.arm()
             store.undo()
-            guard await poll({ !exists(autosave) }) else {
-                Issue.record("round \(round): back at the saved state, the autosave is removed")
-                return
-            }
-            try store.perform(AddTrack(name: "u\(round)", kind: .audio))  // right after the removal, before it resumes
-            guard await poll({ exists(autosave) }) else {
+            await gate.waitUntilParked()  // the removal is done; its autosave hasn't resumed yet
+            #expect(!exists(autosave), "round \(round): back at the saved state, the autosave is removed")
+            try store.perform(AddTrack(name: "u\(round)", kind: .audio))  // inside the window
+            await gate.release()
+            await store.autosaveIdle()
+            guard exists(autosave) else {
                 Issue.record("round \(round): an edit made while the autosave was removed is never autosaved")
                 return
             }
+            let autosaved = try ProjectFile.decode(Data(contentsOf: autosave)).project
+            #expect(autosaved.tracks.last?.name == "u\(round)")
+
             store.undo()
-            #expect(await poll { !exists(autosave) })
+            await store.autosaveIdle()
+            #expect(!exists(autosave), "round \(round): back at the saved state again")
         }
     }
 
-    @Test("DW-148: an edit made while a save runs still gets its debounced autosave")
+    @Test("DW-148: an edit made while a save runs still gets its debounced autosave", .timeLimit(.minutes(1)))
     func editDuringSave() async throws {
         let temp = try TempFolder("persist")
         defer { temp.remove() }
@@ -381,7 +422,8 @@ struct PersistenceTests {
             try store.perform(AddTrack(name: "during \(round)", kind: .audio))
             try await saving.value
             #expect(store.isDirty)
-            guard await eventually(timeout: .seconds(10), { exists(folder.appending(path: "autosave/project.json")) }) else {
+            await store.autosaveIdle()  // DW-172: the store's own work, not a clock
+            guard exists(folder.appending(path: "autosave/project.json")) else {
                 Issue.record("round \(round): the edit made while saving is never autosaved")
                 return
             }

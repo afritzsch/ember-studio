@@ -25,12 +25,32 @@ struct TrackHeaderModel: Identifiable {
     let mute: Bool
     let solo: Bool
     let isSelected: Bool
+    /// REC-001, REC-020 (T-055): armed for recording, the input pair it records, its monitoring.
+    let armed: Bool
+    let inputPair: UInt32
+    let monitoring: Track.Monitoring
     /// `track.<id>.mute`, `track.<id>.solo`, `track.<id>.select` (UI-052).
     let muteControl: UIControl
     let soloControl: UIControl
     let selectControl: UIControl
+    /// `track.<id>.arm` (ArmTrack), `track.<id>.monitor.<off|auto|on>` (SetMonitoring) and, audio
+    /// tracks only, `track.<id>.input.<pair>` (ArmTrack's `inputPair`); see `ProjectWindowModel`.
+    let armControl: UIControl
+    let monitorControls: [UIControl]
+    let inputControls: [UIControl]
 
-    var controls: [UIControl] { [selectControl, muteControl, soloControl] }
+    var controls: [UIControl] { [selectControl, armControl, muteControl, soloControl] + monitorControls + inputControls }
+
+    /// "In 1-2": the device channels an input pair records (1-based, as audio interfaces label them).
+    static func inputTitle(_ pair: UInt32) -> String { "In \(2 * pair + 1)-\(2 * pair + 2)" }
+
+    static func monitoringTitle(_ mode: Track.Monitoring) -> String {
+        switch mode {
+        case .off: "Off"
+        case .auto: "Auto"
+        case .on: "In"
+        }
+    }
 }
 
 /// UI-003: everything one project window shows, derived from its `ProjectStore` and engine. Views
@@ -102,6 +122,9 @@ final class ProjectWindowModel: Identifiable {
         // UI-004: device toasts name devices (also ones that are gone) and offer the audio settings.
         toasts.deviceName = { [weak self] id in self?.audioPrefs.name(of: id) }
         toasts.openAudioSettings = { [weak self] in self?.audioPrefs.isOpen = true }
+        // UI-004 (T-055): recording toasts name the track and say whether the take is in the project.
+        toasts.trackName = { [weak self] id in self?.project.track(id)?.name }
+        toasts.takeImported = { [weak self] take in self?.containsTake(take) ?? false }
     }
 
     var project: Project { store.project }
@@ -132,7 +155,8 @@ final class ProjectWindowModel: Identifiable {
         store.project.tracks.map { track in
             TrackHeaderModel(
                 id: track.id, name: track.name, kind: track.kind, mute: track.strip.mute, solo: track.strip.solo,
-                isSelected: selectedTracks.contains(track.id),
+                isSelected: selectedTracks.contains(track.id), armed: track.armed, inputPair: track.inputPair,
+                monitoring: track.monitoring,
                 muteControl: .toggle("track.\(track.id).mute", "Mute \(track.name)", isOn: track.strip.mute) { [weak self] in
                     self?.setStrip(track.id, .mute, on: !track.strip.mute)
                 },
@@ -141,8 +165,41 @@ final class ProjectWindowModel: Identifiable {
                 },
                 selectControl: .button("track.\(track.id).select", "Select \(track.name)") { [weak self] in
                     self?.selectedTracks = [track.id]
-                })
+                },
+                armControl: .toggle("track.\(track.id).arm", "Arm \(track.name) for Recording", isOn: track.armed) { [weak self] in
+                    self?.perform(ArmTrack(trackID: track.id, armed: !track.armed))
+                },
+                monitorControls: [Track.Monitoring.off, .auto, .on].map { mode in
+                    .toggle("track.\(track.id).monitor.\(mode.rawValue)", "Monitoring \(TrackHeaderModel.monitoringTitle(mode))",
+                            isOn: track.monitoring == mode) { [weak self] in
+                        guard track.monitoring != mode else { return }
+                        self?.perform(SetMonitoring(trackID: track.id, mode: mode))
+                    }
+                },
+                inputControls: track.kind == .audio ? inputPairs(including: track.inputPair).map { pair in
+                    .toggle("track.\(track.id).input.\(pair)", "Input \(TrackHeaderModel.inputTitle(pair))",
+                            isOn: track.inputPair == pair) { [weak self] in
+                        guard track.inputPair != pair else { return }
+                        self?.perform(ArmTrack(trackID: track.id, armed: track.armed, inputPair: pair))
+                    }
+                } : [])
         }
+    }
+
+    /// REC-004: the take's file is an asset of the project (the store imported it). Its path is
+    /// relative inside the project folder (`Audio/Recordings/…`), else absolute.
+    func containsTake(_ take: RecordedTake) -> Bool {
+        store.project.assets.contains { $0.path == take.file || take.file.hasSuffix("/" + $0.path) }
+    }
+
+    /// DW-200: the input pairs an audio track can record from: those the device's inputs (as many
+    /// as the audio settings capture) have, plus the track's own so it still shows. With no device
+    /// known (offline engine) only the track's own.
+    func inputPairs(including current: UInt32) -> [UInt32] {
+        let count = audioPrefs.inputPairCount
+        var pairs = Set((0..<min(count, Track.maxInputPair + 1)).map { $0 })
+        pairs.insert(current)
+        return pairs.sorted()
     }
 
     /// Tracks at least partly inside the arrange viewport (rows of `trackHeight`).
@@ -271,9 +328,11 @@ final class ProjectWindowModel: Identifiable {
 
     /// R: arms or disarms the transport's record state.
     func toggleRecord() {
-        guard let engine else { return }
+        guard let sync = store.engineSync else { return }
         let recording = !isRecording
-        engine.setRecording(recording)
+        // DW-198 (REC-002): through engine sync, which points the engine at the project's
+        // recordings folder (or its temporary one) before recording starts.
+        sync.setRecording(recording)
         request(recording: recording)
     }
 

@@ -90,7 +90,7 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 | T-052 | E | Audio recording: FIFOs, disk writer, latency comp, finalize, punch | REC-001..005 | T-050, T-009 | done |
 | T-053 | E | CoreMIDI input + MIDI recording | REC-010..012 | T-040 | ready |
 | T-054 | E | Input monitoring modes | REC-020..022 | T-052 | ready |
-| T-055 | U | Audio preferences, device toasts, arm/monitor buttons | UI-040, UI-004 | T-051, T-034 | wip(t-055-audio-prefs) |
+| T-055 | U | Audio preferences, device toasts, arm/monitor buttons | UI-040, UI-004 | T-051, T-034 | done |
 | T-056 | E+M | Session sample-rate change (re-convert assets, re-prepare) | IO-033, MODEL-005 (`SetSessionSampleRate`) | T-051 | done |
 
 ### M6 — Plugins
@@ -368,7 +368,7 @@ Recorded by the lead from worker reports.
 | DW-169 | lead (phase 2) | EACCES flakes in DAWControlTests ($TMPDIR dirs created without x bit): ControlSocketServer narrowed the process-wide umask while binding; app autosave could hit it too | B | done (T-023: no umask; chmod 0600 + lstat check before listen) |
 | DW-170 | T-045 | MIDI events dropped by a full `MidiDelayLine` are counted per line (`dropped()`) but not in Telemetry: add `midiEventsDropped` to `core/Telemetry` / `TelemetryPOD` / `engine.telemetry`, summed by `Engine::render` (additive 08 delta) | E+B | todo |
 | DW-171 | T-045 | Stale comment `Tests/DAWEngineTestSupport/MidiClipPlayerChecks.cpp:498` ("MIDI isn't routed yet…"); the player now writes into real storage | test (any) | done (T-044) |
-| DW-172 | lead (phase 3) | Wall-clock tests fail under 4-worker load in `scripts/test.sh`'s swift-test step (pass alone and in plain `swift test` runs): UI-010 perf smoke (`perFrame < 16 ms`, ArrangeModelTests:411), MODEL-044 autosave debounce (PersistenceTests:311), DW-148 autosave poll (PersistenceTests:353), CTL-031 progress pacing, DW-032 sync cost (SyncCostTests:113, T-044). Longer polls or deterministic clocks/hooks | M/U/B | todo; T-056: DW-148 fails ~1 in 4–5 DAWModelTests runs on the base commit too — fix first |
+| DW-172 | lead (phase 3) | Wall-clock tests fail under 4-worker load in `scripts/test.sh`'s swift-test step (pass alone and in plain `swift test` runs): UI-010 perf smoke (`perFrame < 16 ms`, ArrangeModelTests:411), MODEL-044 autosave debounce (PersistenceTests:311), DW-148 autosave poll (PersistenceTests:353), CTL-031 progress pacing, DW-032 sync cost (SyncCostTests:113, T-044). Longer polls or deterministic clocks/hooks | M/U/B | todo; T-056: DW-148 fails ~1 in 4–5 DAWModelTests runs on the base commit too — fix first; T-072 (phase 5): the autosave tests wait on the store (`autosaveIdle()`, `afterAutosaveIO` test seam; DW-148 deterministic), and MODEL-041 no longer blocks the main actor. Left: UI-010 perf smoke and CTL-031 under load, other main-actor stalls (DW-201) |
 | DW-173 | T-071 | DSP-041 names `NodeRegistry::paramInfo(NodeKind)`, but it doesn't exist; the facade's `paramInfoJSON` hard-codes kinds (strip, compressor, metronome, gain). Add `paramInfo` to `NodeKindInfo`/`NodeRegistry` and have `paramInfoJSON` read it | E | todo |
 | DW-174 | T-071 | Meters (strip post-fader, compressor GR) can't be read through the control protocol: `dawctl`/`dawmcp` have no meter method, only the facade's `meter(node)` / `EngineProtocol.meter`. Add one (13 delta); a typed GR reading could come with it | B | todo |
 | DW-175 | T-071 | `nodes/BuiltinNodes.h` doc comment lists the registered kinds but not `compressor` (one line) | D | done (T-073) |
@@ -394,6 +394,9 @@ Recorded by the lead from worker reports.
 | DW-195 | T-055 | 13's `ui.*` paragraph should list the `prefs.audio.*` control ids and `ui.state.windows[].audioPreferences` (documented in 12 *Audio preferences details*), like DW-188 | spec (lead) | todo |
 | DW-196 | T-072 | `ParamInfo` has no step/enum metadata: the delay's `note` (0…13, labels in `Delay::kNotes`) and its `sync`/`pingpong` switches reach the model/UI as linear floats. A `steps`/value-label field is an 06 Interfaces change | spec (user) + D/U | todo |
 | DW-197 | T-072 | The `locate_reset` golden could use a real delay/reverb tail now (DW-162 is covered at unit level) | D (T-077) | todo |
-| DW-198 | T-052 | `ProjectWindowModel` calls `engine.setRecording` directly; it should go through `store.engineSync?.setRecording(_:)` so takes of an unsaved project land in the per-project temp folder | U (T-055) | todo |
+| DW-198 | T-052 | `ProjectWindowModel` calls `engine.setRecording` directly; it should go through `store.engineSync?.setRecording(_:)` so takes of an unsaved project land in the per-project temp folder | U (T-055) | done (T-055) |
 | DW-199 | T-052 | `Project.validate()` doesn't check `Track.inputPair ≤ 15` (ArmTrack refuses it, a hand-edited project.json isn't checked; the engine clamps) | M | todo |
-| DW-200 | T-052 | An input pair beyond the device's input channels records silence with no warning; the UI should offer only existing pairs | U (T-055) / E | todo |
+| DW-200 | T-052 | An input pair beyond the device's input channels records silence with no warning; the UI should offer only existing pairs | U (T-055) / E | done (T-055) |
+| DW-201 | T-072 | DAWModelTests' `@MainActor` tests still finish together (8–15 s): something else synchronous holds the main actor; candidates are the real-engine tests calling the blocking `EngineClient.waitForGraph` on it. Confirm with a per-test timing pass or `sample` | M/B | todo |
+| DW-202 | T-055 | Mixer channel strips (UI-030) need the same arm/monitor/input controls (logic in `TrackHeaderModel`, reusable) | U (T-076) | todo |
+| DW-203 | T-055 | `ProjectStore.connectRecording` only logs a take it couldn't import; the app infers it from the project's assets (`ProjectWindowModel.containsTake`). An import-result callback/event would be more direct | M | todo |

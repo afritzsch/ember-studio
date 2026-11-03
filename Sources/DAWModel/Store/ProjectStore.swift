@@ -55,6 +55,10 @@ public final class ProjectStore {
     @ObservationIgnored private var lastWrite: Task<Void, Never>?
     @ObservationIgnored private var autosaveTimer: Task<Void, Never>?
     @ObservationIgnored private var autosaveDebounce: Task<Void, Never>?
+    /// Test-only seam (DW-148, DW-172): awaited on the file-operation queue right after each
+    /// autosave write or removal, before the store's own continuation resumes on the main actor.
+    /// A test parks it to act inside that window. Nil, as always outside tests, changes nothing.
+    @ObservationIgnored var afterAutosaveIO: (@Sendable () async -> Void)?
 
     @ObservationIgnored private var subscribers: [Int: AsyncStream<ProjectChange>.Continuation] = [:]
     @ObservationIgnored private var nextSubscriber = 0
@@ -345,7 +349,7 @@ public final class ProjectStore {
         autosaveTicket &+= 1
         let ticket = autosaveTicket
         do {
-            try await serialized(body)
+            try await serialized(body, after: afterAutosaveIO)
         } catch {
             if ticket == autosaveTicket { onFailure(self) }
             throw error
@@ -375,17 +379,34 @@ public final class ProjectStore {
     }
 
     /// Runs file I/O off the main actor, one write after another (a save and an autosave never
-    /// interleave, and an autosave never lands after the save that made it stale).
+    /// interleave, and an autosave never lands after the save that made it stale). `after` runs on
+    /// the queue once `body` is done, before the next operation starts (`afterAutosaveIO`).
     private func serialized<T: Sendable>(
-        _ body: @escaping @Sendable () throws(DAWError) -> T
+        _ body: @escaping @Sendable () throws(DAWError) -> T,
+        after: (@Sendable () async -> Void)? = nil
     ) async throws(DAWError) -> T {
         let previous = lastWrite
         let task = Task.detached { () async -> Result<T, DAWError> in
             await previous?.value
-            return Result { () throws(DAWError) -> T in try body() }
+            let result = Result { () throws(DAWError) -> T in try body() }
+            if let after { await after() }
+            return result
         }
         lastWrite = Task { _ = await task.value }
         return try await task.value.get()
+    }
+
+    /// Test-only (DW-148, DW-172): returns once no debounced autosave is pending and every queued
+    /// file operation has finished, including any that those started. It awaits the store's own
+    /// work instead of a clock, so load only makes it slower. The periodic timer isn't awaited.
+    func autosaveIdle() async {
+        while true {
+            let debounce = autosaveDebounce
+            let write = lastWrite
+            await debounce?.value
+            await write?.value
+            if debounce == autosaveDebounce && write == lastWrite { return }
+        }
     }
 
     /// MODEL-044: the periodic autosave, while the project has a folder and a policy.
