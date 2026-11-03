@@ -588,7 +588,7 @@ CheckResult facadePlaysAssetThroughBuiltinNodes() {
     DAW_CHECK(info.find("\"id\":\"pan\"") != std::string::npos);
     DAW_CHECK(info.find("\"index\":2,\"id\":\"mute\"") != std::string::npos);    // T-020
     DAW_CHECK(info.find("\"index\":3,\"id\":\"phase\"") != std::string::npos);
-    DAW_CHECK(facade.paramInfoJSON(NodeKind::reverb) == "[]");
+    DAW_CHECK(facade.paramInfoJSON(NodeKind::audioClipPlayer) == "[]");  // no params (reverb publishes since T-073)
     return checks;
 }
 
