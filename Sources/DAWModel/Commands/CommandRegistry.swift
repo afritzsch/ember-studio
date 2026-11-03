@@ -57,6 +57,9 @@ public enum CommandRegistry {
         // T-056: session sample rate (MODEL-005, DW-126; outside undo history)
         SetSessionSampleRate.self,
         RestoreSessionSampleRate.self,
+        // T-052: arming and monitoring (MODEL-005, REC-001/020; outside undo history)
+        ArmTrack.self,
+        SetMonitoring.self,
     ]
 
     private static let table = Mutex<[String: any Command.Type]>(

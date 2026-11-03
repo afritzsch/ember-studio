@@ -40,6 +40,18 @@
 - Facade: `armInput`, `setRecording`, event `recordingFinalized` (08).
 - Model types: `TakeFolder`, `Take`, `CompSegment` (Codable, persisted in `Track.takeFolders`).
 
+### Contract delta (T-052), accepted (autobuild, see docs/autobuild/DECISIONS.md "T-052 contract", "T-052 undo")
+Facade additions are in 08 (same heading). Model side:
+- `Track.inputPair: UInt32` (0…15, channels 2·pair and 2·pair + 1), decoded with a default of 0, so projects saved before it open unchanged.
+- Commands (07, MODEL-005): `ArmTrack {trackID, armed, inputPair?}` (`inputPair` left out keeps the track's) and `SetMonitoring {trackID, mode: off|on|auto}`. Both are **history-exempt** (persisted, mark the project dirty, never in undo history, refused inside a composite), like `SetMetronome`. `SetMonitoring` only stores the mode; what it does is REC-020/021 (T-054).
+- `EngineSync` turns the armed audio tracks into `armInput` calls (each change of arm state or input pair; a removed armed track is disarmed; MIDI tracks' arming is T-053). `EngineSync.setRecording(_:)` pushes the recordings folder first; use it instead of `engine.setRecording`.
+
+Clarifications:
+- *Folder (REC-002).* Takes go to `<project folder>/Audio/Recordings/`. A project without a folder records into `$TMPDIR/EmberStudio-Recordings/<project UUID>-<pid>/` and refers to the files by absolute path; saving copies them into `Audio/` (DW-124). Files are named `Track <id> Take <n>.caf`, with the first unused `n`. A partly written take (writer error) is deleted; a take with drops is kept with silence in the gaps.
+- *Placement (REC-003, REC-004).* Clips start on ticks. The clip starts at the first tick at or after `startSample`, with `sourceOffsetSamples` skipping the frames before it, so file frame k still plays at sample `startSample + k` exactly. A take starting before 0 starts at tick 0 with its first frames skipped. A take recorded at another session rate is placed scaled to the current one.
+- *Import (REC-004).* `ProjectStore` imports each `recordingFinalized` take when the events are polled (`RecordingImport`, `importRecording`): the engine loads the file under the next model ID, then `CompositeCommand("Record", [ImportAsset, AddClip])` is performed as one undo step. Undo leaves the file on disk.
+- *Punch (REC-005).* The range is transport state (not in the project), set through `transport.setPunch` (13). The loop disables it (REC-030 takes are T-080).
+
 ## Status
 | ID | status | test |
 |---|---|---|

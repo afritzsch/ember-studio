@@ -164,6 +164,14 @@ public struct TransportRecordParams: Codable, Hashable, Sendable {
     public var enabled: Bool
 }
 
+/// REC-005 (T-052): the punch range. `enabled: true` needs `start < end`; `enabled: false` keeps
+/// the range (or sets it, when given) for later. Not part of the project (transport state).
+public struct TransportSetPunchParams: Codable, Hashable, Sendable {
+    public var enabled: Bool
+    public var start: Tick?
+    public var end: Tick?
+}
+
 /// T-026 (TIME-010): performs `SetMetronome` (outside undo history). Fields left out keep their
 /// value; at least one is needed.
 public struct TransportSetMetronomeParams: Codable, Hashable, Sendable {

@@ -513,8 +513,8 @@ public:
     void setRecordingDirectory(const std::string& directory);
     std::string recordingDirectory() const;
     // REC-005: with `enabled` and the loop off, only [in, out) of the timeline is recorded.
-    // Ignored (kept) while disabled; invalidArgument-like requests (in >= out while enabled) are
-    // ignored too, keeping the range as it was.
+    // Disabling keeps the range (or stores [in, out) for later when in < out). An enabled request
+    // with in < 0 or in >= out is ignored, leaving punch as it was.
     void setPunch(bool enabled, Tick in, Tick out);
 
     // MARK: Offline (IO-010..013, DW-057)

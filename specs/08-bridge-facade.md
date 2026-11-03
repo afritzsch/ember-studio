@@ -172,6 +172,29 @@ Swift (`EngineProtocol.swift`, in its own block at the end): `AssetsReload`, `En
 
 Affected: T-056 only. T-055 (device toasts) may read `reload`; the app's `ToastCenter` already shows `assetsReloaded` only when it carries an error.
 
+### Contract delta (T-052), accepted (autobuild, see docs/autobuild/DECISIONS.md "T-052 contract")
+09's REC-001..005 need a recordings folder, a punch range, the take on `recordingFinalized`, and drop and latency telemetry. Everything is **additive and defaulted**: `recordingFinalized` already was an `EngineEventType` case, `armInput` and `setRecording` keep their signatures, and no existing field changes meaning.
+```cpp
+struct RecordingPOD {               // EngineEventPOD gains:  RecordingPOD recording;
+  NodeID track; std::string file;   // absolute path of the 32-bit float CAF
+  int64_t startSample, frames;      // timeline sample of frame 0 (latency-compensated, may be < 0)
+  uint32_t takeIndex = 0, channels = 2; double sampleRate; uint32_t inputPair; uint64_t droppedFrames;
+};
+// TransportPOD gains:  bool punchEnabled; Tick punchIn, punchOut;
+// TelemetryPOD gains:  uint64_t recordDrops; uint32_t deviceInputLatency; uint32_t armedTracks;
+void setRecordingDirectory(const std::string& directory);  // "" = $TMPDIR/EmberStudio-Recordings-<pid>
+std::string recordingDirectory() const;
+void setPunch(bool enabled, Tick in, Tick out);
+```
+- **Takes.** A take records while the transport plays with `setRecording(true)` and some track is armed, in realtime mode with a driver (offline engines have no input). It ends on `stop()`, `setRecording(false)`, a `locate()` while it runs, an `armInput` change, `renderOffline`, a device change (IO-021 (2), DW-119: finalized, not only disarmed) and destruction. Each armed track then gets one `recordingFinalized` event: `subject` = track, `count` = dropped frames, `recording` as above. `error` is set when frames were dropped (`io`, the file is usable, gaps are silence) or the file couldn't be written (`file` empty).
+- **Latency (REC-003).** `startSample` = the transport sample the first captured frame was taken at, minus the running device's input + output latency (IO-005). Facade-internal: `DriverAdapter::latency()` (default zeros; CoreAudio and fake adapters report the running device), refreshed after every driver start.
+- **Punch (REC-005).** `setPunch` with `enabled` and `in < out` (`in ≥ 0`) records only `[in, out)` while the loop is off. Disabling keeps the range, or stores a non-empty one passed with it. An enabled empty or negative range is ignored. Not persisted; `transport()` reports it.
+- **IO seam (04, additive).** `DriverConfig::capture` (`InputCapture*`, `io/InputCapture.h`): `DeviceRenderer` hands it each block's input after `Engine::render`, on the audio thread (`DAW_RT`). The facade points it at its `Recorder` (`record/`).
+
+Swift (`EngineProtocol.swift`): `RecordedTake` and `EngineEvent.recording`, `TransportState.punchEnabled/punchIn/punchOut`, `EngineTelemetry.recordDrops/deviceInputLatency/armedTracks`, and the requirements `setPunch(enabled:start:end:)` and `setRecordingDirectory(_:)`, with default no-ops in a protocol extension so other conformers compile unchanged. `FakeEngine` records both and counts armed tracks; tests post `recordingFinalized` themselves.
+
+Affected: T-052. T-055 (arm/monitor buttons) uses `ArmTrack`/`SetMonitoring` and `EngineSync.setRecording`; T-054 (monitoring) and T-080 (loop takes, `takeIndex`) build on it. No other task's calls change. Tests: `RecordingTests` (DAWEngineTests, six checks incl. a loopback ±1 sample and device-loss finalize), golden `record_loopback_alignment`.
+
 ## Status
 | ID | status | test |
 |---|---|---|
