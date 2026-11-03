@@ -1,37 +1,38 @@
-You are AUTOBUILD phase lead 4. You run in the main checkout /Users/artem/dev/macDAW on branch main. Read CLAUDE.md, then `.claude/skills/autobuild/SKILL.md` (Phase lead), then follow "Orchestrating with Patchbay" in specs/90-tasks.md with the skill's overrides. Use the Patchbay MCP tools for workers, never the Agent tool. The run log is `docs/autobuild/RUN.md` and the decisions taken without the user are in `docs/autobuild/DECISIONS.md`.
+You are AUTOBUILD phase lead 5. You run in the main checkout /Users/artem/dev/macDAW on branch main. Read CLAUDE.md, then `.claude/skills/autobuild/SKILL.md` (Phase lead), then follow "Orchestrating with Patchbay" in specs/90-tasks.md with the skill's overrides. Use the Patchbay MCP tools for workers, never the Agent tool. The run log is `docs/autobuild/RUN.md` and the decisions taken without the user are in `docs/autobuild/DECISIONS.md`.
 
-## State at handoff (2026-11-03, end of autobuild phase 3; main @ the "Autobuild phase 3: handover" commit, pushed; clean; no worker sessions running)
-- Phase 3 merged all four wave tasks:
-  - **T-045** MIDI edge routing (DW-099; DSP-003, MIX-001, MIX-021 for MIDI): fixed-capacity per-graph MIDI storage, a k-way stable merge, `MidiDelayLine` PDC with carry-over (05 "MIDI routing"). A MIDI track with a sampler is audible: an A5 note renders at 880 Hz through the model and dawctl.
-  - **T-071** compressor (DSP-031, DSP-040/041 for it): sidechain key, GR meter on the per-node meter path (autobuild decision), golden `sidechain_compressor`. MIX-008 is done.
-  - **T-026** project metronome (TIME-010 project part, DW-160): `SetMetronome` (persisted, marks dirty, outside undo history via `HistoryExemptCommand`), one metronome node straight into the master, `transport.setMetronome` + `daw_transport_set_metronome`, `render.offline {includeMetronome}` (default off), Metronome/GainNode ParamInfo.
-  - **T-034** toolbar, transport and keyboard (UI-002, DW-165): one dispatch path (`KeyBindings.all` → `UIControl`), menus, the `transport.metronome` toggle, ui.state `toolbar`/`keyBindings`.
-- Done & merged (44): T-001..T-026, T-030..T-036, T-040..T-042, T-045, T-050, T-051, T-060, T-071, T-085..T-087.
+## State at handoff (2026-11-03, end of autobuild phase 4; main @ the "Autobuild phase 4: handover" commit, pushed; clean; no worker sessions running)
+- Phase 4 merged all four wave tasks. **M4 (MIDI & Sampler) is complete.**
+  - **T-044** M4 goldens: `sampler_pitch`, `midi_loop_wrap`, `midi_locate_no_stuck_notes` (per-sample oracle from 06), and `midi_tempo` through EngineClient (`MidiTempoEngineTests`, DW-096 for MIDI). Test-only.
+  - **T-073** reverb (DSP-033): 8-line FDN with Hadamard mixing, deterministic float math, silence snaps to exact 0; golden `reverb_determinism` (two fresh engines, bit-identical). ParamInfo via `paramInfoJSON`.
+  - **T-056** session-rate change (IO-033, `SetSessionSampleRate`): the facade's `AssetReloader` re-converts assets on `daw.loader` with `reload` progress on `assetsReloaded` events; play is refused while a pass runs, exports wait (≤ 600 s). `SetSessionSampleRate` is history-exempt and rescales clip offsets/zone loops; the document follows engine-side rate changes (DW-130). `loadAsset` takes a peak-cache dir (DW-077). Contract deltas in 08 and 13.
+  - **T-043** piano roll (UI-020) + audition (UI-021): `previewNote(source, pitch, velocity, on)` into the track's MIDI clip player through a lock-free `MidiPreviewInbox`; releaseAll on stop/locate/offline. Open with double-click, right-click → Open in Piano Roll, or `P`. Arrange now drops peaks once per rate-change pass.
+- Done & merged (48): T-001..T-026, T-030..T-036, T-040..T-045, T-050, T-051, T-056, T-060, T-071, T-073, T-085..T-087.
 - No `wip` tasks.
-- **Ready (9):** T-043 piano roll (U, M4), T-044 M4 goldens (D, newly ready), T-055 audio preferences + device toasts (U, M5, newly ready), T-056 session-rate change (E+M, M5), T-070 EQ, T-072 delay, T-073 reverb (D, M7), T-076 mixer view (U), T-082 export dialog (U).
-- Discovered work runs DW-001..DW-181. New this phase: DW-170..181.
-- `scripts/test.sh` is 11/11 on main, and timed `swift test` was green 2× after the last merge.
-- Phase 3 week usage: 23% → 33%.
+- **Ready (13):** T-052 audio recording (E, M5), T-053 CoreMIDI + MIDI recording (E, M5), T-055 audio preferences + device toasts (U, M5), T-061 AU hosting (P, M6), T-062 VST3 hosting (P, M6), T-070 EQ (D, M7), T-072 delay (D, M7), T-076 mixer view (U), T-082 export dialog (U).
+  - T-052, T-053, T-061 and T-062 were left `todo` by earlier leads although all their dependencies were done; phase 4 marked them `ready`.
+- Discovered work runs DW-001..DW-191. New this phase: DW-182..191 (T-056: rate-change golden, rate UI, a blocking control wait, restore JSON keys, rejected-graph-at-new-rate; T-043: two spec-text items, headless `engine.previewNote`, preview retrigger on graph rebuild, piano-roll perf + per-asset peak refresh). DW-172 now notes that DW-148 also fails ~1 in 4–5 runs on base: fix it first.
+- `scripts/test.sh` on the last trial merge was 10/11 (only the DW-172 flakes DW-148 and CTL-031 in the swift-test step); plain `swift test` was green after every merge.
+- Phase 4 week usage: 34% → 49%.
 
 ## Suggested next wave
-Earliest milestone first; M4 can close this phase.
-- **T-044** (D, M4): M4 goldens. `sampler_pitch` (DW-139, now unblocked), `midi_loop_wrap` (DW-101), `midi_tempo` through EngineClient (DW-096). Files: Tests/GoldenTests/** and fixtures; no engine edits expected.
-- **T-043** (U, M4): piano roll + velocity lane + audition. It needs a `previewNote` facade addition (08 Interfaces). Pre-decide it in the briefing as an additive, defaulted `EngineProtocol` method, like T-033's `peaks`, so the worker doesn't stop. It may touch facade + DAWModel/Engine besides App/.
-- **T-056** (E+M, M5): session sample-rate change (IO-033 re-convert assets, re-prepare; `SetSessionSampleRate`). It touches io/, facade and DAWModel: tell T-043 which facade lines are whose (both add-only).
-- **T-073** (D, M7): reverb (FDN, deterministic). It's the same lane as T-044, but the files are disjoint (new nodes/Reverb.*, dsp/**, a BuiltinNodes.cpp line, a `paramInfoJSON` line). It unblocks DW-162 (a real tail in `locate_reset`) and moves T-077 forward.
-- T-055 (U, M5) is also ready but shares App/ with T-043; run it after T-043 or give the two disjoint folders.
-- Small cleanups worth folding into a worker that finishes early: DW-171 (one stale comment), DW-175 (one doc line), DW-172 (wall-clock test flakes under load).
+Critical path / earliest milestone first (M5 recording, then M6 plugins):
+- **T-052** (E, M5): audio recording. The core of M5; T-054 and T-080 depend on it.
+- **T-061** (P, M6): AU hosting. Unblocks T-063/T-064/T-074 (automation, AUTO-009). T-062 (VST3, P) is the same lane; run one P task per wave or give them disjoint folders.
+- **T-055** (U, M5): audio preferences + device toasts. Can also take DW-183 (session-rate UI + progress).
+- **T-070** or **T-072** (D, M7): EQ or delay. T-072 also lets `routing` (DW-096) and DW-162 move; both are needed for T-077 with T-074.
+- Small items worth folding into a worker that finishes early: DW-172/DW-148 (autosave poll flake, the most frequent), DW-187/188 (spec text), DW-189 (headless previewNote).
 
 ## Decisions taken this phase (see docs/autobuild/DECISIONS.md)
-- T-026 Q1: an export leaves the click out unless `includeMetronome: true` (pre-decided in the briefing).
-- T-026 Q2: `SetMetronome` is persisted and marks the project dirty, but doesn't enter undo history.
-- T-071: the GR meter reuses `MeterReading` (peak = deepest reduction as a linear factor in the block, rms = factor at the last frame); no Telemetry/facade change.
+- T-043: `previewNote` added to the facade (additive, defaulted protocol method), pre-decided in the briefing.
+- T-056: `SetSessionSampleRate` is history-exempt (like `SetMetronome`) and also applied when the engine changes rate by itself (DW-130).
+- T-056: additive progress events / facade method pre-accepted; it shipped `reload` fields on `assetsReloaded` and `assetsReloadPending` in telemetry (no new event type).
+- Not logged as a user decision: T-073 changed one token in `Tests/DAWEngineTestSupport/FacadeChecks.cpp` and one in `EngineClientTests.swift` (their "kind with no params" checks used `reverb`, which now has params); accepted at review.
 
 ## Sessions only the user can close
-- In the sidebar: "macDAW" sessions (the conductor and an older "push to main" session). Phase lead 3 closed all its own workers.
+- In the sidebar: "macDAW" sessions (the conductor and an older "push to main" session). Phase lead 4 closed all its own workers.
 - Worktrees left on disk: removing them needs `--force` (submodules), which auto mode denies. All are merged or superseded:
-  - `~/.patchbay/worktrees/macDAW/t-025-m2-goldens`, `t-025-m2-goldens-r2`, `t-031-persistence`, `t-032-app-shell`, `t-032-app-shell-r2`, `t-035-crossfades`, `t-042-note-commands`, `t-023-sidechain`, `t-024-metronome`, `t-033-arrange-canvas`, `t-036-m3-goldens`;
-  - new this phase: `t-026-project-metronome`, `t-034-toolbar-transport`, `t-045-midi-routing`, `t-071-compressor`.
+  - `~/.patchbay/worktrees/macDAW/t-023-sidechain`, `t-024-metronome`, `t-025-m2-goldens`, `t-025-m2-goldens-r2`, `t-026-project-metronome`, `t-031-persistence`, `t-032-app-shell`, `t-032-app-shell-r2`, `t-033-arrange-canvas`, `t-034-toolbar-transport`, `t-035-crossfades`, `t-036-m3-goldens`, `t-042-note-commands`, `t-045-midi-routing`, `t-071-compressor`;
+  - new this phase: `t-043-piano-roll`, `t-044-m4-goldens`, `t-056-session-rate`, `t-073-reverb`.
   - Remove them with `git worktree remove --force <path>`, then `git branch -D <branch>`. The old remote WIP branches `origin/t-025-m2-goldens`, `t-031-persistence` and `t-032-app-shell` can be deleted too.
 
 ## Environment note: CoreAudio
@@ -91,7 +92,11 @@ Earliest milestone first; M4 can close this phase.
 - **Budget (phase 3):** the four workers reported within ~25 min; the 5-hour window went 19% → 85% in ~45 min with the lead reviewing. The rest of the phase (one worker follow-up) waited out a ~4 h reset. Merging in report order while others finish keeps the lead busy before the pause.
 - **`usage.sh` once returned a stale-looking reading mid-phase** (week 23 / five 21 between two readings of 30 / 68). Re-read before acting on a surprising number.
 - **Tell a finished worker that waits for its merge "queued, do nothing unless I message you"**, so it doesn't start extra work.
-
+- **Phase 4 pattern worked well:** merge in report order while the others finish; when a later branch shares files with merged ones (T-043 vs T-056 in the facade/Swift engine files), have its worker `git merge main` and resolve, instead of resolving yourself. It also took a small lane-local follow-up from another worker's discovered work (arrange peak invalidation).
+- **A test-only task can finish within ~20 min** (T-044); give the next one a small follow-up queue in the briefing so it doesn't sit idle.
+- **Check `todo` tasks whose deps are all done** when you pick a wave; phase 4 found four that should have been `ready` (T-052, T-053, T-061, T-062).
+- **Budget (phase 4):** the 5-hour window went 12% → 86% in ~45 min with four workers (paused ~4 h until the reset); the week went 34% → 49% for the whole phase. One 4-worker phase costs ~15 week-%.
+- **`list_sessions` output is huge** (it echoes each worker's whole briefing). Prefer `wait_for(session, timeout: 5)` per worker to check status.
 
 ## Open questions for the user (not yet answered)
 - DW-061: on a tempo edit, should the playhead keep its sample position (current behaviour) or its tick position (recommended; what most DAWs do)?
@@ -112,11 +117,12 @@ Earliest milestone first; M4 can close this phase.
   - Review the three phase-3 decisions in `docs/autobuild/DECISIONS.md` (T-026's export click and undo; T-071's GR-meter encoding). T-026's two questions are answered there.
   - T-034: the NSEvent → KeyMonitor path has no automated test (posting key events needs Accessibility). A manual check in the app: Space, R, L, ⌘E, ⌫, ⌘T.
   - T-034 UX choices: arrow keys for `clip.nudge.*` (KeyChord drops function keys today); editable tempo/signature in the toolbar.
-
+- New in autobuild phase 4:
+  - Review the three phase-4 decisions in `docs/autobuild/DECISIONS.md` (T-043 `previewNote`; T-056 undo + DW-130; T-056 additive events).
+  - T-043 UX choices: open the piano roll with double-click / right-click / `P`; quantize strength is a preset menu (25/50/75/100 %), because a raw Slider isn't `ui.perform`-able (UI-052).
+  - T-056: `play()` is refused (not deferred) while assets re-convert; an export waits up to 600 s.
 
 ## Your first job
-1. Run `usage.sh`, then `list_sessions`.
-2. Pick the wave (see *Suggested next wave*), mark the tasks `wip(...)`, commit, and start the workers with the briefing template (`.git/autobuild/common.txt`).
-   - Add to every briefing: the other workers' files ("do NOT touch"), the add-only shared files, the untracked REPORT.md, "Questions for the lead" instead of waiting for the user, "verify new commands/engine changes with a freshly built dawctl/dawmcp", and "run swift test / scripts/test.sh under `.git/autobuild/tmo.sh`".
-   - Pre-decide likely Interfaces additions (T-043's `previewNote`) in the briefing and log them in DECISIONS.md.
+1. Run `usage.sh`. If `week ≥ 50`, don't start a phase: write the stop handover (skill *Stop the run*).
+2. Otherwise `list_sessions`, pick the wave (see *Suggested next wave*), mark it `wip(...)`, commit, and start the workers with `.git/autobuild/common.txt` (edit `watch.sh`'s glob for your tasks).
 3. Follow the skill: review, trial merge, timed tests, merge, close each worker, then hand over and push.

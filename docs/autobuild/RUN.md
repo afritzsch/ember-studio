@@ -7,6 +7,7 @@ Unattended phases started by `/autobuild` (see `.claude/skills/autobuild/SKILL.m
 | 1 | T-032, T-025, T-042, T-035 | all 4 (T-035, T-025, T-042, T-032) | 0 → 10 | Resumed T-025/T-032 on `-r2` branches; one 5-hour pause (~27 min); DW-148 autosave race fixed; T-045 added |
 | 2 | T-023, T-024, T-033, T-036 | all 4 (T-024, T-036, T-033, T-023) | 10 → 23 | 4 h stall: the lead's trial-merge `swift test` hung (DW-168, fixed) through a ~4 h 5-hour-window reset; EACCES flakes fixed (DW-169); `render.offline {loop}` and a facade `peaks` query added; T-026 added |
 | 3 | T-045, T-071, T-026, T-034 | all 4 (T-045, T-071, T-026, T-034) | 23 → 33 | MIDI edges audible (A5 at 880 Hz), compressor + `sidechain_compressor` golden, project metronome (export excludes the click; not undoable), toolbar/shortcuts; one 5-hour pause (~4 h, only T-034's follow-up waited); load flakes logged (DW-172) |
+| 4 | T-044, T-073, T-056, T-043 | all 4 (T-044, T-073, T-056, T-043) | 34 → 49 | M4 complete (M4 goldens, piano roll + previewNote); reverb + `reverb_determinism`; session-rate change with asset re-conversion; one 5-hour pause (~4 h); T-052/053/061/062 found `ready` |
 
 ## Phase notes
 
@@ -45,3 +46,10 @@ Unattended phases started by `/autobuild` (see `.claude/skills/autobuild/SKILL.m
 - Wave: T-044 M4 goldens (D, test-only), T-043 piano roll + audition (U, M4; `previewNote` pre-decided), T-056 session-rate change (E+M, M5; undo/events pre-decided), T-073 reverb (D, M7; new files only, disjoint from T-044).
 - Start: week 34%, five-hour window 12%.
 - Pre-decisions in DECISIONS.md: T-043 `previewNote` facade addition; T-056 `SetSessionSampleRate` history-exempt and follows engine-side rate changes (DW-130); T-056 additive progress events pre-accepted.
+- T-044 merged (6c3a229): test.sh failed only on DW-172 load flakes; plain swift test green. Worker closed.
+- 5-hour window hit 86% at 1793695307 (epoch), ~45 min into the phase. T-043 and T-073 paused (T-056 had just reported); sleeping until the reset at 1793710800 + 120 s.
+- Resumed T-043, T-073, T-056 at 1793711078 (five-hour window 0%).
+- T-073 merged (540ad43): test.sh 11/11, swift test green. The worker fixed EngineClientTests' reverb param check after merging main.
+- T-056 merged (56b793c): module.modulemap add-only conflict kept both sides; test.sh 11/11, swift test green.
+- T-043 merged (4a35541) after its worker merged main (T-056 conflicts in shared files, kept both) and fixed the arrange peak invalidation (one drop per pass). Marked T-052, T-053, T-061, T-062 `ready` (all deps were done).
+- End: 4/4 merged, M4 complete, main green (plain swift test green after every merge; test.sh failed only on DW-172 flakes), week 49%, no worker session left open.

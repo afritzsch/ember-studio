@@ -87,8 +87,8 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 |---|---|---|---|---|---|
 | T-050 | E | FakeDeviceDriver (loopback, scripted events) | TEST-005 | T-011 | done |
 | T-051 | E | DeviceMonitor, hot-swap sequence, xrun detection, EngineEvents | IO-020..023 | T-050 | done |
-| T-052 | E | Audio recording: FIFOs, disk writer, latency comp, finalize, punch | REC-001..005 | T-050, T-009 | todo |
-| T-053 | E | CoreMIDI input + MIDI recording | REC-010..012 | T-040 | todo |
+| T-052 | E | Audio recording: FIFOs, disk writer, latency comp, finalize, punch | REC-001..005 | T-050, T-009 | ready |
+| T-053 | E | CoreMIDI input + MIDI recording | REC-010..012 | T-040 | ready |
 | T-054 | E | Input monitoring modes | REC-020..022 | T-052 | todo |
 | T-055 | U | Audio preferences, device toasts, arm/monitor buttons | UI-040, UI-004 | T-051, T-034 | ready |
 | T-056 | E+M | Session sample-rate change (re-convert assets, re-prepare) | IO-033, MODEL-005 (`SetSessionSampleRate`) | T-051 | done |
@@ -97,8 +97,8 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 | Task | Lane | Title | Requirements | Depends on | Status |
 |---|---|---|---|---|---|
 | T-060 | P | PluginScanner + cache + blocklist | PLUG-001..004 | T-001 | done |
-| T-061 | P | AU hosting node (FX + instrument), params, state, latency | PLUG-010, 012..016 (AU) | T-021, T-014 | todo |
-| T-062 | P | VST3 hosting node + build SDK `again` test plugin | PLUG-011..016 (VST3) | T-021, T-014 | todo |
+| T-061 | P | AU hosting node (FX + instrument), params, state, latency | PLUG-010, 012..016 (AU) | T-021, T-014 | ready |
+| T-062 | P | VST3 hosting node + build SDK `again` test plugin | PLUG-011..016 (VST3) | T-021, T-014 | ready |
 | T-063 | P+U | Plugin editor windows (AU view controller, VST3 IPlugView) | PLUG-017 | T-061, T-062, T-032 | todo |
 | T-064 | P | Host bypass, NaN guard, crash marker + safe-mode open | PLUG-018, 020..022 | T-061 | todo |
 | T-065 | U | Device chain view (generic UI from ParamInfo), plugin manager | UI-032, UI-041 | T-063 | todo |
