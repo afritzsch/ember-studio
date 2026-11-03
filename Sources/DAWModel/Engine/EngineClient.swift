@@ -73,6 +73,12 @@ public final class EngineClient: EngineProtocol {
     public func setLoop(enabled: Bool, start: Tick, end: Tick) { facade.setLoop(enabled, start.raw, end.raw) }
     public func setRecording(_ recording: Bool) { facade.setRecording(recording) }
 
+    /// UI-021 (T-043): the facade takes the MIDI source node feeding the track's instrument, its
+    /// clip player (MODEL-020).
+    public func previewNote(track: ModelID, pitch: UInt8, velocity: UInt8, on: Bool) {
+        facade.previewNote(GraphNodeID.source(of: track), pitch, velocity, on)
+    }
+
     public func transport() -> TransportState {
         let t = facade.transport()
         return TransportState(sample: t.sample, tick: Tick(t.tick), playing: t.playing, recording: t.recording,

@@ -78,7 +78,7 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 | T-040 | D | MidiClipPlayer, hanging-note handling | DSP-003 | T-008, T-012 | done |
 | T-041 | D | Sampler (zones, Hermite, voices, ADSR, CC64, bend) | DSP-020..023 | T-040, T-010 | done |
 | T-042 | M | Note commands, instrument slot on MIDI tracks | MODEL-005 (note subset) | T-030 | done |
-| T-043 | U | Piano roll + velocity lane + audition (`previewNote` facade addition) | UI-020, 021 | T-033, T-042 | wip(t-043-piano-roll) |
+| T-043 | U | Piano roll + velocity lane + audition (`previewNote` facade addition) | UI-020, 021 | T-033, T-042 | done |
 | T-044 | D | M4 goldens | TEST (M4 set) | T-041, T-042, T-045 | done |
 | T-045 | E | MIDI edge routing in RenderGraph/GraphBuilder: player → instrument MIDI data, frame-ordered merge, fixed-capacity storage, MIDI delay for PDC; makes a MIDI track with a sampler audible | DW-099 (DSP-003, MIX-001, MIX-021 for MIDI) | T-040, T-041 | done |
 
@@ -368,7 +368,7 @@ Recorded by the lead from worker reports.
 | DW-169 | lead (phase 2) | EACCES flakes in DAWControlTests ($TMPDIR dirs created without x bit): ControlSocketServer narrowed the process-wide umask while binding; app autosave could hit it too | B | done (T-023: no umask; chmod 0600 + lstat check before listen) |
 | DW-170 | T-045 | MIDI events dropped by a full `MidiDelayLine` are counted per line (`dropped()`) but not in Telemetry: add `midiEventsDropped` to `core/Telemetry` / `TelemetryPOD` / `engine.telemetry`, summed by `Engine::render` (additive 08 delta) | E+B | todo |
 | DW-171 | T-045 | Stale comment `Tests/DAWEngineTestSupport/MidiClipPlayerChecks.cpp:498` ("MIDI isn't routed yet…"); the player now writes into real storage | test (any) | done (T-044) |
-| DW-172 | lead (phase 3) | Wall-clock tests fail under 4-worker load in `scripts/test.sh`'s swift-test step (pass alone and in plain `swift test` runs): UI-010 perf smoke (`perFrame < 16 ms`, ArrangeModelTests:411), MODEL-044 autosave debounce (PersistenceTests:311), DW-148 autosave poll (PersistenceTests:353), CTL-031 progress pacing, DW-032 sync cost (SyncCostTests:113, T-044). Longer polls or deterministic clocks/hooks | M/U/B | todo |
+| DW-172 | lead (phase 3) | Wall-clock tests fail under 4-worker load in `scripts/test.sh`'s swift-test step (pass alone and in plain `swift test` runs): UI-010 perf smoke (`perFrame < 16 ms`, ArrangeModelTests:411), MODEL-044 autosave debounce (PersistenceTests:311), DW-148 autosave poll (PersistenceTests:353), CTL-031 progress pacing, DW-032 sync cost (SyncCostTests:113, T-044). Longer polls or deterministic clocks/hooks | M/U/B | todo; T-056: DW-148 fails ~1 in 4–5 DAWModelTests runs on the base commit too — fix first |
 | DW-173 | T-071 | DSP-041 names `NodeRegistry::paramInfo(NodeKind)`, but it doesn't exist; the facade's `paramInfoJSON` hard-codes kinds (strip, compressor, metronome, gain). Add `paramInfo` to `NodeKindInfo`/`NodeRegistry` and have `paramInfoJSON` read it | E | todo |
 | DW-174 | T-071 | Meters (strip post-fader, compressor GR) can't be read through the control protocol: `dawctl`/`dawmcp` have no meter method, only the facade's `meter(node)` / `EngineProtocol.meter`. Add one (13 delta); a typed GR reading could come with it | B | todo |
 | DW-175 | T-071 | `nodes/BuiltinNodes.h` doc comment lists the registered kinds but not `compressor` (one line) | D | done (T-073) |
@@ -378,3 +378,13 @@ Recorded by the lead from worker reports.
 | DW-179 | T-034 | Arrow keys aren't bound to `clip.nudge.left|right|up|down`; `KeyChord` drops function keys today (UX choice) | U | todo |
 | DW-180 | T-034 | Toolbar tempo/signature are display only; editing them (`SetTempoEvent` / `SetTimeSignature`) from the toolbar is a possible follow-up | U | todo |
 | DW-181 | T-034 | The NSEvent → `KeyMonitor` path has no automated test (posting key events needs Accessibility); manual check in the app: Space, R, L, ⌘E, ⌫, ⌘T | U / user | todo |
+| DW-182 | T-056 | Golden for a session-rate change (CONV §5.4 gap; checks live in `SessionRateTests`/`SessionRateControlTests`); `GoldenEngine.swift` doesn't map the `reload` event or `assetsReloadPending` | D/test | todo |
+| DW-183 | T-056 | App has no UI to change the session rate or show re-conversion progress | U (T-055 or later) | todo |
+| DW-184 | T-056 | Control: a method or `wait` flag on `command.apply` that blocks until re-conversion finishes, with CTL-031 progress (today clients poll `engine.telemetry.assetsReloadPending`) | B | todo |
+| DW-185 | T-056 | `RestoreSessionSampleRate` JSON requires `clipOffsets`/`zoneLoops` even when empty (hand-written scripts must pass `[]`) | M (minor) | todo |
+| DW-186 | T-051/T-056 | If the latest graph description is rejected during a rate change, the old-rate graph keeps rendering until the next accepted description | E | todo |
+| DW-187 | T-043 | 06 MidiClipPlayer "Capacity": the writer reserve now includes held preview notes (`numActive + numPreviewOn + 2`) and the player merges `MidiPreviewInbox` events at frame 0 | spec (lead) | todo |
+| DW-188 | T-043 | 13 `ui.*` paragraph should list the `pianoRoll.*` control ids and `ui.state.windows[].pianoRoll` (documented in 12 *Piano roll details*) | spec (lead) | todo |
+| DW-189 | T-043 | Headless `engine.previewNote` in dawctl/dawmcp so agents can check instruments without the app (today only `ui.perform pianoRoll.key.<n>` in attach mode) | B | todo |
+| DW-190 | T-043 | A held preview note is cut and retriggered when its player is re-created (graph rebuild while a key is held); no hang | E (low) | todo |
+| DW-191 | T-043 | Piano roll 60 fps check with Instruments on a dense clip; per-asset peak refresh during a re-conversion pass (today waveforms update once at `finished`) | U | todo |

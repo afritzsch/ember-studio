@@ -26,8 +26,14 @@ struct ProjectWindowView: View {
             }
             if let pane = model.bottomPane {
                 Divider()
-                PanePlaceholder(title: pane.title, detail: "")
-                    .frame(height: 140)
+                if pane == .pianoRoll {
+                    // UI-020: the piano roll needs room for its keyboard and velocity lane.
+                    PianoRollPane(model: model.pianoRoll, controls: controls)
+                        .frame(height: 300)
+                } else {
+                    PanePlaceholder(title: pane.title, detail: "")
+                        .frame(height: 140)
+                }
             }
             Divider()
             BottomTabs(controls: controls)
@@ -238,6 +244,81 @@ private struct BottomTabs: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 4)
     }
+}
+
+/// UI-020: the piano roll pane: a bar with the tool, snap, quantize and transpose controls (all
+/// view-model controls, UI-052) over the AppKit canvas.
+private struct PianoRollPane: View {
+    let model: PianoRollModel
+    let controls: [String: UIControl]
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 6) {
+                Text(title).font(.caption.weight(.semibold)).lineLimit(1)
+                if model.isOpen {
+                    ForEach(PianoRollTool.allCases, id: \.self) { tool in
+                        if let control = controls["pianoRoll.tool.\(tool.rawValue)"] { ControlToggle(control: control, face: tool.title) }
+                    }
+                    Menu("Snap: \(model.snap.title)") {
+                        ForEach(SnapMode.allCases, id: \.self) { mode in
+                            if let control = controls["pianoRoll.snap.\(mode.rawValue)"] { ControlToggle(control: control, face: mode.title) }
+                        }
+                    }
+                    .fixedSize()
+                    .accessibilityIdentifier("pianoRoll.snap.menu")
+                    Divider().frame(height: 14)
+                    if let quantize = controls["pianoRoll.quantize"] { ControlButton(control: quantize) }
+                    Menu("Grid: \(model.quantizeGrid.title)") {
+                        ForEach(SnapMode.allCases.filter { $0 != .off }, id: \.self) { mode in
+                            if let control = controls["pianoRoll.quantize.grid.\(mode.rawValue)"] { ControlToggle(control: control, face: mode.title) }
+                        }
+                    }
+                    .fixedSize()
+                    .accessibilityIdentifier("pianoRoll.quantize.grid.menu")
+                    Menu("Strength: \(Int((model.quantizeStrength * 100).rounded()))%") {
+                        ForEach(PianoRollModel.strengthPresets, id: \.self) { percent in
+                            if let control = controls["pianoRoll.quantize.strength.\(percent)"] {
+                                ControlToggle(control: control, face: "\(percent)%")
+                            }
+                        }
+                    }
+                    .fixedSize()
+                    .accessibilityIdentifier("pianoRoll.quantize.strength.menu")
+                    Divider().frame(height: 14)
+                    if let down = controls["pianoRoll.transpose.down"] { ControlButton(control: down, systemImage: "arrow.down") }
+                    if let up = controls["pianoRoll.transpose.up"] { ControlButton(control: up, systemImage: "arrow.up") }
+                    if let audition = controls["pianoRoll.audition"] { ControlToggle(control: audition, face: "Audition") }
+                    Spacer()
+                    if let delete = controls["pianoRoll.delete"] { ControlButton(control: delete, systemImage: "trash") }
+                    if let close = controls["pianoRoll.close"] { ControlButton(control: close, systemImage: "xmark") }
+                } else {
+                    Spacer()
+                    if let open = controls["pianoRoll.open"] { ControlButton(control: open) }
+                }
+            }
+            .labelStyle(.iconOnly)
+            .controlSize(.small)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            Divider()
+            PianoRollCanvas(model: model)
+                .accessibilityIdentifier("pianoRoll.canvas")
+        }
+    }
+
+    private var title: String {
+        guard let clip = model.clip else { return "Piano Roll" }
+        return "\(model.track?.name ?? "MIDI") · \(clip.notes.count) notes"
+    }
+}
+
+/// UI-020: the AppKit piano roll in SwiftUI. The view model drives it; SwiftUI only places it.
+private struct PianoRollCanvas: NSViewRepresentable {
+    let model: PianoRollModel
+
+    func makeNSView(context: Context) -> PianoRollView { PianoRollView(model: model) }
+    func updateNSView(_ view: PianoRollView, context: Context) {}
 }
 
 private struct PanePlaceholder: View {

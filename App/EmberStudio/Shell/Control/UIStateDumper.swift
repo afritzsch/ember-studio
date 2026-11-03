@@ -76,6 +76,7 @@ enum UIStateDumper {
             "toasts": .array(window.toasts.toasts.map(dump)),
             "controls": .array(window.controls.map(dump)),
             "arrange": dump(window.arrange),
+            "pianoRoll": dump(window.pianoRoll),
         ]
     }
 
@@ -136,6 +137,63 @@ enum UIStateDumper {
                                               "height": .double($0.height)] } ?? .null,
             "gesture": arrange.activeGesture.map { .string($0) } ?? .null,
             "playhead": ["tick": .int(playhead.raw), "x": .double(g.x(playhead))],
+        ]
+    }
+
+    /// UI-020/021 (T-043): the piano roll: the open clip and its track, tool, snap, quantize and
+    /// audition settings, zoom and scroll, what is visible (pitches, ticks, notes with their view
+    /// rects and velocity stems), selection, marquee, the gesture in progress, the pitches being
+    /// auditioned, and the track's post-fader meter (so an audition can be heard through `ui.state`).
+    ///
+    ///     {"open", "clip", "track", "trackName", "clipStart", "clipLength", "noteCount", "tool", "snap",
+    ///      "quantize": {"grid", "strength"}, "audition", "pixelsPerBeat", "keyHeight", "scroll": {x, y},
+    ///      "size", "focused", "visiblePitches": {low, high} | null, "visibleTicks": {from, to},
+    ///      "visibleNotes": [{id, start, length, pitch, velocity, selected, rect, velocityY}],
+    ///      "selection", "marquee", "gesture", "sounding": [pitch], "auditionTrack",
+    ///      "trackMeter": {peak, rms} | null, "playhead": {tick, x}}
+    static func dump(_ roll: PianoRollModel) -> JSONValue {
+        let g = roll.geometry
+        let clip = roll.clip
+        let visible = g.visibleTicks
+        let meter = roll.trackID.flatMap { roll.window?.engine?.meter($0) }
+        let playhead = roll.playheadTick()
+        return [
+            "open": .bool(clip != nil),
+            "clip": clip.map { .int(Int64(bitPattern: $0.id)) } ?? .null,
+            "track": roll.trackID.map { .int(Int64(bitPattern: $0)) } ?? .null,
+            "trackName": roll.track.map { .string($0.name) } ?? .null,
+            "clipStart": clip.map { .int($0.start.raw) } ?? .null,
+            "clipLength": clip.map { .int($0.length.raw) } ?? .null,
+            "noteCount": .int(Int64(roll.notes.count)),
+            "tool": .string(roll.tool.rawValue),
+            "snap": .string(roll.snap.rawValue),
+            "quantize": ["grid": .string(roll.quantizeGrid.rawValue), "strength": .double(roll.quantizeStrength)],
+            "audition": .bool(roll.auditionNotes),
+            "pixelsPerBeat": .double(roll.pixelsPerBeat),
+            "keyHeight": .double(roll.keyHeight),
+            "scroll": ["x": .double(roll.scrollX), "y": .double(roll.scrollY)],
+            "size": ["width": .double(g.size.width), "height": .double(g.size.height)],
+            "focused": .bool(roll.hasKeyFocus),
+            "visiblePitches": g.visiblePitches.map { ["low": .int(Int64($0.lowerBound)), "high": .int(Int64($0.upperBound))] } ?? .null,
+            "visibleTicks": ["from": .int(visible.from), "to": .int(visible.to)],
+            "visibleNotes": .array(roll.visibleNotes.map { note -> JSONValue in
+                let r = g.rect(note)
+                return [
+                    "id": .int(Int64(bitPattern: note.id)), "start": .int(note.start.raw), "length": .int(note.length.raw),
+                    "pitch": .int(Int64(note.pitch)), "velocity": .int(Int64(note.velocity)),
+                    "selected": .bool(roll.selection.contains(note.id)),
+                    "rect": ["x": .double(r.minX), "y": .double(r.minY), "width": .double(r.width), "height": .double(r.height)],
+                    "velocityY": .double(g.velocityY(note.velocity)),
+                ]
+            }),
+            "selection": ids(roll.selectedNotes.map(\.id).sorted()),
+            "marquee": roll.marquee.map { ["x": .double($0.minX), "y": .double($0.minY), "width": .double($0.width),
+                                           "height": .double($0.height)] } ?? .null,
+            "gesture": roll.activeGesture.map { .string($0) } ?? .null,
+            "sounding": .array(roll.sounding.map { .int(Int64($0)) }),
+            "auditionTrack": roll.auditionTrack.map { .int(Int64(bitPattern: $0)) } ?? .null,
+            "trackMeter": meter.map { ["peak": .double(Double($0.peak)), "rms": .double(Double($0.rms))] } ?? .null,
+            "playhead": ["tick": .int(playhead.raw), "x": .double(g.x(playhead.raw))],
         ]
     }
 

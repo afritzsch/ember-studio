@@ -45,7 +45,10 @@ final class ProjectWindowModel: Identifiable {
     // Panes (12 Layout)
     var showsBrowser = true
     var showsInspector = true
-    var bottomPane: BottomPane? = .mixer
+    var bottomPane: BottomPane? = .mixer {
+        // UI-021: a hidden piano roll sounds nothing.
+        didSet { if bottomPane != .pianoRoll { pianoRoll.finishDrag() } }
+    }
 
     // Selection
     var selectedTracks: Set<NodeIDValue> = []
@@ -83,12 +86,15 @@ final class ProjectWindowModel: Identifiable {
 
     /// UI-010..014: the arrange canvas (snap, gestures, waveforms, playhead).
     let arrange = ArrangeModel()
+    /// UI-020/021: the piano roll (bottom pane) and its audition.
+    let pianoRoll = PianoRollModel()
 
     init(id: Int, store: ProjectStore, toasts: ToastCenter = ToastCenter()) {
         self.id = id
         self.store = store
         self.toasts = toasts
         arrange.window = self
+        pianoRoll.window = self
     }
 
     var project: Project { store.project }
@@ -100,6 +106,7 @@ final class ProjectWindowModel: Identifiable {
     func replace(store: ProjectStore) {
         guard store !== self.store else { return }
         arrange.finishDrag()
+        pianoRoll.close()  // UI-021: its note-offs go to the old engine, before the swap
         self.store = store
         arrange.peaks.invalidate(nil)
         selectedTracks = []
@@ -212,6 +219,7 @@ final class ProjectWindowModel: Identifiable {
         }
         controls += trackHeaders.flatMap(\.controls)
         controls += arrange.controls
+        controls += pianoRoll.controls
         controls += toasts.controls
         return controls
     }
@@ -310,7 +318,9 @@ final class ProjectWindowModel: Identifiable {
     /// control or (when `isRepeat`) a binding that doesn't repeat, so the event goes on its way.
     @discardableResult
     func handleKey(_ chord: KeyChord, isRepeat: Bool = false) -> Bool {
-        guard let binding = KeyBindings.binding(for: chord), !isRepeat || binding.repeats,
+        // UI-020: with the piano roll focused, its keys (⌫, ⌘A, Q) act on notes rather than clips.
+        let pianoRollBinding = pianoRoll.hasKeyFocus && pianoRoll.isOpen ? KeyBindings.pianoRollBinding(for: chord) : nil
+        guard let binding = pianoRollBinding ?? KeyBindings.binding(for: chord), !isRepeat || binding.repeats,
               let control = controls.first(where: { $0.id == binding.controlID }), control.isEnabled
         else { return false }
         control.action()

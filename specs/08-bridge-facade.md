@@ -135,6 +135,19 @@ The facade computes the mipmap on `daw.loader` when an asset loads (before `asse
 
 Affected: T-033 (arrange canvas). No other task's calls change.
 
+### Contract delta (T-043, accepted (autobuild, see docs/autobuild/DECISIONS.md))
+UI-021 auditions notes through the engine, which the facade couldn't do. One **additive, non-RT** call:
+```cpp
+// Auditions `pitch` on the instrument fed by MIDI source node `source` (a MIDI track's
+// MidiClipPlayer, GraphNodeID.source(of: track)), on MIDI channel 1, transport stopped or playing.
+void previewNote(NodeID source, uint8_t pitch, uint8_t velocity, bool on);
+```
+- **Delivery.** The facade posts the note (under its lock, which only serializes producers) to a `MidiPreviewInbox` (`nodes/MidiClipPlayer.h`): one SPSC mailbox per player NodeID (32, claimed on first use, handed to another player only when empty and holding no note), no allocation after construction. The player drains its mailbox at frame 0 of its next block and writes the notes into its `midiOut` ahead of its own events, so they reach the track's instrument (sampler or plugin) over the T-045 MIDI edge, PDC delay included. Its writer reserve (06 MidiClipPlayer "Capacity") counts held preview notes, so a preview note-off is never dropped. A track without an instrument has no player (MODEL-020): the note goes nowhere.
+- **Semantics.** Velocity is clamped to 1…127. A note-on for a pitch already sounding retriggers it (off, on); a note-off for a pitch that isn't sounding is dropped. Every note-on needs its note-off from the caller; in addition `stop()`, `locate()` and `renderOffline()` turn off every preview note still on. A re-created player (any note edit, DW-051) starts with All Notes Off and then turns the previews still held back on, so a preview lasts until its own off. A note-on is ignored in offline mode and while an export runs (only the export would hear it); a note-off never is.
+- **Swift.** `EngineProtocol.previewNote(track: ModelID, pitch: UInt8, velocity: UInt8, on: Bool)`, with a default no-op in a protocol extension so test doubles compile unchanged; `EngineClient` passes `GraphNodeID.source(of: track)`; `FakeEngine` records `.previewNote(track:pitch:velocity:on:)` calls.
+
+Affected: T-043 (piano roll audition). No other task's calls change. Tests: `PreviewNoteTests` (inbox, player merge, re-created player, mailbox reuse, no-hang fuzz, realtime facade on the fake device audible on the strip meter; 0 RT violations).
+
 ### Contract delta (T-056, accepted (autobuild, see docs/autobuild/DECISIONS.md))
 IO-033 needs progress events for the re-conversion (DW-044), the facade must keep asset paths to re-load them (DW-118), and a project-driven rate change must work offline too, where `setDevice` is unsupported. Everything is **additive and defaulted**; no existing field, case or call changes meaning, except that the T-051 placeholder (point 4 of that delta: `assetsReloaded` with `error = unsupported`) is gone: assets are now re-converted.
 ```cpp

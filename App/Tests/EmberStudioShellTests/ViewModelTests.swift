@@ -95,7 +95,7 @@ struct ViewModelTests {
         let ids = model.controls.map(\.id)
         #expect(Set(ids).count == ids.count)
         for id in ids {
-            #expect(id.wholeMatch(of: /(transport|edit|zoom|pane|track|toast|snap|clip)(\.[A-Za-z0-9]+)+/) != nil, "\(id)")
+            #expect(id.wholeMatch(of: /(transport|edit|zoom|pane|track|toast|snap|clip|pianoRoll)(\.[A-Za-z0-9]+)+/) != nil, "\(id)")
         }
         let track = model.project.tracks[1].id
         #expect(ids.contains("track.\(track).mute") && ids.contains("track.\(track).solo"))

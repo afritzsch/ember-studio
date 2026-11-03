@@ -97,7 +97,21 @@ enum KeyBindings {
         KeyBinding(chord: KeyChord("=", .command), controlID: "zoom.in", repeats: true),
         KeyBinding(chord: KeyChord("-", .command), controlID: "zoom.out", repeats: true),
         KeyBinding(chord: KeyChord("−", .command), controlID: "zoom.out", repeats: true),
+        // UI-020 (T-043): P opens the selected MIDI clip in the piano roll.
+        KeyBinding(chord: KeyChord("p"), controlID: "pianoRoll.open"),
     ]
+
+    /// UI-020 (T-043): while the piano roll has focus these come first (the arrows transpose in
+    /// the view itself: KeyChord leaves function keys out).
+    static let pianoRoll: [KeyBinding] = [
+        KeyBinding(chord: KeyChord(.delete), controlID: "pianoRoll.delete"),
+        KeyBinding(chord: KeyChord("a", .command), controlID: "pianoRoll.selectAll"),
+        KeyBinding(chord: KeyChord("q"), controlID: "pianoRoll.quantize"),
+    ]
+
+    private static let pianoRollByChord = Dictionary(pianoRoll.map { ($0.chord, $0) }, uniquingKeysWith: { first, _ in first })
+
+    static func pianoRollBinding(for chord: KeyChord) -> KeyBinding? { pianoRollByChord[chord] }
 
     private static let byChord = Dictionary(all.map { ($0.chord, $0) }, uniquingKeysWith: { first, _ in first })
 

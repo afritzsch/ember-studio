@@ -17,6 +17,8 @@ public final class FakeEngine: EngineProtocol {
         case freeParams(first: ParamID, count: UInt32)
         case setParam(ParamID, Float)
         case play, stop
+        /// UI-021 (T-043).
+        case previewNote(track: ModelID, pitch: UInt8, velocity: UInt8, on: Bool)
         case locate(Tick)
         case setLoop(enabled: Bool, start: Tick, end: Tick)
         case setRecording(Bool)
@@ -158,6 +160,11 @@ public final class FakeEngine: EngineProtocol {
     }
 
     public func transport() -> TransportState { state.withLock { $0.transport } }
+
+    /// UI-021 (T-043): recorded; no sound.
+    public func previewNote(track: ModelID, pitch: UInt8, velocity: UInt8, on: Bool) {
+        state.withLock { $0.calls.append(.previewNote(track: track, pitch: pitch, velocity: velocity, on: on)) }
+    }
 
     // MARK: Assets & jobs
 

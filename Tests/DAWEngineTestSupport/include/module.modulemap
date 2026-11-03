@@ -35,6 +35,7 @@ module DAWEngineTestSupport {
   header "SidechainChecks.h"
   header "MidiRoutingChecks.h"
   header "CompressorChecks.h"
+  header "PreviewNoteChecks.h"
   header "ReverbChecks.h"
   header "SessionRateChecks.h"
   requires cplusplus

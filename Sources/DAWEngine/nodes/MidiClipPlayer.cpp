@@ -1,6 +1,7 @@
 #include "nodes/MidiClipPlayer.h"
 
 #include <algorithm>
+#include <bit>
 #include <limits>
 #include <utility>
 
@@ -9,15 +10,106 @@
 
 namespace daw {
 
-NodeKindInfo MidiClipPlayer::kindInfo() {
-    NodeKindInfo info{[](const NodeCreateInfo& create) -> Result<std::unique_ptr<Node>> {
-        return std::unique_ptr<Node>(MidiClipPlayer::create(create.notes));
+// MARK: MidiPreviewInbox (UI-021, T-043)
+
+namespace {
+
+bool testBit(const uint64_t (&bits)[2], uint8_t pitch) DAW_RT { return (bits[pitch >> 6] >> (pitch & 63)) & 1; }
+
+} // namespace
+
+MidiPreviewInbox::MidiPreviewInbox() : boxes_(new Mailbox[kMailboxes]) {}
+
+MidiPreviewInbox::Mailbox* MidiPreviewInbox::mailboxFor(NodeID player) {
+    Mailbox* reusable = nullptr;
+    for (uint32_t i = 0; i < kMailboxes; ++i) {
+        Mailbox& box = boxes_[i];
+        const NodeID owner = box.owner.load(std::memory_order_relaxed);  // only post() writes it
+        if (owner == player) return &box;
+        // Free, or empty with nothing held: the least recently used of those is handed on.
+        const bool idle = owner == 0 || (box.queue.emptyApprox() &&
+                                         box.held[0].load(std::memory_order_relaxed) == 0 &&
+                                         box.held[1].load(std::memory_order_relaxed) == 0);
+        if (idle && (!reusable || box.lastUse < reusable->lastUse)) reusable = &box;
+    }
+    if (reusable) reusable->owner.store(player, std::memory_order_release);
+    return reusable;
+}
+
+bool MidiPreviewInbox::push(Mailbox& box, NodeID player, uint8_t pitch, uint8_t velocity, bool on) {
+    if (!box.queue.push(Event{player, pitch, velocity, on})) return false;
+    std::atomic<uint64_t>& word = box.held[pitch >> 6];
+    const uint64_t bit = uint64_t(1) << (pitch & 63);
+    if (on) {
+        box.velocity[pitch].store(velocity, std::memory_order_relaxed);
+        word.fetch_or(bit, std::memory_order_release);
+    } else {
+        word.fetch_and(~bit, std::memory_order_release);
+    }
+    return true;
+}
+
+bool MidiPreviewInbox::post(NodeID player, uint8_t pitch, uint8_t velocity, bool on) {
+    if (player == 0 || pitch > 127) return false;
+    Mailbox* box = mailboxFor(player);
+    if (!box) return false;
+    box->lastUse = ++clock_;
+    const bool isHeld = (box->held[pitch >> 6].load(std::memory_order_relaxed) >> (pitch & 63)) & 1;
+    if (!on) return !isHeld || push(*box, player, pitch, 0, false);
+    // A second on for a held pitch retriggers it: off, then on.
+    if (isHeld && !push(*box, player, pitch, 0, false)) return false;
+    return push(*box, player, pitch, std::clamp<uint8_t>(velocity, 1, 127), true);
+}
+
+void MidiPreviewInbox::releaseAll() {
+    for (uint32_t i = 0; i < kMailboxes; ++i) {
+        Mailbox& box = boxes_[i];
+        const NodeID owner = box.owner.load(std::memory_order_relaxed);
+        for (unsigned pitch = 0; owner != 0 && pitch < 128; ++pitch)
+            if ((box.held[pitch >> 6].load(std::memory_order_relaxed) >> (pitch & 63)) & 1)
+                (void)push(box, owner, static_cast<uint8_t>(pitch), 0, false);
+    }
+}
+
+uint32_t MidiPreviewInbox::heldCount(NodeID player) const {
+    for (uint32_t i = 0; i < kMailboxes; ++i) {
+        const Mailbox& box = boxes_[i];
+        if (player == 0 || box.owner.load(std::memory_order_relaxed) != player) continue;
+        return static_cast<uint32_t>(std::popcount(box.held[0].load(std::memory_order_relaxed)) +
+                                     std::popcount(box.held[1].load(std::memory_order_relaxed)));
+    }
+    return 0;
+}
+
+int MidiPreviewInbox::find(NodeID player, int hint) const DAW_RT {
+    if (hint >= 0 && hint < int(kMailboxes) && boxes_[hint].owner.load(std::memory_order_acquire) == player)
+        return hint;
+    for (uint32_t i = 0; i < kMailboxes; ++i)  // bounded (CONV-RT-04)
+        if (boxes_[i].owner.load(std::memory_order_acquire) == player) return int(i);
+    return -1;
+}
+
+bool MidiPreviewInbox::pop(int index, Event& out) DAW_RT { return boxes_[index].queue.pop(out); }
+
+bool MidiPreviewInbox::held(int index, uint8_t pitch, uint8_t& velocity) const DAW_RT {
+    const Mailbox& box = boxes_[index];
+    if (!((box.held[pitch >> 6].load(std::memory_order_acquire) >> (pitch & 63)) & 1)) return false;
+    velocity = box.velocity[pitch].load(std::memory_order_relaxed);
+    return true;
+}
+
+// MARK: MidiClipPlayer
+
+NodeKindInfo MidiClipPlayer::kindInfo(MidiPreviewInbox* preview) {
+    NodeKindInfo info{[preview](const NodeCreateInfo& create) -> Result<std::unique_ptr<Node>> {
+        return std::unique_ptr<Node>(MidiClipPlayer::create(create.notes, preview, create.desc.id));
     }};
     info.audioOutput = false;  // MIDI only: its instrument hangs off a MIDI edge
     return info;
 }
 
-std::unique_ptr<MidiClipPlayer> MidiClipPlayer::create(std::span<const NoteDesc> descs) {
+std::unique_ptr<MidiClipPlayer> MidiClipPlayer::create(std::span<const NoteDesc> descs, MidiPreviewInbox* preview,
+                                                       NodeID id) {
     std::vector<Note> notes;
     notes.reserve(descs.size());
     for (const NoteDesc& d : descs) {
@@ -25,10 +117,11 @@ std::unique_ptr<MidiClipPlayer> MidiClipPlayer::create(std::span<const NoteDesc>
         notes.push_back(Note{d.start, d.start + d.length, d.pitch,
                              std::clamp<uint8_t>(d.velocity, 1, 127), d.channel});
     }
-    return std::make_unique<MidiClipPlayer>(std::move(notes));
+    return std::make_unique<MidiClipPlayer>(std::move(notes), preview, id);
 }
 
-MidiClipPlayer::MidiClipPlayer(std::vector<Note> notes) : notes_(std::move(notes)) {
+MidiClipPlayer::MidiClipPlayer(std::vector<Note> notes, MidiPreviewInbox* preview, NodeID id)
+    : notes_(std::move(notes)), preview_(preview), id_(id) {
     std::stable_sort(notes_.begin(), notes_.end(),
                      [](const Note& a, const Note& b) { return a.start < b.start; });
     active_.resize(notes_.size());
@@ -39,6 +132,39 @@ MidiClipPlayer::MidiClipPlayer(std::vector<Note> notes) : notes_(std::move(notes
 void MidiClipPlayer::prepare(const PrepareInfo&) {
     numActive_ = 0;
     havePos_ = false;
+    previewOn_[0] = previewOn_[1] = 0;
+    numPreviewOn_ = 0;
+}
+
+void MidiClipPlayer::playPreview(MidiEventWriter& out, bool resync) DAW_RT {
+    constexpr uint8_t ch = MidiPreviewInbox::kChannel;
+    previewBox_ = preview_->find(id_, previewBox_);
+    if (previewBox_ < 0) return;
+    auto noteOn = [&](uint8_t pitch, uint8_t velocity) DAW_RT {
+        if (testBit(previewOn_, pitch) || !roomForOn(out)) return;  // dropped, never hanging
+        if (!out.push(MidiEvent{0, 3, {uint8_t(kNoteOn | ch), pitch, velocity}})) return;
+        previewOn_[pitch >> 6] |= uint64_t(1) << (pitch & 63);
+        ++numPreviewOn_;
+    };
+    if (resync) {
+        // After this instance's All Notes Off: the previews still held sound again.
+        for (unsigned pitch = 0; pitch < 128; ++pitch) {
+            uint8_t velocity = 0;
+            if (preview_->held(previewBox_, uint8_t(pitch), velocity)) noteOn(uint8_t(pitch), velocity);
+        }
+    }
+    // Bounded by the queue size (CONV-RT-04); offs always fit (roomForOn keeps room for them).
+    MidiPreviewInbox::Event e;
+    for (std::size_t n = 0; n < MidiPreviewInbox::kQueueSize && preview_->pop(previewBox_, e); ++n) {
+        if (e.player != id_ || e.pitch > 127) continue;  // a mailbox just handed to another player
+        if (e.on) {
+            noteOn(e.pitch, e.velocity);
+        } else if (testBit(previewOn_, e.pitch)) {
+            out.push(MidiEvent{0, 3, {uint8_t(kNoteOff | ch), e.pitch, kReleaseVelocity}});
+            previewOn_[e.pitch >> 6] &= ~(uint64_t(1) << (e.pitch & 63));
+            --numPreviewOn_;
+        }
+    }
 }
 
 void MidiClipPlayer::reset() DAW_RT {
@@ -138,11 +264,13 @@ void MidiClipPlayer::process(ProcessContext& ctx, NodeIO& io) DAW_RT {
     if (ctx.numFrames == 0) return;  // no frame to put an event on
 
     // A new instance (DW-051) replaces one whose notes may still be on downstream.
+    const bool resync = !announced_;
     if (!announced_) {
         for (uint8_t ch = 0; ch < kNumChannels; ++ch)
             out.push(MidiEvent{0, 3, {uint8_t(kControlChange | ch), kAllNotesOff, 0}});
         announced_ = true;
     }
+    if (preview_) playPreview(out, resync);  // UI-021, at frame 0 whether the transport plays or not
 
     const TransportBlock& block = ctx.transport;
     if (block.numSegments == 0 || block.tempo == nullptr) {

@@ -346,6 +346,7 @@ final class TimelineCanvasView: NSView, SnapshotCompositing {
 
     override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
+        if event.clickCount == 2, model.doubleClick(at: point(event)) { return }  // UI-020: open in the piano roll
         model.mouseDown(at: point(event), modifiers: Self.modifiers(event))
     }
 
@@ -381,6 +382,9 @@ final class TimelineCanvasView: NSView, SnapshotCompositing {
         let tick = model.isSnapping(Self.modifiers(event)) ? model.grid.snap(model.geometry.tick(atX: p.x), model.snap)
             : model.geometry.tick(atX: p.x)
         let menu = NSMenu()
+        if case .midi = model.project.clip(hit.clipID) {
+            menu.addItem(ClosureMenuItem("Open in Piano Roll") { [weak self] in self?.model.window?.pianoRoll.open(hit.clipID) })
+        }
         menu.addItem(ClosureMenuItem("Split at Pointer") { [weak self] in self?.model.split(hit.clipID, at: tick) })
         menu.addItem(ClosureMenuItem("Duplicate", key: "d") { [weak self] in self?.model.duplicateSelection() })
         menu.addItem(ClosureMenuItem("Delete") { [weak self] in self?.model.deleteSelection() })

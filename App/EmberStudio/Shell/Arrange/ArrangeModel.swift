@@ -174,6 +174,16 @@ final class ArrangeModel {
         }
     }
 
+    /// UI-020: a double-click on a MIDI clip opens it in the piano roll. True if it did.
+    @discardableResult
+    func doubleClick(at point: CGPoint) -> Bool {
+        guard let hit = hitTest(point), case .midi = project.clip(hit.clipID) else { return false }
+        finishDrag()
+        selection = [hit.clipID]
+        window?.pianoRoll.open(hit.clipID)
+        return true
+    }
+
     func mouseDragged(to point: CGPoint, modifiers: CanvasModifiers = []) {
         guard var drag else { return }
         if !drag.started {
@@ -491,11 +501,19 @@ final class ArrangeModel {
         return peakLevel(clip.assetID, samplesPerPixel: spp).map { _ in WaveformMesh.level(samplesPerPixel: spp) }
     }
 
-    /// Engine events: newly loaded audio drops its cached peaks and redraws the waveforms.
+    /// Engine events: newly loaded audio drops its cached peaks and redraws the waveforms. A
+    /// session-rate pass (IO-033) drops every peak once, when it finishes; its `started` and
+    /// per-asset `progress` events (T-056) leave the cache alone. An `assetsReloaded` without
+    /// `reload` counts as finished.
     func engineEventsArrived(_ events: [EngineEvent]) {
-        let loaded = events.filter { $0.kind == .assetLoaded || $0.kind == .assetsReloaded }
-        guard !loaded.isEmpty else { return }
-        peaks.invalidate(loaded.contains { $0.kind == .assetsReloaded } ? nil : Set(loaded.map(\.subject)))
+        let loaded = events.filter { $0.kind == .assetLoaded }
+        let reloaded = events.contains { (event: EngineEvent) -> Bool in
+            guard event.kind == .assetsReloaded else { return false }
+            let phase: AssetsReload.Phase = event.reload?.phase ?? .finished
+            return phase == .finished
+        }
+        guard reloaded || !loaded.isEmpty else { return }
+        peaks.invalidate(reloaded ? nil : Set(loaded.map(\.subject)))
         peaksVersion += 1
     }
 

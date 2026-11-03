@@ -36,6 +36,7 @@
 // GraphBuilder::kMidiCapacity in every graph while the player has an outgoing MIDI edge, so a
 // snapshot swap never shrinks it.
 
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <span>
@@ -44,12 +45,81 @@
 #include "core/Node.h"
 #include "core/NodeIO.h"
 #include "core/Realtime.h"
+#include "core/SpscQueue.h"
 #include "daw/GraphDescription.h"
 #include "graph/NodeRegistry.h"
 #include "time/TempoMap.h"
 #include "time/TransportBlock.h"
 
 namespace daw {
+
+// UI-021 (T-043): notes the UI auditions on a MIDI track (EngineFacade::previewNote). The facade
+// posts them here; the track's MidiClipPlayer merges them into its MIDI output at frame 0 of its
+// next block, so they reach the track's instrument (sampler or plugin) on the same path as the
+// track's own notes, whether the transport plays or not.
+//
+// Threads: post/releaseAll are non-RT and need one caller at a time (the facade's lock); find/
+// pop/held are RT and called by players on the render thread. Each player has a mailbox, an SPSC
+// queue keyed by the player's NodeID, so players never compete for events. The first post for a
+// player claims a mailbox; a mailbox is handed to another player only once it is empty and holds
+// no note, and a player drops events that don't carry its NodeID (the one block in which it may
+// still read a mailbox that was just handed on). No allocation after construction.
+//
+// Hanging notes. The inbox tracks which pitches each player has on (the facade's view): a
+// note-on for a held pitch is sent as off + on (a retrigger), an off for a pitch that isn't held
+// is dropped, and releaseAll (stop, locate, export) posts an off for every held note. A
+// re-created player (any note edit, DW-051) begins with All Notes Off, which silences held
+// previews downstream; it turns the held ones back on right after from `held`, so a preview
+// lasts until its own off.
+// One preview note-on or note-off, as queued (outside the class so SpscQueue sees a complete type).
+struct MidiPreviewEvent {
+    NodeID player = 0;
+    uint8_t pitch = 0;
+    uint8_t velocity = 0;
+    bool on = false;
+};
+
+class MidiPreviewInbox {
+public:
+    static constexpr uint32_t kMailboxes = 32;
+    static constexpr std::size_t kQueueSize = 256;
+    static constexpr uint8_t kChannel = 0;  // previews play on MIDI channel 1
+
+    using Event = MidiPreviewEvent;
+
+    MidiPreviewInbox();
+    MidiPreviewInbox(const MidiPreviewInbox&) = delete;
+    MidiPreviewInbox& operator=(const MidiPreviewInbox&) = delete;
+
+    // Non-RT. Queues a note-on (velocity clamped to 1..127) or note-off for `player`. False if it
+    // couldn't: player 0, pitch > 127, no mailbox free, or the mailbox's queue is full.
+    bool post(NodeID player, uint8_t pitch, uint8_t velocity, bool on);
+    // Non-RT. A note-off for every held note of every player.
+    void releaseAll();
+    // Non-RT diagnostics: how many pitches `player` has on.
+    uint32_t heldCount(NodeID player) const;
+
+    // RT. The mailbox of `player`, or -1; `hint` (the last index found) is checked first.
+    int find(NodeID player, int hint) const DAW_RT;
+    // RT. The next event of mailbox `index` (from find).
+    bool pop(int index, Event& out) DAW_RT;
+    // RT. Whether mailbox `index` holds `pitch` on, and with which velocity.
+    bool held(int index, uint8_t pitch, uint8_t& velocity) const DAW_RT;
+
+private:
+    struct Mailbox {
+        std::atomic<NodeID> owner{0};  // 0: free
+        SpscQueue<Event, kQueueSize> queue;
+        std::atomic<uint64_t> held[2]{};
+        std::atomic<uint8_t> velocity[128]{};
+        uint64_t lastUse = 0;  // producer only
+    };
+    Mailbox* mailboxFor(NodeID player);  // non-RT: finds or claims one
+    bool push(Mailbox& box, NodeID player, uint8_t pitch, uint8_t velocity, bool on);
+
+    std::unique_ptr<Mailbox[]> boxes_;
+    uint64_t clock_ = 0;
+};
 
 class MidiClipPlayer final : public Node {
 public:
@@ -67,12 +137,14 @@ public:
     };
 
     // Non-RT. The registry entry for NodeKind::midiClipPlayer (registerBuiltinNodes): no audio
-    // output, notes from NodeCreateInfo::notes.
-    static NodeKindInfo kindInfo();
+    // output, notes from NodeCreateInfo::notes. UI-021: with `preview`, each player also plays
+    // the preview notes posted for its NodeID (the facade registers it that way, T-043).
+    static NodeKindInfo kindInfo(MidiPreviewInbox* preview = nullptr);
 
     // Non-RT. Takes the notes in any order and drops invalid ones (see above).
-    static std::unique_ptr<MidiClipPlayer> create(std::span<const NoteDesc> notes);
-    explicit MidiClipPlayer(std::vector<Note> notes);
+    static std::unique_ptr<MidiClipPlayer> create(std::span<const NoteDesc> notes,
+                                                  MidiPreviewInbox* preview = nullptr, NodeID id = 0);
+    explicit MidiClipPlayer(std::vector<Note> notes, MidiPreviewInbox* preview = nullptr, NodeID id = 0);
 
     void prepare(const PrepareInfo& info) override;
     void reset() DAW_RT override;
@@ -92,8 +164,14 @@ private:
     size_t firstStartingAtOrAfter(Tick tick) const DAW_RT;
     // DW-103: note-ons at the segment's first frame for the notes it starts inside of.
     void chase(const TransportBlock& block, const TransportSegment& seg, MidiEventWriter& out) DAW_RT;
-    // A note-on is written only if room stays for its own off and every held note's.
-    bool roomForOn(const MidiEventWriter& out) const DAW_RT { return out.capacity() - out.size() >= numActive_ + 2; }
+    // A note-on is written only if room stays for its own off and every held note's (preview
+    // notes included, UI-021).
+    bool roomForOn(const MidiEventWriter& out) const DAW_RT {
+        return out.capacity() - out.size() >= numActive_ + numPreviewOn_ + 2;
+    }
+    // UI-021: the inbox's events for this player, at frame 0 (and, for a new instance, its held
+    // notes again after the All Notes Off).
+    void playPreview(MidiEventWriter& out, bool resync) DAW_RT;
 
     std::vector<Note> notes_;  // sorted by start
     std::vector<Tick> maxEnd_; // maxEnd_[i] = max(notes_[0..i].end), non-decreasing (chase)
@@ -106,6 +184,13 @@ private:
     bool havePos_ = false;     // false: the next segment is a jump
     Tick nextTick_ = 0;        // where the previous segment's ticks ended
     bool announced_ = false;   // the first non-empty block's All Notes Off went out
+
+    // UI-021 preview notes (audio thread only, besides the pointer and ID).
+    MidiPreviewInbox* preview_ = nullptr;
+    NodeID id_ = 0;
+    int previewBox_ = -1;          // find() hint
+    uint64_t previewOn_[2] = {};   // pitches this instance turned on, channel kChannel
+    uint32_t numPreviewOn_ = 0;
 };
 
 } // namespace daw
