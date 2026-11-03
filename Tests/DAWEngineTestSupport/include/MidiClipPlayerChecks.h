@@ -3,10 +3,10 @@
 // DW-096), run from Tests/DAWEngineTests/MidiClipPlayerTests.swift. C++ because they drive the
 // Transport, the Engine (non-movable), GraphBuilder and RtScope.
 //
-// The RenderGraph doesn't route MIDI yet (midiOut has capacity 0 in a graph), so most checks run
-// the player the way Engine::render does: Transport::advance, reset() on a locate while playing,
-// then process() into a MidiEventWriter of their own, all inside an RtScope that must count 0
-// violations (CONV §5.3).
+// Most checks run the player the way Engine::render does: Transport::advance, reset() on a locate
+// while playing, then process() into a MidiEventWriter of their own (so they can size it, e.g.
+// too small for every event), all inside an RtScope that must count 0 violations (CONV §5.3).
+// MIDI routing through a RenderGraph (T-045) is checked in MidiRoutingChecks.h.
 
 #include "Checks.h"
 
