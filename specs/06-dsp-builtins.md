@@ -56,6 +56,14 @@ All processors are `daw::Node` subclasses, stereo in/out, with parameters throug
 | DSP-032 | **Delay**: stereo/ping-pong, time in ms or tempo-synced note values (reads tempo from TransportBlock), feedback, LP filter in loop, mix. Delay time changes are smoothed (no zipper/pitch artifacts beyond a short crossfade). | Golden |
 | DSP-033 | **Reverb**: algorithmic (FDN, 8 lines, Hadamard), size, decay, damping, pre-delay, mix. Deterministic (no random modulation, or seeded). | Golden + determinism (IO-011) |
 
+#### Compressor semantics (clarified in T-071)
+- **Params (DSP-031, DSP-041)**, relative to `firstParam`, read once per block; slots beyond `numParams` use their defaults, NaN reads as the default, other values are clamped: 0 threshold −60…0 dB (default −20), 1 ratio 1…20 (4), 2 attack 0.1…200 ms (10), 3 release 1…2000 ms (100), 4 knee 0…24 dB full width (6), 5 makeup 0…24 dB (0), 6 detector switch, RMS at ≥ 0.5, else peak (0). Threshold, ratio, knee and makeup ramp linearly across the block (ENG-022); attack, release and the detector are latched per block. The table is published through the facade's `paramInfoJSON` (`NodeRegistry::paramInfo` doesn't exist yet, see the T-071 report).
+- **Key (MIX-008).** The detector reads the sidechain input when one is routed (`NodeIO::sidechain` non-empty), else the node's own input. Stereo-linked: every key channel counts and one gain applies to all channels.
+- **Signal path**, per sample, in double: level `x` = 20·log10(max over channels |key|) (peak) or 10·log10(m) with `m[n] = β·m[n−1] + (1−β)·mean(key²)`, `β = exp(−1/(10 ms · rate))` (RMS), floored at −200 dB. Gain computer: the log-domain curve with a quadratic soft knee (Giannoulis et al. 2012): `c = 0` for `2(x−T) ≤ −W`, `(1/R − 1)(x − T + W/2)²/(2W)` inside the knee, `(1/R − 1)(x − T)` above it. Ballistics: `e[n] = α·e[n−1] + (1−α)·c` with `α = exp(−1/(t · rate))`, `t` = attack when `c < e[n−1]`, else release. Output: `in · 10^((e + makeup)/20)`. `e` and `m` snap to exactly 0 near it, so silence settles to unity gain without denormals. No lookahead: latency 0.
+- **Gain-reduction meter.** The kind meters (`NodeKindInfo::meters`), so GraphBuilder gives it a MeterID and the facade's `meter(node)` reads it. Each block writes linear gain factors without makeup (1 = no reduction): `peak` is the block's deepest reduction (smallest factor), `rms` the factor at its last frame.
+- **NaN guard (DSP-040).** A block whose input or key holds NaN/±Inf outputs silence and restarts the detector (`e = m = 0`); the node counts it (`nanBlocks()`), since Telemetry has no processor NaN counter yet (DW-142).
+- `reset()` (locate) keeps the envelope, like other effects (TIME-008).
+
 ### General
 | ID | Requirement |
 |---|---|
