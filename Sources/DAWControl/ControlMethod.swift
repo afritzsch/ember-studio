@@ -15,6 +15,7 @@ public enum ControlMethod: String, CaseIterable, Hashable, Sendable {
     case transportLocate = "transport.locate"
     case transportSetLoop = "transport.setLoop"
     case transportRecord = "transport.record"
+    case transportSetPunch = "transport.setPunch"
     case transportWait = "transport.wait"
     case transportSetMetronome = "transport.setMetronome"
     case assetImport = "asset.import"
@@ -54,6 +55,7 @@ public enum ControlMethod: String, CaseIterable, Hashable, Sendable {
         case .transportLocate: TransportLocateParams.self
         case .transportSetLoop: TransportSetLoopParams.self
         case .transportRecord: TransportRecordParams.self
+        case .transportSetPunch: TransportSetPunchParams.self
         case .transportWait: TransportWaitParams.self
         case .transportSetMetronome: TransportSetMetronomeParams.self
         case .assetImport: AssetImportParams.self
@@ -86,7 +88,8 @@ public enum ControlMethod: String, CaseIterable, Hashable, Sendable {
         case .transportStop: "Stop playback → transport"
         case .transportLocate: "Move the playhead {tick} → transport"
         case .transportSetLoop: "Set the loop {enabled, start, end} → transport"
-        case .transportRecord: "Arm or disarm recording {enabled} → transport"
+        case .transportRecord: "Start or stop recording {enabled} → transport (armed tracks record while it plays; stopping finalizes the takes into clips)"
+        case .transportSetPunch: "Set the punch range {enabled, start?, end?} → transport (recording writes only inside it while the loop is off)"
         case .transportWait: "Wait for playback to reach a tick or stop {untilTick?, timeoutMs} (live engine only)"
         case .transportSetMetronome: "Switch the project metronome or set its levels {enabled?, level?, accent?} → {enabled, level, accent} (not undoable)"
         case .assetImport: "Load an audio file into the project {path} → {assetID, …}"

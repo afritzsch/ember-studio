@@ -167,6 +167,7 @@ public final class ProjectStore {
         let sync = try EngineSync(engine: engine, project: project, debounce: debounce)
         // DW-130 (T-056): the document follows a session-rate change the engine made by itself.
         sync.onEngineSampleRateChange = { [weak self] rate in self?.followEngineSampleRate(rate) }
+        connectRecording(sync)  // T-052: recordings folder, REC-004 takes → ImportAsset + AddClip
         engineSync = sync
         return sync
     }

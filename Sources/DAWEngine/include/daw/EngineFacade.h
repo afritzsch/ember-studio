@@ -94,6 +94,11 @@ struct TransportPOD {
     bool loopEnabled = false;
     Tick loopStart = 0;
     Tick loopEnd = 0;
+    // REC-005 (T-052): the punch range (setPunch). Recording writes only inside it while the loop
+    // is off.
+    bool punchEnabled = false;
+    Tick punchIn = 0;
+    Tick punchOut = 0;
 };
 
 // MARK: Jobs (BRIDGE-002)
@@ -225,6 +230,12 @@ struct TelemetryPOD {
     // IO-033 (T-056): assets of the running session-rate re-conversion still to come (0: none
     // running; play() is refused until it is 0 again).
     uint32_t assetsReloadPending = 0;
+    // REC-002/003 (T-052): frames dropped because a recording FIFO was full (all takes since the
+    // facade was created), the running device's input latency (IO-005; 0 without input), and
+    // the tracks armed for recording (armInput).
+    uint64_t recordDrops = 0;
+    uint32_t deviceInputLatency = 0;
+    uint32_t armedTracks = 0;
 };
 
 struct NodeLatencyPOD {
@@ -290,6 +301,24 @@ struct AssetsReloadPOD {
     uint64_t assetID = 0;           // progress: the asset just done
 };
 
+// REC-004 (T-052): a finished recording, one event per track. `startSample` is where the file's
+// first frame belongs on the timeline, at the session rate, already compensated for input +
+// output latency (REC-003); it can be negative (recording from the very start). The model turns
+// it into ImportAsset + AddClip (one undoable edit). An event with `error` set and `frames` > 0
+// still has a usable file: the error says what went wrong (e.g. REC-002 dropped frames, filled
+// with silence); with `file` empty nothing could be written.
+struct RecordingPOD {
+    NodeID track = 0;
+    std::string file;           // absolute path of the 32-bit float CAF
+    int64_t startSample = 0;
+    int64_t frames = 0;         // in the file
+    uint32_t takeIndex = 0;     // REC-030 (loop takes, T-080): 0
+    uint32_t channels = 2;
+    double sampleRate = 0;      // the session rate it was recorded at
+    uint32_t inputPair = 0;     // channels 2·inputPair, 2·inputPair + 1
+    uint64_t droppedFrames = 0; // REC-002
+};
+
 struct EngineEventPOD {
     EngineEventType type = EngineEventType::deviceChanged;
     uint64_t subject = 0;
@@ -298,6 +327,7 @@ struct EngineEventPOD {
     FacadeError error;
     DeviceChangePOD device;  // deviceChanged
     AssetsReloadPOD reload;  // assetsReloaded (T-056)
+    RecordingPOD recording;  // recordingFinalized (T-052); subject = the track
 };
 
 // T-051, DW-089: what simulateDeviceEvent makes the fake device do.
@@ -461,13 +491,31 @@ public:
     // MARK: Recording (09) and plugins (10): later tasks
 
     // DW-067: the device's input runs while any track is armed; turning it on or off restarts
-    // the driver. Routing input to tracks is 09 (T-030s).
+    // the driver. REC-001 (T-052): an armed track records input channels 2·pair and 2·pair + 1
+    // (pairs 0…15) while the transport plays and records. Changing what is armed during a take
+    // finalizes it first (REC-022: arming is structural).
     void armInput(NodeID track, uint32_t inputChannelPair, bool armed);
     JobID instantiatePlugin(NodeID slot, const PluginDescriptorPOD& plugin);
     ByteVector getPluginState(NodeID slot);
     void setPluginState(NodeID slot, const ByteVector& state);
     void* createPluginView(NodeID slot);  // NSView*, owned by the facade
     void destroyPluginView(NodeID slot);
+
+    // MARK: Recording (09, T-052; accepted (autobuild, see docs/autobuild/DECISIONS.md))
+    //
+    // A take records while the transport plays with setRecording(true) and some track is armed
+    // (realtime mode: offline engines have no input). It ends, and its files are finalized
+    // (recordingFinalized events, REC-004), on stop(), setRecording(false), a locate while it
+    // runs, a change to what is armed, an export, and a device change (IO-021 (2), DW-119).
+
+    // REC-002: where recordings are written (created when needed). Empty: a per-process folder
+    // in $TMPDIR. A take already running keeps its folder.
+    void setRecordingDirectory(const std::string& directory);
+    std::string recordingDirectory() const;
+    // REC-005: with `enabled` and the loop off, only [in, out) of the timeline is recorded.
+    // Disabling keeps the range (or stores [in, out) for later when in < out). An enabled request
+    // with in < 0 or in >= out is ignored, leaving punch as it was.
+    void setPunch(bool enabled, Tick in, Tick out);
 
     // MARK: Offline (IO-010..013, DW-057)
 

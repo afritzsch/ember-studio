@@ -74,6 +74,10 @@ struct CommandRegistryTests {
         RestoreSessionSampleRate(sampleRate: 96_000, clipOffsets: [.init(clipID: 5, sourceOffsetSamples: 44_174)],
                                  zoneLoops: [.init(slotID: 4, zone: 0, loopStart: 10, loopEnd: 20)]),
         RestoreSessionSampleRate(sampleRate: 48_000),
+        // T-052 (MODEL-005, REC-001)
+        ArmTrack(trackID: 3, armed: true, inputPair: 2),
+        ArmTrack(trackID: 3, armed: false),
+        SetMonitoring(trackID: 3, mode: .auto),
     ]
 
     @Test("MODEL-006: built-in type strings are stable and unique")
@@ -90,6 +94,7 @@ struct CommandRegistryTests {
             "RestoreInstrument", "SetSamplerZones",
             "SetMetronome",
             "SetSessionSampleRate", "RestoreSessionSampleRate",
+            "ArmTrack", "SetMonitoring",
         ])
         let all = CommandRegistry.registered.map { $0.type }
         #expect(Set(all).count == all.count)

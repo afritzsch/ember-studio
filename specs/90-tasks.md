@@ -87,9 +87,9 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 |---|---|---|---|---|---|
 | T-050 | E | FakeDeviceDriver (loopback, scripted events) | TEST-005 | T-011 | done |
 | T-051 | E | DeviceMonitor, hot-swap sequence, xrun detection, EngineEvents | IO-020..023 | T-050 | done |
-| T-052 | E | Audio recording: FIFOs, disk writer, latency comp, finalize, punch | REC-001..005 | T-050, T-009 | wip(t-052-audio-recording) |
+| T-052 | E | Audio recording: FIFOs, disk writer, latency comp, finalize, punch | REC-001..005 | T-050, T-009 | done |
 | T-053 | E | CoreMIDI input + MIDI recording | REC-010..012 | T-040 | ready |
-| T-054 | E | Input monitoring modes | REC-020..022 | T-052 | todo |
+| T-054 | E | Input monitoring modes | REC-020..022 | T-052 | ready |
 | T-055 | U | Audio preferences, device toasts, arm/monitor buttons | UI-040, UI-004 | T-051, T-034 | wip(t-055-audio-prefs) |
 | T-056 | E+M | Session sample-rate change (re-convert assets, re-prepare) | IO-033, MODEL-005 (`SetSessionSampleRate`) | T-051 | done |
 
@@ -120,7 +120,7 @@ DSP effects (T-070..073) depend only on the Node API and can be **pulled forward
 ### M8 — Comping, export, hardening
 | Task | Lane | Title | Requirements | Depends on | Status |
 |---|---|---|---|---|---|
-| T-080 | E+M | Loop recording takes, TakeFolder, comp model, flattening | REC-030..034 | T-052, T-035 | todo |
+| T-080 | E+M | Loop recording takes, TakeFolder, comp model, flattening | REC-030..034 | T-052, T-035 | ready |
 | T-081 | U | Take folder / comp editing UI | UI-016 | T-080, T-033 | todo |
 | T-082 | U | Export dialog | UI-042 | T-009, T-032 | ready |
 | T-083 | U | Crash recovery dialog | UI-043 | T-031, T-064 | todo |
@@ -315,7 +315,7 @@ Recorded by the lead from worker reports.
 | DW-116 | T-051 | Add `io/DeviceMonitor.h` (`DeviceMonitorHost`, `DeviceSwap`) to the 04 Interfaces block, with DW-069 (Interfaces change → user) | spec (user/lead) | todo |
 | DW-117 | T-051 | `GraphCompiler` fixes its sample rate at construction, so a session-rate change replaces the compiler and maps tickets via `ticketBase`; `GraphCompiler::setSampleRate` would be simpler | E (small) | todo |
 | DW-118 | T-051 | After a session-rate change, loaded assets keep their load rate; the facade posts `assetsReloaded` with `unsupported`. The facade doesn't keep asset paths, so T-056 must (see DW-077) | E+M (T-056) | done (T-056: facade `AssetReloader` keeps paths; placeholder removed) |
-| DW-119 | T-051 | IO-021 (2) "finalize recordings" only disarms recording (`DeviceHost::finalizeRecordings`, `Impl::stopForDeviceChange`) | REC (09) | todo |
+| DW-119 | T-051 | IO-021 (2) "finalize recordings" only disarms recording (`DeviceHost::finalizeRecordings`, `Impl::stopForDeviceChange`) | REC (09) | done (T-052) |
 | DW-120 | T-051 | A device lost during an export: notifications are dropped while the export pauses the device; a failed restart afterwards reports `startFailed` and recovers on the next notification, with no fallback to the default | E (small) | todo |
 | DW-121 | T-051 | FakeDeviceDriver `start()` with an explicit rate doesn't move the fake device's nominal rate (CoreAudioDriver's does), so fake runs never produce the "rate set back" notification | E (small) | todo |
 | DW-122 | T-051 | Document `DAW_DEVICE_EVENT_TESTS=1` in 14 next to `DAW_DEVICE_INPUT_TESTS` / `DAW_SKIP_DEVICE_TESTS` | lead | todo |
@@ -394,3 +394,6 @@ Recorded by the lead from worker reports.
 | DW-195 | T-055 | 13's `ui.*` paragraph should list the `prefs.audio.*` control ids and `ui.state.windows[].audioPreferences` (documented in 12 *Audio preferences details*), like DW-188 | spec (lead) | todo |
 | DW-196 | T-072 | `ParamInfo` has no step/enum metadata: the delay's `note` (0…13, labels in `Delay::kNotes`) and its `sync`/`pingpong` switches reach the model/UI as linear floats. A `steps`/value-label field is an 06 Interfaces change | spec (user) + D/U | todo |
 | DW-197 | T-072 | The `locate_reset` golden could use a real delay/reverb tail now (DW-162 is covered at unit level) | D (T-077) | todo |
+| DW-198 | T-052 | `ProjectWindowModel` calls `engine.setRecording` directly; it should go through `store.engineSync?.setRecording(_:)` so takes of an unsaved project land in the per-project temp folder | U (T-055) | todo |
+| DW-199 | T-052 | `Project.validate()` doesn't check `Track.inputPair ≤ 15` (ArmTrack refuses it, a hand-edited project.json isn't checked; the engine clamps) | M | todo |
+| DW-200 | T-052 | An input pair beyond the device's input channels records silence with no warning; the UI should offer only existing pairs | U (T-055) / E | todo |

@@ -30,6 +30,9 @@ public final class FakeEngine: EngineProtocol {
         case setDevice(DriverConfig)
         case simulateDeviceEvent(DeviceEvent)
         case setSessionSampleRate(Double)  // T-056
+        /// T-052 (REC-002, REC-005).
+        case setRecordingDirectory(String)
+        case setPunch(enabled: Bool, start: Tick, end: Tick)
     }
 
     private struct State {
@@ -48,6 +51,8 @@ public final class FakeEngine: EngineProtocol {
         var telemetry = EngineTelemetry()
         var loadedAssets: Set<ModelID> = []
         var refusedSessionRates: Set<Double> = []  // T-056
+        var armed: Set<NodeIDValue> = []  // T-052
+        var recordingDirectory = ""
     }
 
     private let state = Mutex(State())
@@ -226,7 +231,35 @@ public final class FakeEngine: EngineProtocol {
     // MARK: Recording and plugins
 
     public func armInput(track: NodeIDValue, inputChannelPair: UInt32, armed: Bool) {
-        state.withLock { $0.calls.append(.armInput(track: track, pair: inputChannelPair, armed: armed)) }
+        state.withLock { s in
+            s.calls.append(.armInput(track: track, pair: inputChannelPair, armed: armed))
+            if armed { s.armed.insert(track) } else { s.armed.remove(track) }
+            s.telemetry.armedTracks = UInt32(s.armed.count)
+        }
+    }
+
+    /// T-052: recorded. Nothing is captured; tests post `recordingFinalized` events themselves.
+    public func setRecordingDirectory(_ path: String) {
+        state.withLock { s in
+            s.calls.append(.setRecordingDirectory(path))
+            s.recordingDirectory = path
+        }
+    }
+
+    /// T-052: the last `setRecordingDirectory`.
+    public var recordingDirectory: String { state.withLock { $0.recordingDirectory } }
+
+    /// T-052 (REC-005): like the facade, an enabled empty range is ignored.
+    public func setPunch(enabled: Bool, start: Tick, end: Tick) {
+        state.withLock { s in
+            s.calls.append(.setPunch(enabled: enabled, start: start, end: end))
+            if enabled && (start.raw < 0 || start >= end) { return }
+            s.transport.punchEnabled = enabled
+            if enabled || start < end {
+                s.transport.punchIn = start
+                s.transport.punchOut = end
+            }
+        }
     }
 
     public func instantiatePlugin(slot: NodeIDValue, _ plugin: PluginDescriptor) -> JobID {
