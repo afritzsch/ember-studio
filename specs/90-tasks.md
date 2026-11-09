@@ -114,7 +114,7 @@ DSP effects (T-070..073) depend only on the Node API and can be **pulled forward
 | T-073 | D | Reverb (FDN, deterministic) | DSP-033, 040, 041 | T-004, T-005 | done |
 | T-074 | E+M | Automation lanes model + AutomationPlayer + plugin param path | AUTO-001..005, 008..010 | T-030, T-061/T-062 (for AUTO-009) | ready |
 | T-075 | U+M | Automation recording (touch/latch/write) + lane UI | AUTO-006, 007, UI-015 | T-074, T-033 | todo |
-| T-076 | U | Mixer view + meters + routing pickers | UI-030, 031, 033 | T-022, T-032 | wip(t-076-mixer-view) |
+| T-076 | U | Mixer view + meters + routing pickers | UI-030, 031, 033 | T-022, T-032 | done |
 | T-077 | D | M7 goldens | TEST (M7 set) | T-071, T-073, T-074 | todo |
 
 ### M8 — Comping, export, hardening
@@ -398,7 +398,9 @@ Recorded by the lead from worker reports.
 | DW-199 | T-052 | `Project.validate()` doesn't check `Track.inputPair ≤ 15` (ArmTrack refuses it, a hand-edited project.json isn't checked; the engine clamps) | M | todo |
 | DW-200 | T-052 | An input pair beyond the device's input channels records silence with no warning; the UI should offer only existing pairs | U (T-055) / E | done (T-055) |
 | DW-201 | T-072 | DAWModelTests' `@MainActor` tests still finish together (8–15 s): something else synchronous holds the main actor; candidates are the real-engine tests calling the blocking `EngineClient.waitForGraph` on it. Confirm with a per-test timing pass or `sample` | M/B | todo |
-| DW-202 | T-055 | Mixer channel strips (UI-030) need the same arm/monitor/input controls (logic in `TrackHeaderModel`, reusable) | U (T-076) | todo |
+| DW-202 | T-055 | Mixer channel strips (UI-030) need the same arm/monitor/input controls (logic in `TrackHeaderModel`, reusable) | U (T-076) | done (T-076) |
 | DW-203 | T-055 | `ProjectStore.connectRecording` only logs a take it couldn't import; the app infers it from the project's assets (`ProjectWindowModel.containsTake`). An import-result callback/event would be more direct | M | todo |
 | DW-204 | T-061 | Plugin → model params: a change from the AU's own UI (or user) isn't written back to `DeviceSlot.params` (PLUG-015 second half) | P+M (T-063) | todo |
 | DW-205 | T-061 | A session-rate change re-instantiates the slot's AU synchronously on daw.compile (state carried over); may need to be async for slow out-of-process AUv3s | P (T-064 or later) | todo |
+| DW-206 | T-076 | UI-031's acceptance names Instruments (no SwiftUI invalidation per frame; today a `withObservationTracking` test) and UI-030's smooth scrolling with 100 strips is unmeasured; real mouse drag/double-click on faders only tested with synthesized NSEvents; occlusion pause has no test | U / user | todo |
+| DW-207 | T-076 | `MeterReading` holds one peak/RMS per channel strip, so mixer meters are a single bar, not L/R. Stereo meters need a two-channel reading (08 Interfaces change) | E+B / user | todo |
