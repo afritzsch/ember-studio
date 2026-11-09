@@ -2,13 +2,13 @@ import DAWModel
 import SwiftUI
 
 /// The project window (12 *Layout*): toolbar, browser | arrange | inspector, bottom pane, toasts.
-/// Thin over `ProjectWindowModel` (UI-003); the arrange canvas, mixer and the other panes are
-/// placeholders until their tasks (T-033, T-076, …) fill them in.
+/// Thin over `ProjectWindowModel` (UI-003); the device chain and comp editor panes are placeholders
+/// until their tasks fill them in.
 struct ProjectWindowView: View {
     @Bindable var model: ProjectWindowModel
 
     var body: some View {
-        let controls = Dictionary(model.controls.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        let controls = Dictionary(model.windowControls.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         VStack(spacing: 0) {
             ToolbarRow(model: model, controls: controls)
             Divider()
@@ -36,6 +36,10 @@ struct ProjectWindowView: View {
                     // UI-020: the piano roll needs room for its keyboard and velocity lane.
                     PianoRollPane(model: model.pianoRoll, controls: controls)
                         .frame(height: 300)
+                } else if pane == .mixer {
+                    // UI-030: strips need room for the fader between sends, pan and the buttons.
+                    MixerPane(mixer: model.mixer)
+                        .frame(height: 340)
                 } else {
                     PanePlaceholder(title: pane.title, detail: "")
                         .frame(height: 140)

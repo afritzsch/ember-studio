@@ -110,6 +110,8 @@ final class ProjectWindowModel: Identifiable {
     let pianoRoll = PianoRollModel()
     /// UI-040 (T-055): device, sample rate, buffer, input channels, latency; re-conversion progress.
     let audioPrefs = AudioPreferencesModel()
+    /// UI-030/031/033 (T-076): the Mixer tab's channel strips, meters and routing pickers.
+    let mixer = MixerModel()
 
     init(id: Int, store: ProjectStore, toasts: ToastCenter = ToastCenter()) {
         self.id = id
@@ -118,6 +120,7 @@ final class ProjectWindowModel: Identifiable {
         arrange.window = self
         pianoRoll.window = self
         audioPrefs.window = self
+        mixer.window = self
         audioPrefs.refreshDevices()
         // UI-004: device toasts name devices (also ones that are gone) and offer the audio settings.
         toasts.deviceName = { [weak self] id in self?.audioPrefs.name(of: id) }
@@ -137,6 +140,7 @@ final class ProjectWindowModel: Identifiable {
         guard store !== self.store else { return }
         arrange.finishDrag()
         pianoRoll.close()  // UI-021: its note-offs go to the old engine, before the swap
+        mixer.documentReplaced()
         self.store = store
         arrange.peaks.invalidate(nil)
         selectedTracks = []
@@ -242,7 +246,12 @@ final class ProjectWindowModel: Identifiable {
     }
 
     /// UI-052: every control this window shows, in display order.
-    var controls: [UIControl] {
+    var controls: [UIControl] { windowControls + mixer.controls }
+
+    /// The window's controls except the mixer's. The window's view reads these (it invalidates on
+    /// the transport and telemetry polls), so a mixer with 100 strips adds nothing to that;
+    /// `MixerPane` takes its controls from the strips.
+    var windowControls: [UIControl] {
         let hasEngine = engine != nil
         var controls: [UIControl] = [
             .button("transport.play", "Play", enabled: hasEngine && !isPlaying) { [weak self] in self?.play() },
