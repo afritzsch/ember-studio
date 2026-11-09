@@ -505,9 +505,9 @@ void VST3Instance::startLatencyTimer() {
 
 namespace {
 
-// Asks for `want` channels on the main (and aux) audio buses. False if the plugin refuses.
+// Asks for `want` on the main audio buses and `wantAux` on the aux input. False if the plugin refuses.
 bool tryArrangement(IAudioProcessor& processor, IComponent& component, int32 mainIn, int32 aux, int32 mainOut,
-                    SpeakerArrangement want) {
+                    SpeakerArrangement want, SpeakerArrangement wantAux) {
     const int32 numIn = component.getBusCount(kAudio, kInput);
     const int32 numOut = component.getBusCount(kAudio, kOutput);
     std::vector<SpeakerArrangement> ins(static_cast<std::size_t>(numIn), SpeakerArr::kEmpty);
@@ -515,7 +515,7 @@ bool tryArrangement(IAudioProcessor& processor, IComponent& component, int32 mai
     for (int32 i = 0; i < numIn; ++i) processor.getBusArrangement(kInput, i, ins[static_cast<std::size_t>(i)]);
     for (int32 i = 0; i < numOut; ++i) processor.getBusArrangement(kOutput, i, outs[static_cast<std::size_t>(i)]);
     if (mainIn >= 0) ins[static_cast<std::size_t>(mainIn)] = want;
-    if (aux >= 0) ins[static_cast<std::size_t>(aux)] = want;
+    if (aux >= 0) ins[static_cast<std::size_t>(aux)] = wantAux;
     if (mainOut >= 0) outs[static_cast<std::size_t>(mainOut)] = want;
     return processor.setBusArrangements(ins.data(), numIn, outs.data(), numOut) == kResultTrue;
 }
@@ -539,9 +539,13 @@ Result<void> VST3Instance::prepare(double sampleRate, uint32_t maxBlock) {
     if (processor.canProcessSampleSize(kSample32) != kResultTrue)
         return makeError(ErrorCode::unsupported, identifier() + " can't process 32-bit audio");
 
-    // PLUG-011 / PLUG-014: stereo where the plugin takes it, else mono, else what it has.
-    if (!tryArrangement(processor, component, impl.mainInput, impl.auxInput, impl.mainOutput, SpeakerArr::kStereo))
-        (void)tryArrangement(processor, component, impl.mainInput, impl.auxInput, impl.mainOutput, SpeakerArr::kMono);
+    // PLUG-011 / PLUG-014: stereo where the plugin takes it, else a mono sidechain (common), else
+    // mono throughout, else what it has.
+    const auto attempt = [&](SpeakerArrangement main, SpeakerArrangement aux) {
+        return tryArrangement(processor, component, impl.mainInput, impl.auxInput, impl.mainOutput, main, aux);
+    };
+    if (!attempt(SpeakerArr::kStereo, SpeakerArr::kStereo) && !attempt(SpeakerArr::kStereo, SpeakerArr::kMono))
+        (void)attempt(SpeakerArr::kMono, SpeakerArr::kMono);
 
     int32 in = 0, aux = 0, out = 0;
     if (impl.mainInput >= 0 && (!channelsOf(processor, kInput, impl.mainInput, in) || in < 1 || in > kMaxBusChannels))
@@ -730,15 +734,19 @@ Result<void> VST3Instance::setState(const std::vector<uint8_t>& state) {
     std::lock_guard lock(impl.mutex);
 
     // MemoryStream wraps the bytes without owning them; the plugin only reads.
+    // An empty section means the plugin had nothing to save: nothing to restore either (a plugin
+    // may refuse an empty stream, which isn't a bad state).
     void* componentBytes = const_cast<uint8_t*>(state.data() + componentAt);
-    {
-        MemoryStream stream(componentBytes, static_cast<TSize>(componentSize));
-        if (impl.component->setState(&stream) != kResultOk)
-            return makeError(ErrorCode::invalidArgument, identifier() + ": the component refused the state");
-    }
-    if (impl.controller) {
-        MemoryStream stream(componentBytes, static_cast<TSize>(componentSize));
-        impl.controller->setComponentState(&stream);
+    if (componentSize > 0) {
+        {
+            MemoryStream stream(componentBytes, static_cast<TSize>(componentSize));
+            if (impl.component->setState(&stream) != kResultOk)
+                return makeError(ErrorCode::invalidArgument, identifier() + ": the component refused the state");
+        }
+        if (impl.controller) {
+            MemoryStream stream(componentBytes, static_cast<TSize>(componentSize));
+            impl.controller->setComponentState(&stream);
+        }
     }
     if (impl.controller && controllerSize > 0) {
         MemoryStream stream(const_cast<uint8_t*>(state.data() + at), static_cast<TSize>(controllerSize));
