@@ -1,3 +1,9 @@
 {
-  "enabledMcpjsonServers": ["dawmcp"]
+  "enabledMcpjsonServers": ["dawmcp"],
+  "idleCompaction": false,
+  "modelSettings": {
+    "claude-opus-5-5": {
+      "autoCompactWindow": 1000000
+    }
+  }
 }
