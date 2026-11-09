@@ -189,7 +189,9 @@ private struct MixerStripView: View, Equatable {
             Text(PanTaper.label(pan: strip.pan))
                 .font(.system(size: 9).monospacedDigit())
                 .foregroundStyle(.secondary)
-                .frame(width: 22, alignment: .trailing)
+                .lineLimit(1)
+                .fixedSize()
+                .frame(width: 26, alignment: .trailing)
         }
     }
 
@@ -214,6 +216,7 @@ private struct MixerStripView: View, Equatable {
                                 ControlToggle(control: control, face: control.label.replacingOccurrences(of: "Input ", with: ""))
                             }
                         }
+                        .menuIndicator(.hidden)
                         .accessibilityIdentifier("\(strip.controlPrefix).input.menu")
                     }
                     Menu("Mon \(TrackHeaderModel.monitoringTitle(header.monitoring))") {
@@ -221,11 +224,18 @@ private struct MixerStripView: View, Equatable {
                             ControlToggle(control: control, face: control.label.replacingOccurrences(of: "Monitoring ", with: ""))
                         }
                     }
+                    .menuIndicator(.hidden)
                     .accessibilityIdentifier("\(strip.controlPrefix).monitor.menu")
                 }
+                .frame(height: Self.recordRowHeight)
+            } else {
+                // A bus or the master has no record row: keep the faders level with the tracks'.
+                Color.clear.frame(height: Self.recordRowHeight)
             }
         }
     }
+
+    private static let recordRowHeight: CGFloat = 16
 }
 
 /// UI-030: a `MixerSliderView` in SwiftUI. It reports to the model; SwiftUI only pushes the value back.
