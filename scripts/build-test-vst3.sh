@@ -85,7 +85,7 @@ until mkdir "$lock" 2>/dev/null; do
         exit 1
     fi
 done
-trap 'rmdir "$lock" 2>/dev/null || true' EXIT
+trap 'rm -rf "$out"/.tmp-*; rmdir "$lock" 2>/dev/null || true' EXIT
 
 mkdir -p "$objdir"
 cxx=(xcrun clang++ -std=c++17 -arch arm64 -w -O1 -g -fPIC -fvisibility=hidden -DRELEASE=1

@@ -8,6 +8,7 @@
 // Both report whatever latency ember_test_set_latency last set; the setter (or, when requested,
 // process() on the audio thread) calls IComponentHandler::restartComponent(kLatencyChanged).
 
+#include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <cstring>
@@ -203,14 +204,26 @@ public:
         const AudioBusBuffers& in = data.inputs[0];
         const AudioBusBuffers* side = data.numInputs > 1 ? &data.inputs[1] : nullptr;
         const AudioBusBuffers& out = data.outputs[0];
-        for (int32 c = 0; c < out.numChannels; ++c) {
+        // The output really is delayed by the reported latency, so PDC tests see it as a real plugin.
+        const uint32 delay = std::min<uint32>(gLatency.load(), kRingSize - 1);
+        for (int32 c = 0; c < out.numChannels && c < 2; ++c) {
             Sample32* o = out.channelBuffers32[c];
             const Sample32* i = in.channelBuffers32[c < in.numChannels ? c : 0];
             const Sample32* s = side && side->numChannels ? side->channelBuffers32[c < side->numChannels ? c : 0] : nullptr;
-            for (int32 n = 0; n < data.numSamples; ++n) o[n] = i[n] * gain_ + (s ? s[n] * mix_ : 0.0f);
+            for (int32 n = 0; n < data.numSamples; ++n) {
+                const uint32 w = (writePos_ + static_cast<uint32>(n)) & (kRingSize - 1);
+                ring_[c][w] = i[n] * gain_ + (s ? s[n] * mix_ : 0.0f);
+                o[n] = ring_[c][(w - delay) & (kRingSize - 1)];
+            }
         }
+        writePos_ = (writePos_ + static_cast<uint32>(data.numSamples)) & (kRingSize - 1);
         return kResultOk;
     }
+
+private:
+    static constexpr uint32 kRingSize = 1 << 15;
+    Sample32 ring_[2][kRingSize] = {};
+    uint32 writePos_ = 0;
 };
 
 class EmberSynth final : public Processor {
