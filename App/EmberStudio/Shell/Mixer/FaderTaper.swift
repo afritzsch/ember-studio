@@ -54,7 +54,7 @@ enum FaderTaper {
         let floorDB = points[0].db
         guard gain > 0 else { return delta > 0 ? Self.gain(db: floorDB) : 0 }
         let db = 20 * log10(Double(gain))
-        if delta < 0, db <= floorDB { return 0 }
+        if delta < 0, db <= floorDB + 1e-3 { return 0 }  // (Float rounding at the bottom mark)
         return Self.gain(db: max(db + delta, floorDB))
     }
 

@@ -51,7 +51,8 @@ final class ChannelMeterView: NSView {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     /// UI-031: only a meter someone can see reads the engine and draws.
-    var isOnScreen: Bool { window != nil && !isHiddenOrHasHiddenAncestor && !visibleRect.isEmpty }
+    /// (`visibleRect` isn't cut to the view's own bounds when `clipsToBounds` is off, as it is by default.)
+    var isOnScreen: Bool { window != nil && !isHiddenOrHasHiddenAncestor && !visibleRect.intersection(bounds).isEmpty }
 
     func update(channel: NodeIDValue) {
         guard channel != self.channel else { return }

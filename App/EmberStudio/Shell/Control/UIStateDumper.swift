@@ -24,7 +24,7 @@ import Foundation
 ///                                      audio: "assetID", "gain", "fadeIn", "fadeOut", "waveformLevel" | null;
 ///                                      midi: "notes"}],
 ///                    "selection", "marquee", "gesture", "playhead": {"tick", "x"}},
-///        "pianoRoll": {…}, "audioPreferences": {…}}]}
+///        "pianoRoll": {…}, "audioPreferences": {…}, "mixer": {…}}]}
 @MainActor
 enum UIStateDumper {
     static func dump(_ app: AppModel) -> JSONValue {
@@ -82,6 +82,80 @@ enum UIStateDumper {
             "arrange": dump(window.arrange),
             "pianoRoll": dump(window.pianoRoll),
             "audioPreferences": dump(window.audioPrefs),
+            "mixer": dump(window.mixer),
+        ]
+    }
+
+    /// UI-030/031/033 (T-076): the Mixer tab: each strip's values, routing, sends, inserts, meter and
+    /// the ids of its controls (a track's mute, solo, arm, monitor and input are its header's,
+    /// `track.<id>.…`). 12 *Mixer details*. `gainDB`, `levelDB` are null for silence; a strip's
+    /// `meter` is null until the engine reports one.
+    ///
+    ///     {"open", "gesture", "strips": [{id, kind (audio|midi|bus|master), name, controlPrefix,
+    ///      selected, gain, gainDB, faderPosition, pan, panLabel, mute, solo, armed?, inputPair?, monitoring?,
+    ///      output: {kind, id?, name} | null, outputChoices: [{id, name, current}],
+    ///      sends: [{id, target, targetName, level, levelDB, tap, levelPosition, controls}],
+    ///      sendTargets: [{id, name}], inserts: [{id, name, bypass}],
+    ///      meter: {peak, rms, peakDB, rmsDB, holdDB, clipped} | null, controls: [ids]}]}
+    static func dump(_ mixer: MixerModel) -> JSONValue {
+        [
+            "open": .bool(mixer.isOpen),
+            "gesture": mixer.activeDrag.map { .string($0.label) } ?? .null,
+            "strips": .array(mixer.strips.map { dump($0, meters: mixer.meters) }),
+        ]
+    }
+
+    private static func dump(_ strip: MixerStripModel, meters: MeterBank) -> JSONValue {
+        var json: [String: JSONValue] = [
+            "id": .int(Int64(bitPattern: strip.id)), "kind": .string(strip.kind.rawValue), "name": .string(strip.name),
+            "controlPrefix": .string(strip.controlPrefix), "selected": .bool(strip.isSelected),
+            "gain": .double(Double(strip.gain)), "gainDB": gainDB(strip.gain), "gainLabel": .string(FaderTaper.label(gain: strip.gain)),
+            "faderPosition": .double(strip.faderPosition), "pan": .double(Double(strip.pan)),
+            "panLabel": .string(PanTaper.label(pan: strip.pan)), "mute": .bool(strip.mute), "solo": .bool(strip.solo),
+            "output": strip.output.map { output in
+                switch output {
+                case .master: ["kind": "master", "name": .string(strip.outputTitle ?? "")]
+                case .bus(let id): ["kind": "bus", "id": .int(Int64(bitPattern: id)), "name": .string(strip.outputTitle ?? "")]
+                }
+            } ?? .null,
+            "outputChoices": .array(strip.outputChoices.map { choice in
+                ["id": .int(Int64(bitPattern: choice.id)), "name": .string(choice.name), "current": .bool(choice.isCurrent)]
+            }),
+            "sends": .array(strip.sends.map { send in
+                [
+                    "id": .int(Int64(bitPattern: send.id)), "target": .int(Int64(bitPattern: send.values.target)),
+                    "targetName": .string(send.values.targetName), "level": .double(Double(send.values.level)),
+                    "levelDB": gainDB(send.values.level), "levelPosition": .double(send.levelPosition),
+                    "tap": .string(send.values.tap.rawValue), "controls": .array(send.controls.map { .string($0.id) }),
+                ]
+            }),
+            "sendTargets": .array(strip.sendTargets.map { ["id": .int(Int64(bitPattern: $0.id)), "name": .string($0.name)] }),
+            "inserts": .array(strip.inserts.map { ["id": .int(Int64(bitPattern: $0.id)), "name": .string($0.name), "bypass": .bool($0.bypass)] }),
+            "meter": meter(meters.readMeter(strip.id), meters.state(of: strip.id)),
+            "controls": .array(strip.allControlIDs.map { .string($0) }),
+        ]
+        if strip.header != nil {
+            json["armed"] = .bool(strip.armed)
+            json["inputPair"] = .int(Int64(strip.inputPair))
+            json["monitoring"] = .string(strip.monitoring.rawValue)
+        }
+        return .object(json)
+    }
+
+    private static func gainDB(_ gain: Float) -> JSONValue {
+        gain > 0 ? .double(20 * log10(Double(gain))) : .null
+    }
+
+    /// The engine's reading now; peak bar, hold line and clip latch from the last display frame.
+    private static func meter(_ reading: MeterReading?, _ state: MeterBallistics?) -> JSONValue {
+        guard reading != nil || state != nil else { return .null }
+        return [
+            "peak": reading.map { .double(Double($0.peak)) } ?? .null,
+            "rms": reading.map { .double(Double($0.rms)) } ?? .null,
+            "peakDB": state.map { .double($0.peakDB) } ?? .null,
+            "rmsDB": state.map { .double($0.rmsDB) } ?? .null,
+            "holdDB": state.map { .double($0.holdDB) } ?? .null,
+            "clipped": .bool(state?.clipped ?? false),
         ]
     }
 
