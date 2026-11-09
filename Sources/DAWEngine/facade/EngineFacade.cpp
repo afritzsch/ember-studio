@@ -60,6 +60,7 @@
 #include "nodes/MidiClipPlayer.h"
 #include "nodes/Reverb.h"
 #include "plugins/AUPluginHost.h"
+#include "plugins/VST3PluginHost.h"
 #include "record/Recorder.h"
 #include "time/TempoMap.h"
 
@@ -251,6 +252,8 @@ struct EngineFacade::Impl {
     // PLUG-010 (T-061): the session's Audio Units by device slot, and the auPlugin factory.
     // Declared before `engine`, so it outlives the nodes (they only hold it weakly anyway).
     std::shared_ptr<AUPluginHost> plugins = std::make_shared<AUPluginHost>();
+    // PLUG-011 (T-062): the session's VST3 plugins, and the vst3Plugin factory.
+    std::shared_ptr<VST3PluginHost> vst3Plugins = std::make_shared<VST3PluginHost>();
 
     // Declaration order is destruction order in reverse: the loader and compiler threads stop
     // before the state their callbacks touch, and the engine outlives everything rendering
@@ -430,6 +433,12 @@ EngineFacade::Impl::Impl(EngineMode m, const DriverConfigPOD& cfg, FacadeOptions
     // the kind) and kept in registerNodes for rate changes.
     registerNodes = [hook = std::move(registerNodes), host = plugins](NodeRegistry& r) -> Result<void> {
         if (auto set = r.set(NodeKind::auPlugin, host->kindInfo()); !set) return set;
+        return hook ? hook(r) : Result<void>{};
+    };
+
+    // PLUG-011 (T-062): hosted VST3 plugins, like the AUs above.
+    registerNodes = [hook = std::move(registerNodes), host = vst3Plugins](NodeRegistry& r) -> Result<void> {
+        if (auto set = r.set(NodeKind::vst3Plugin, host->kindInfo()); !set) return set;
         return hook ? hook(r) : Result<void>{};
     };
 
@@ -813,6 +822,15 @@ void EngineFacade::Impl::pump() {
     // PLUG-010/012 (T-061): an AU that couldn't be instantiated or prepared (its node renders as
     // absent) or a state that didn't apply.
     for (AUPluginHost::Failure& failure : plugins->takeFailures()) {
+        EngineEventPOD event;
+        event.type = EngineEventType::pluginCrashed;
+        event.subject = failure.slot;
+        event.error = toFacadeError(failure.error);
+        pushEvent(std::move(event));
+    }
+
+    // PLUG-011/012 (T-062): the same, for VST3 plugins.
+    for (VST3PluginHost::Failure& failure : vst3Plugins->takeFailures()) {
         EngineEventPOD event;
         event.type = EngineEventType::pluginCrashed;
         event.subject = failure.slot;
@@ -1325,13 +1343,14 @@ void EngineFacade::armInput(NodeID track, uint32_t inputChannelPair, bool armed)
     impl.prepareRecording();  // REC-001: the FIFOs exist before the transport records
 }
 
-// PLUG-012 (T-061): an AU is instantiated right here, on the caller's (non-RT) thread, and parked
-// for `slot`; the graph build that brings the slot's auPlugin node adopts it. The job is finished
-// when this returns. VST3 is T-062.
+// PLUG-012 (T-061, T-062): an AU or VST3 plugin is instantiated right here, on the caller's
+// (non-RT) thread, and parked for `slot`; the graph build that brings the slot's node adopts it.
+// The job is finished when this returns.
 JobID EngineFacade::instantiatePlugin(NodeID slot, const PluginDescriptorPOD& plugin) {
     FacadeError error;
-    if (plugin.format != PluginFormatPOD::audioUnit) {
-        error = facadeError(FacadeErrorCode::unsupported, "VST3 hosting is not implemented yet (T-062)");
+    if (plugin.format == PluginFormatPOD::vst3) {
+        if (auto made = impl_->vst3Plugins->instantiate(slot, plugin.identifier); !made)
+            error = toFacadeError(made.error());
     } else if (auto made = impl_->plugins->instantiate(slot, plugin.identifier); !made) {
         error = toFacadeError(made.error());
     }
@@ -1343,18 +1362,29 @@ JobID EngineFacade::instantiatePlugin(NodeID slot, const PluginDescriptorPOD& pl
 
 // PLUG-016 (T-061): the AU's fullState as a binary plist, off the audio thread. Empty for a slot
 // without an AU or state; a slot whose plugin failed to load returns the state it was given.
+// PLUG-016 (T-062): a slot the VST3 host was configured with answers from there (the state
+// container); anything else is the AU host's, whose empty answer also covers unknown slots.
 ByteVector EngineFacade::getPluginState(NodeID slot) {
-    auto state = impl_->plugins->state(slot);
+    auto state = impl_->vst3Plugins->knows(slot) ? impl_->vst3Plugins->state(slot) : impl_->plugins->state(slot);
     return state ? std::move(state).value() : ByteVector{};
 }
 
 // PLUG-016 (T-061): applies `state` to the slot's AU (or holds it for the slot's first AU). A
 // state the AU refuses is reported as a pluginCrashed event with the error.
 void EngineFacade::setPluginState(NodeID slot, const ByteVector& state) {
+    // PLUG-016 (T-062): a slot not yet configured could become either kind, so both hosts hold the
+    // state and the slot's first plugin (of whichever format) consumes it.
+    if (impl_->vst3Plugins->knows(slot)) {
+        if (auto set = impl_->vst3Plugins->setState(slot, state); !set) impl_->vst3Plugins->reportFailure(slot, set.error());
+        return;
+    }
+    (void)impl_->vst3Plugins->setState(slot, state);  // held (nothing live here yet)
     if (auto set = impl_->plugins->setState(slot, state); !set) impl_->plugins->reportFailure(slot, set.error());
 }
 
-std::string EngineFacade::pluginInfoJSON(NodeID slot) const { return impl_->plugins->infoJSON(slot); }
+std::string EngineFacade::pluginInfoJSON(NodeID slot) const {
+    return impl_->vst3Plugins->knows(slot) ? impl_->vst3Plugins->infoJSON(slot) : impl_->plugins->infoJSON(slot);
+}
 void* EngineFacade::createPluginView(NodeID) { return nullptr; }
 void EngineFacade::destroyPluginView(NodeID) {}
 

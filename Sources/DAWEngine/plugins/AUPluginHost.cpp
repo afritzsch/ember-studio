@@ -1,46 +1,16 @@
 #include "plugins/AUPluginHost.h"
 
-#include <cmath>
-#include <cstdio>
 #include <utility>
 
 #include "plugins/AUPluginConfig.h"
 #include "plugins/AUPluginNode.h"
+#include "plugins/PluginJSON.h"
 
 namespace daw {
 
 namespace {
 
 constexpr std::size_t kMaxFailures = 256;
-
-std::string jsonString(std::string_view s) {
-    std::string out = "\"";
-    for (unsigned char c : s) {
-        switch (c) {
-        case '"': out += "\\\""; break;
-        case '\\': out += "\\\\"; break;
-        case '\n': out += "\\n"; break;
-        case '\r': out += "\\r"; break;
-        case '\t': out += "\\t"; break;
-        default:
-            if (c < 0x20) {
-                char buf[8];
-                std::snprintf(buf, sizeof buf, "\\u%04x", c);
-                out += buf;
-            } else {
-                out += static_cast<char>(c);
-            }
-        }
-    }
-    return out + "\"";
-}
-
-std::string jsonNumber(double v) {
-    if (!std::isfinite(v)) return "null";
-    char buf[32];
-    std::snprintf(buf, sizeof buf, "%.9g", v);
-    return buf;
-}
 
 } // namespace
 
@@ -213,27 +183,27 @@ std::string AUPluginHost::infoJSON(NodeID slotID) const {
         identifier = it->second.identifier;
         error = it->second.error;
     }
-    std::string json = "{\"slot\":" + std::to_string(slotID) + ",\"identifier\":" + jsonString(identifier) +
+    std::string json = "{\"slot\":" + std::to_string(slotID) + ",\"identifier\":" + pluginJSONString(identifier) +
                        ",\"loaded\":" + (instance ? "true" : "false");
-    if (error) json += ",\"error\":" + jsonString(error->message);
+    if (error) json += ",\"error\":" + pluginJSONString(error->message);
     if (instance) {
-        json += ",\"name\":" + jsonString(instance->name());
+        json += ",\"name\":" + pluginJSONString(instance->name());
         json += std::string(",\"instrument\":") + (instance->hasAudioInput() ? "false" : "true");
         json += std::string(",\"midi\":") + (instance->acceptsMIDI() ? "true" : "false");
         json += std::string(",\"sidechain\":") + (instance->sidechainEnabled() ? "true" : "false");
         json += ",\"inputChannels\":" + std::to_string(instance->inputChannels());
         json += ",\"outputChannels\":" + std::to_string(instance->outputChannels());
         json += ",\"latencySamples\":" + std::to_string(instance->latencySamples());
-        json += ",\"tailSeconds\":" + jsonNumber(instance->tailSeconds());
+        json += ",\"tailSeconds\":" + pluginJSONNumber(instance->tailSeconds());
         json += ",\"params\":[";
         const std::vector<AUParamInfo> params = instance->params(true);
         for (std::size_t i = 0; i < params.size(); ++i) {
             const AUParamInfo& p = params[i];
             if (i) json += ",";
             json += "{\"index\":" + std::to_string(i) + ",\"address\":" + std::to_string(p.address) +
-                    ",\"id\":" + jsonString(p.identifier) + ",\"name\":" + jsonString(p.name) +
-                    ",\"unit\":" + jsonString(p.unit) + ",\"min\":" + jsonNumber(p.min) +
-                    ",\"max\":" + jsonNumber(p.max) + ",\"value\":" + jsonNumber(p.value) +
+                    ",\"id\":" + pluginJSONString(p.identifier) + ",\"name\":" + pluginJSONString(p.name) +
+                    ",\"unit\":" + pluginJSONString(p.unit) + ",\"min\":" + pluginJSONNumber(p.min) +
+                    ",\"max\":" + pluginJSONNumber(p.max) + ",\"value\":" + pluginJSONNumber(p.value) +
                     ",\"canRamp\":" + (p.canRamp ? "true" : "false") + "}";
         }
         json += "]";
