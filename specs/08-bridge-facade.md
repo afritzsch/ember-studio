@@ -206,6 +206,14 @@ AU hosting (10 PLUG-010, 012..016) fills the existing plugin calls and adds one 
 
 Affected: T-061 only. T-062 (VST3) should follow the same configJSON / NaN / pluginInfoJSON shape; T-063 (editors) and T-065 (device chain UI) read `pluginInfoJSON`.
 
+### Contract delta (T-070), accepted (autobuild, see docs/autobuild/DECISIONS.md)
+DSP-040 asks the NaN guards to bump telemetry (DW-142). **Additive and defaulted**; no existing field or call changes.
+- `TelemetryPOD` gains `uint64_t nanBlocks = 0;` (and `TelemetrySnapshot`, `Telemetry::countNanBlock()`): the blocks the built-in effects' NaN guards silenced since the engine was created; each effect's silenced block counts once, so a bad input feeding two effects counts twice. It is a relaxed atomic bumped on the audio thread.
+- Swift `EngineTelemetry.nanBlocks` mirrors it, so `engine.telemetry` (13) reports it.
+- `paramInfoJSON` keeps its signature; it now reads `NodeRegistry::paramInfo(NodeKind)` (06 Interfaces, DSP-041). `.sampler` and `.eq` return their tables instead of `"[]"`.
+
+Affected: T-070 only. No other task's calls change.
+
 ## Status
 | ID | status | test |
 |---|---|---|
