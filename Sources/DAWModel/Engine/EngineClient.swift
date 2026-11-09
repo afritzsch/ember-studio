@@ -252,6 +252,7 @@ public final class EngineClient: EngineProtocol {
         out.recordDrops = t.recordDrops  // T-052
         out.deviceInputLatency = t.deviceInputLatency
         out.armedTracks = t.armedTracks
+        out.nanBlocks = t.nanBlocks  // T-070
         return out
     }
 

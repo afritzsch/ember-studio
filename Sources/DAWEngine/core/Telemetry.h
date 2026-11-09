@@ -11,6 +11,8 @@
 //                                    the device starts or changes (IO-005)
 //   graph / PDC (T-012/T-021)        publishNodeLatencies() with the latencies of the graph being
 //                                    rendered; one writer at a time (see below)
+//   built-in effects (T-070)         countNanBlock() from process() when the NaN guard silences a
+//                                    block (DSP-040, DW-142)
 //   channel strips, meters (T-013/T-020)  writeMeter() from process() for the MeterID the node was
 //                                    configured with (MIX-005); one node per MeterID
 //
@@ -56,6 +58,9 @@ struct TelemetrySnapshot {
     // DW-037: blocks that ended with the RetireQueue full, so RT retire() calls were failing
     // (callers keep the object and retry; a growing count means daw.reclaim isn't keeping up).
     uint64_t retireQueueFullBlocks = 0;
+    // DSP-040, DW-142: blocks the built-in effects' NaN guards silenced (each effect's own block
+    // counts once, so one bad input through two effects counts twice).
+    uint64_t nanBlocks = 0;
     // Output latency in samples: the device's (IO-005) plus the current graph's PDC latency
     // (MIX-021); outputLatency is their sum.
     uint32_t deviceOutputLatency = 0;
@@ -110,6 +115,7 @@ public:
 
     // Any thread, any number of them.
     void countXrun() DAW_RT;
+    void countNanBlock() DAW_RT;  // DSP-040, DW-142
     void setDeviceOutputLatency(uint32_t samples) DAW_RT;
 
     // One writer at a time; it's simplest for the audio thread to copy the table from the graph
@@ -151,6 +157,7 @@ private:
         std::atomic<uint64_t> graphEpoch{0};
         std::atomic<uint64_t> oversizeBlocks{0};
         std::atomic<uint64_t> retireQueueFullBlocks{0};
+        std::atomic<uint64_t> nanBlocks{0};  // DW-142
         // Writer-private (audio thread): EMA state and the last known sample rate.
         float emaPercent = 0;
         bool emaSeeded = false;

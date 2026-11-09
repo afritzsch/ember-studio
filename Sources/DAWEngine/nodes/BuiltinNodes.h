@@ -25,6 +25,9 @@
 //   delay            DSP-032 stereo/ping-pong delay (Delay): params time, sync, note, feedback,
 //                    lowpass, pingpong, mix; slots beyond numParams use their defaults (see
 //                    Delay.h).
+//   eq               DSP-030 six-band RBJ EQ (Eq): HP, low shelf, 2× peak, high shelf, LP; 22 params,
+//                    slots beyond numParams use their defaults; NaN blocks count into `telemetry`
+//                    (see Eq.h).
 
 #include "core/Result.h"
 #include "core/Telemetry.h"

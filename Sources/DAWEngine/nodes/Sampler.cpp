@@ -234,11 +234,13 @@ Result<std::unique_ptr<Sampler>> Sampler::create(const NodeDesc& desc, const Ass
 }
 
 NodeKindInfo Sampler::kindInfo(AssetLookup lookup) {
-    return NodeKindInfo{[lookup = std::move(lookup)](const NodeCreateInfo& info) -> Result<std::unique_ptr<Node>> {
+    NodeKindInfo kind{[lookup = std::move(lookup)](const NodeCreateInfo& info) -> Result<std::unique_ptr<Node>> {
         auto sampler = create(info.desc, lookup);
         if (!sampler) return sampler.error();
         return std::unique_ptr<Node>(std::move(sampler).value());
     }};
+    kind.paramInfo = kParamInfo;  // DSP-041, DW-141
+    return kind;
 }
 
 Sampler::Sampler(std::vector<Zone> zones, ParamID firstParam, uint32_t numParams)

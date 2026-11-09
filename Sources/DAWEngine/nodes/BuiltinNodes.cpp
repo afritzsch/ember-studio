@@ -8,6 +8,7 @@
 #include "nodes/ChannelStrip.h"
 #include "nodes/Compressor.h"
 #include "nodes/Delay.h"
+#include "nodes/Eq.h"
 #include "nodes/GainNode.h"
 #include "nodes/Metronome.h"
 #include "nodes/MidiClipPlayer.h"
@@ -36,11 +37,18 @@ Result<void> registerBuiltinNodes(NodeRegistry& registry, AssetLookup lookup, Te
     };
     NodeKindInfo stripInfo{std::move(strip)};
     stripInfo.meters = true;  // MIX-005, DW-048
+    stripInfo.paramInfo = ChannelStrip::kParamInfo;  // DSP-041
     if (auto r = registry.set(NodeKind::channelStrip, std::move(stripInfo)); !r) return r;
 
     if (auto r = registry.set(NodeKind::compressor, Compressor::kindInfo(telemetry)); !r) return r;  // DSP-031
     if (auto r = registry.set(NodeKind::reverb, Reverb::kindInfo()); !r) return r;  // DSP-033
     if (auto r = registry.set(NodeKind::delay, Delay::kindInfo()); !r) return r;  // DSP-032
+    // DSP-040 (DW-142): the NaN-guarded effects count into the engine's telemetry. Registered again
+    // because this file is add-only during T-070's wave; a later task can fold these lines into
+    // the two above.
+    if (auto r = registry.set(NodeKind::reverb, Reverb::kindInfo(telemetry)); !r) return r;
+    if (auto r = registry.set(NodeKind::delay, Delay::kindInfo(telemetry)); !r) return r;
+    if (auto r = registry.set(NodeKind::eq, Eq::kindInfo(telemetry)); !r) return r;  // DSP-030
 
     auto gain = [](const NodeCreateInfo& info) -> Result<std::unique_ptr<Node>> {
         if (info.desc.numParams < GainNode::kMinNumParams)
@@ -49,6 +57,7 @@ Result<void> registerBuiltinNodes(NodeRegistry& registry, AssetLookup lookup, Te
                                  std::to_string(GainNode::kMinNumParams) + " param");
         return std::unique_ptr<Node>(std::make_unique<GainNode>(info.desc.firstParam, info.desc.numParams));
     };
+    registry.setParamInfo(NodeKind::gain, GainNode::kParamInfo);  // DSP-041, DW-160
     return registry.set(NodeKind::gain, {std::move(gain)});
 }
 

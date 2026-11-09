@@ -87,6 +87,10 @@ void Telemetry::countXrun() DAW_RT {
     device_.xruns.fetch_add(1, std::memory_order_relaxed);
 }
 
+void Telemetry::countNanBlock() DAW_RT {
+    block_.nanBlocks.fetch_add(1, std::memory_order_relaxed);
+}
+
 void Telemetry::setDeviceOutputLatency(uint32_t samples) DAW_RT {
     device_.deviceOutputLatency.store(samples, std::memory_order_relaxed);
 }
@@ -123,6 +127,7 @@ TelemetrySnapshot Telemetry::snapshot() const {
     s.graphEpoch = block_.graphEpoch.load(std::memory_order_relaxed);
     s.oversizeBlocks = block_.oversizeBlocks.load(std::memory_order_relaxed);
     s.retireQueueFullBlocks = block_.retireQueueFullBlocks.load(std::memory_order_relaxed);
+    s.nanBlocks = block_.nanBlocks.load(std::memory_order_relaxed);
     s.deviceOutputLatency = device_.deviceOutputLatency.load(std::memory_order_relaxed);
     // The two table scalars come from the same write; the seqlock isn't needed for a scalar
     // each, but reading both under it keeps graphLatency and the count from different graphs

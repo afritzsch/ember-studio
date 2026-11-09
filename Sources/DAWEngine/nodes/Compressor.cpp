@@ -45,9 +45,10 @@ NodeKindInfo Compressor::kindInfo(Telemetry* telemetry) {
         const MeterTarget meter =
             telemetry && create.meter != kNoMeter ? MeterTarget{telemetry, create.meter} : MeterTarget{};
         return std::unique_ptr<Node>(
-            std::make_unique<Compressor>(create.desc.firstParam, create.desc.numParams, meter));
+            std::make_unique<Compressor>(create.desc.firstParam, create.desc.numParams, meter, telemetry));
     }};
     info.meters = true;  // DSP-031: the gain-reduction meter
+    info.paramInfo = kParamInfo;  // DSP-041
     return info;
 }
 
@@ -104,6 +105,7 @@ void Compressor::process(ProcessContext& ctx, NodeIO& io) DAW_RT {
         env_ = 0.0;
         ms_ = 0.0;
         nanBlocks_.fetch_add(1, std::memory_order_relaxed);
+        if (telemetry_ != nullptr) telemetry_->countNanBlock();  // DW-142
         if (meter_.telemetry != nullptr) meter_.telemetry->writeMeter(meter_.id, 1.0f, 1.0f);
         return;
     }
