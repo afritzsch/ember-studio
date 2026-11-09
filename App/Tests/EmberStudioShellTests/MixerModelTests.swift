@@ -449,7 +449,7 @@ struct MixerAppKitTests {
         #expect(reads.value.isEmpty)
     }
 
-    @Test("UI-031: the display link runs only while the clock view is in a window, and doesn't retain its window")
+    @Test("UI-031: the display link runs only while the clock view is in a window (hiding the tab removes it)")
     func displayLink() throws {
         let bank = MeterBank()
         let host = hostWindow()
@@ -476,8 +476,9 @@ struct MixerAppKitTests {
             host.contentView?.addSubview(clock)
             #expect(clock.isRunning)
             weakClock = clock
-            clock.removeFromSuperview()
+            // Still in the window, the link still live: only the weak proxy lets the view go.
             host.close()
+            host.contentView = nil
         }
         #expect(weakClock == nil, "no retain cycle through the display link")
     }
