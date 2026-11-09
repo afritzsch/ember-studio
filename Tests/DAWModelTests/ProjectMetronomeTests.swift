@@ -239,10 +239,9 @@ struct ProjectMetronomeTests {
         #expect(gain.map(\.index) == [ParamLayout.Send.level, ParamLayout.Send.mute])
     }
 
-    /// `routing` is left out: its EQ, compressor and delay have no engine nodes yet (06).
     @Test("TIME-010: the real engine builds fixture graphs with the metronome node in them")
     func realEngineAcceptsGraph() async throws {
-        for project in [Project(), GraphFixtures.audioTracks(), try GraphFixtures.midiTempo()] {
+        for project in [Project(), GraphFixtures.audioTracks(), try GraphFixtures.midiTempo(), try GraphFixtures.project(named: "routing")] {
             let engine = try EngineClient(.offline())
             let store = ProjectStore(project: project)
             let sync = try store.attachEngine(engine, debounce: .zero)
