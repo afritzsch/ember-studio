@@ -86,16 +86,17 @@ inline BiquadCoeffs biquadHighShelf(double freq, double q, double gainDb, double
 struct BiquadState {
     double z1 = 0.0, z2 = 0.0;
 
-    // State below this (−240 dBFS) is stored as exactly 0, so silence reaches exact 0 in finite
-    // time and nothing decays into denormals (DSP-040).
+    // When both state terms are below this (−240 dBFS) they are stored as exactly 0, so silence
+    // reaches exact 0 in finite time and nothing decays into denormals (DSP-040). Both together:
+    // in a narrow low-frequency filter the two terms nearly cancel, and zeroing one alone
+    // re-excites the filter, which then limit-cycles around 1e-9 instead of decaying.
     static constexpr double kSnap = 1e-12;
 
     double tick(double x, const BiquadCoeffs& c) DAW_RT {
         const double y = c.b0 * x + z1;
         z1 = c.b1 * x - c.a1 * y + z2;
         z2 = c.b2 * x - c.a2 * y;
-        if (std::fabs(z1) < kSnap) z1 = 0.0;
-        if (std::fabs(z2) < kSnap) z2 = 0.0;
+        if (std::fabs(z1) < kSnap && std::fabs(z2) < kSnap) z1 = z2 = 0.0;
         return y;
     }
 
