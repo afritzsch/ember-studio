@@ -72,6 +72,11 @@ Unattended phases started by `/autobuild` (see `.claude/skills/autobuild/SKILL.m
 - T-061 merged (c943dbf) after a small app follow-up (app saves capture live AU state, DW-143): test.sh 11/11. T-064 and T-074 now ready. Worker closed.
 - End: 4/4 merged, main green (test.sh 11/11 on the last trial merge), week 75%, five-hour window 46%, no worker session left open. Run stopped as the user asked (final phase).
 
+### Phase 6 (2026-11-09)
+- New run after the phase-5 stop (week reset). Wave: T-053 CoreMIDI + MIDI recording (E, M5), T-062 VST3 hosting (P, M6), T-070 EQ (D, M7; also closes DW-173 `NodeRegistry::paramInfo`), T-076 mixer view (U, M7; includes DW-202). T-054 waits for the next phase (one E task per wave).
+- Start: week 1%, five-hour window 4%.
+- Pre-decisions in DECISIONS.md: T-053 contract, routing and placement; T-062 contract and test plugin; T-070 registry; T-076 inserts and faders.
+
 ## Summary for the user
 
 The run had five phases (2026-11-02 → 2026-11-04). The week went 0% → 75%; phase 5 ran past WEEK_STOP because you authorized it.

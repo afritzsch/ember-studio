@@ -88,7 +88,7 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 | T-050 | E | FakeDeviceDriver (loopback, scripted events) | TEST-005 | T-011 | done |
 | T-051 | E | DeviceMonitor, hot-swap sequence, xrun detection, EngineEvents | IO-020..023 | T-050 | done |
 | T-052 | E | Audio recording: FIFOs, disk writer, latency comp, finalize, punch | REC-001..005 | T-050, T-009 | done |
-| T-053 | E | CoreMIDI input + MIDI recording | REC-010..012 | T-040 | ready |
+| T-053 | E | CoreMIDI input + MIDI recording | REC-010..012 | T-040 | wip(t-053-coremidi) |
 | T-054 | E | Input monitoring modes | REC-020..022 | T-052 | ready |
 | T-055 | U | Audio preferences, device toasts, arm/monitor buttons | UI-040, UI-004 | T-051, T-034 | done |
 | T-056 | E+M | Session sample-rate change (re-convert assets, re-prepare) | IO-033, MODEL-005 (`SetSessionSampleRate`) | T-051 | done |
@@ -98,7 +98,7 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 |---|---|---|---|---|---|
 | T-060 | P | PluginScanner + cache + blocklist | PLUG-001..004 | T-001 | done |
 | T-061 | P | AU hosting node (FX + instrument), params, state, latency | PLUG-010, 012..016 (AU) | T-021, T-014 | done |
-| T-062 | P | VST3 hosting node + build SDK `again` test plugin | PLUG-011..016 (VST3) | T-021, T-014 | ready |
+| T-062 | P | VST3 hosting node + build SDK `again` test plugin | PLUG-011..016 (VST3) | T-021, T-014 | wip(t-062-vst3-hosting) |
 | T-063 | P+U | Plugin editor windows (AU view controller, VST3 IPlugView) | PLUG-017 | T-061, T-062, T-032 | todo |
 | T-064 | P | Host bypass, NaN guard, crash marker + safe-mode open | PLUG-018, 020..022 | T-061 | ready |
 | T-065 | U | Device chain view (generic UI from ParamInfo), plugin manager | UI-032, UI-041 | T-063 | todo |
@@ -108,13 +108,13 @@ DSP effects (T-070..073) depend only on the Node API and can be **pulled forward
 
 | Task | Lane | Title | Requirements | Depends on | Status |
 |---|---|---|---|---|---|
-| T-070 | D | EQ | DSP-030, 040, 041 | T-004, T-005 | ready |
+| T-070 | D | EQ | DSP-030, 040, 041 | T-004, T-005 | wip(t-070-eq) |
 | T-071 | D | Compressor (+ sidechain) | DSP-031, 040, 041 | T-005, T-023 | done |
 | T-072 | D | Delay (tempo sync) | DSP-032, 040, 041 | T-008 | done |
 | T-073 | D | Reverb (FDN, deterministic) | DSP-033, 040, 041 | T-004, T-005 | done |
 | T-074 | E+M | Automation lanes model + AutomationPlayer + plugin param path | AUTO-001..005, 008..010 | T-030, T-061/T-062 (for AUTO-009) | ready |
 | T-075 | U+M | Automation recording (touch/latch/write) + lane UI | AUTO-006, 007, UI-015 | T-074, T-033 | todo |
-| T-076 | U | Mixer view + meters + routing pickers | UI-030, 031, 033 | T-022, T-032 | ready |
+| T-076 | U | Mixer view + meters + routing pickers | UI-030, 031, 033 | T-022, T-032 | wip(t-076-mixer-view) |
 | T-077 | D | M7 goldens | TEST (M7 set) | T-071, T-073, T-074 | todo |
 
 ### M8 — Comping, export, hardening
