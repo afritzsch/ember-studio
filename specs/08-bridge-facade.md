@@ -206,6 +206,12 @@ AU hosting (10 PLUG-010, 012..016) fills the existing plugin calls and adds one 
 
 Affected: T-061 only. T-062 (VST3) should follow the same configJSON / NaN / pluginInfoJSON shape; T-063 (editors) and T-065 (device chain UI) read `pluginInfoJSON`.
 
+### Contract delta (T-062), accepted (autobuild, see docs/autobuild/DECISIONS.md "T-062 contract")
+VST3 hosting fills the same calls for `.vst3` descriptors. No signature, field or enum case changes.
+- `NodeKind::vst3Plugin` config: `{"identifier": "path#classUID", "state"?: "<base64>"}`; DAWModel writes it from a `.vst3` `DeviceSlot` as `.au` slots.
+- `instantiatePlugin`, `getPluginState`/`setPluginState` and `pluginInfoJSON` work for VST3 slots (10 "Contract delta (T-062)"): state is the `EVS3` blob; `pluginInfoJSON` has the same shape, with `address`/`id` = the ParamID, `min` 0, `max` 1, `canRamp` false (normalized values). The facade routes each call by which host knows the slot; a `setPluginState` for a slot no host knows yet is held for its first plugin of either format.
+- `pluginCrashed` events carry VST3 failures the same way.
+
 ## Status
 | ID | status | test |
 |---|---|---|

@@ -1372,13 +1372,13 @@ ByteVector EngineFacade::getPluginState(NodeID slot) {
 // PLUG-016 (T-061): applies `state` to the slot's AU (or holds it for the slot's first AU). A
 // state the AU refuses is reported as a pluginCrashed event with the error.
 void EngineFacade::setPluginState(NodeID slot, const ByteVector& state) {
-    // PLUG-016 (T-062): a slot not yet configured could become either kind, so both hosts hold the
+    // PLUG-016 (T-062): a slot not configured yet could become either kind, so both hosts hold the
     // state and the slot's first plugin (of whichever format) consumes it.
     if (impl_->vst3Plugins->knows(slot)) {
         if (auto set = impl_->vst3Plugins->setState(slot, state); !set) impl_->vst3Plugins->reportFailure(slot, set.error());
         return;
     }
-    (void)impl_->vst3Plugins->setState(slot, state);  // held (nothing live here yet)
+    if (!impl_->plugins->knows(slot)) (void)impl_->vst3Plugins->setState(slot, state);  // held only
     if (auto set = impl_->plugins->setState(slot, state); !set) impl_->plugins->reportFailure(slot, set.error());
 }
 

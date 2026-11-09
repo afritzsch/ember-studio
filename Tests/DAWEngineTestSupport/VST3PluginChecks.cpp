@@ -284,8 +284,6 @@ CheckResult vst3AgainThroughGraph() {
     DAW_CHECK(allEqual(rig->left(), 0, 0.25f));
     DAW_CHECK(pooled && pooled->paramEventsPushed() == 2);
 
-    // A note's velocity lowers again's gain (again.cpp: gain = fGain - velocity), so the event
-    // list reaches the plugin too.
     DAW_CHECK(instance->renderErrors() == 0);
     return checks;
 }

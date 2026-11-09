@@ -49,6 +49,17 @@ Additive; the facade side is in 08 "Contract delta (T-061)". How the AU half is 
 - **Sidechain** (PLUG-014, DW-159): the AU's aux input bus (bus 1) is enabled and fed from `NodeIO::sidechain` (graph `toPort` 0).
 - **State** (PLUG-016): `fullState` ↔ binary plist, off the RT thread.
 
+### Contract delta (T-062), accepted (autobuild, see docs/autobuild/DECISIONS.md "T-062 contract")
+Additive; the facade side is in 08 "Contract delta (T-062)". The VST3 half (`Sources/DAWEngine/plugins/VST3*`) mirrors the AU half of the T-061 delta:
+- **Identity and config.** `NodeKind::vst3Plugin`'s `configJSON` = `{"identifier": "path#classUID", "state"?}` (the scanner's identifier, class UID as 32 hex digits, canonically uppercase; state as `getPluginState` returns it, base64).
+- **One instance per slot** (`VST3PluginHost`), the same rules as `AUPluginHost`, including a failed load rendering as absent (`pluginCrashed`, the graph isn't rejected). Modules load and unload under one process-wide mutex.
+- **Render** (PLUG-011): every bus the plugin declares gets channel buffers (`AudioBusBuffers`, unused buses too); main in/out stereo where accepted, else mono (mono output duplicated). All process inputs (scratch buffers, `ProcessData`, event/param lists, `ProcessContext`) are preallocated in `prepare`. Fixed-capacity `IEventList` and `IParameterChanges` of our own, with `addEvent`/`addPoint`/`addParameterData` allocation-free, since the SDK helpers grow vectors. `ProcessContext` from `TransportBlock`: tempo, ppq, bar position, time signature, playing, continuous time. Notes in `NodeIO::midiIn` become note on/off events at their frame offsets (other MIDI: T-063/discovered work). The audio thread calls the plugin only through the `IAudioProcessor` vtable; RT safety of plugin code is verified by the RT trap, not assumed.
+- **Params** (PLUG-015): param slot *i* drives the *i*-th parameter of `IEditController::getParameterInfo`. One point per block at offset 0 (D-13), clamped to 0…1. **VST3 values are normalized:** `pluginInfoJSON` reports `min 0, max 1, canRamp false`, and the model/automation see normalized values. NaN = not set. Read-only parameters (meters) aren't pushed. Pushed values are written to the controller off the RT thread before `params(true)`/`state()` read it. The plugin → model direction is T-063 (DW-204): `IComponentHandler::performEdit/beginEdit/endEdit` are accepted no-ops.
+- **Latency** (PLUG-013): `getLatencySamples()` at prepare; `restartComponent(kLatencyChanged)` from any thread only sets an atomic flag, and a 50 ms timer on a utility queue re-reads latency off the RT thread and reports it through the node's `LatencyReporter` (MIX-024).
+- **Sidechain** (PLUG-014, DW-159): the first `kAux` audio input bus is activated and fed from `NodeIO::sidechain` (graph `toPort` 0).
+- **State** (PLUG-016): one blob: magic `EVS3`, u32 version 1, u64 component length, component state, u64 controller length, controller state (little-endian), through `MemoryStream`, off the RT thread. Restore calls `IComponent::setState`, then `IEditController::setComponentState` and `setState`.
+- **Editor seam** (T-063): `VST3Instance::editController()` is the `IEditController` for `createView`; `EngineFacade::createPluginView` is still a stub.
+
 ## Status
 | ID | status | test |
 |---|---|---|

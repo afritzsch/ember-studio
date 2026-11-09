@@ -272,6 +272,8 @@ step bootstrap scripts/bootstrap.sh
 step manifest check_manifest
 step submodule check_submodule
 step swift-build-debug swift_build debug
+# PLUG-011 (T-062): the real .vst3 bundles the VST3 tests load (no-op when current).
+step test-plugins scripts/build-test-vst3.sh
 step swift-test swift_test
 step goldens check_goldens
 step swift-build-release swift_build release

@@ -110,6 +110,12 @@ Result<void> AUPluginHost::instantiate(NodeID slotID, std::string_view identifie
     return {};
 }
 
+bool AUPluginHost::knows(NodeID slotID) const {
+    std::lock_guard lock(mutex_);
+    auto it = slots_.find(slotID);
+    return it != slots_.end() && !it->second.identifier.empty();
+}
+
 Result<std::vector<uint8_t>> AUPluginHost::state(NodeID slotID) const {
     std::shared_ptr<AUInstance> instance;
     {
