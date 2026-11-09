@@ -22,6 +22,7 @@ namespace {
 
 constexpr CFTimeInterval kRunLoopSlice = 0.25;              // seconds; how quickly daw.midi notices a stop
 constexpr auto kRescanInterval = std::chrono::seconds(2);   // in case a notification was missed
+constexpr auto kIdleSleep = std::chrono::milliseconds(20);  // the run loop had nothing to wait on
 
 std::string toString(CFStringRef text) {
     if (text == nullptr) return {};
@@ -86,7 +87,9 @@ struct CoreMidiInput::Impl {
 
         auto lastScan = std::chrono::steady_clock::now();
         while (!stopping.load(std::memory_order_acquire)) {
-            CFRunLoopRunInMode(kCFRunLoopDefaultMode, kRunLoopSlice, false);
+            // With no source attached the loop returns at once; don't let that turn into a spin.
+            if (CFRunLoopRunInMode(kCFRunLoopDefaultMode, kRunLoopSlice, false) == kCFRunLoopRunFinished)
+                std::this_thread::sleep_for(kIdleSleep);
             if (status != noErr) continue;
             const auto now = std::chrono::steady_clock::now();
             if (needsScan.exchange(false, std::memory_order_acq_rel) || now - lastScan >= kRescanInterval) {
