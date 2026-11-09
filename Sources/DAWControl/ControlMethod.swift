@@ -29,6 +29,8 @@ public enum ControlMethod: String, CaseIterable, Hashable, Sendable {
     case deviceList = "device.list"
     case deviceSet = "device.set"
     case deviceSimulate = "device.simulate"
+    case midiInputs = "midi.inputs"
+    case midiInject = "midi.inject"
     case uiState = "ui.state"
     case uiSnapshot = "ui.snapshot"
     case uiPerform = "ui.perform"
@@ -52,7 +54,7 @@ public enum ControlMethod: String, CaseIterable, Hashable, Sendable {
         case .commandApply: CommandApplyParams.self
         case .commandBatch: CommandBatchParams.self
         case .commandSchema: CommandSchemaParams.self
-        case .undo, .redo, .transportPlay, .transportStop, .engineTelemetry, .uiState, .deviceList: NoParams.self
+        case .undo, .redo, .transportPlay, .transportStop, .engineTelemetry, .uiState, .deviceList, .midiInputs: NoParams.self
         case .transportLocate: TransportLocateParams.self
         case .transportSetLoop: TransportSetLoopParams.self
         case .transportRecord: TransportRecordParams.self
@@ -68,6 +70,7 @@ public enum ControlMethod: String, CaseIterable, Hashable, Sendable {
         case .enginePluginInfo: EnginePluginInfoParams.self
         case .deviceSet: DeviceSetParams.self
         case .deviceSimulate: DeviceSimulateParams.self
+        case .midiInject: MidiInjectParams.self
         case .uiSnapshot: UISnapshotParams.self
         case .uiPerform: UIPerformParams.self
         case .testFixture: TestFixtureParams.self
@@ -105,6 +108,8 @@ public enum ControlMethod: String, CaseIterable, Hashable, Sendable {
         case .deviceList: "Audio devices and the running one → {devices, outputDeviceID, driver}"
         case .deviceSet: "Switch the output/input device or rate {outputDevice?, inputDevice?, sampleRate?, bufferFrames?} (realtime engine)"
         case .deviceSimulate: "Make the fake device lose, restore, change rate or overload {kind, deviceID?, sampleRate?} → {outputDeviceID, sampleRate, events}"
+        case .midiInputs: "MIDI input sources (REC-010) → {inputs: [{uniqueID, name, connected}]}"
+        case .midiInject: "Feed MIDI messages as if from a controller (test seam, realtime engines) {events: [{sample | framesFromNow, status, data1?, data2?}]} → {accepted}"
         case .uiState: "UI state dump (attach only)"
         case .uiSnapshot: "Window snapshot as PNG {path?} → {pngPath} (attach only)"
         case .uiPerform: "Click or toggle a control {accessibilityId, action} (attach only)"

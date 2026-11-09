@@ -33,6 +33,9 @@ public final class FakeEngine: EngineProtocol {
         /// T-052 (REC-002, REC-005).
         case setRecordingDirectory(String)
         case setPunch(enabled: Bool, start: Tick, end: Tick)
+        /// T-053 (REC-011).
+        case armMidiInput(track: NodeIDValue, armed: Bool)
+        case injectMidi(atSample: Int64, relativeToNow: Bool, status: UInt8, data1: UInt8, data2: UInt8)
     }
 
     private struct State {
@@ -53,6 +56,8 @@ public final class FakeEngine: EngineProtocol {
         var refusedSessionRates: Set<Double> = []  // T-056
         var armed: Set<NodeIDValue> = []  // T-052
         var recordingDirectory = ""
+        var armedMidi: Set<NodeIDValue> = []  // T-053
+        var midiInputs: [MidiInputInfo] = []
     }
 
     private let state = Mutex(State())
@@ -244,6 +249,26 @@ public final class FakeEngine: EngineProtocol {
             s.calls.append(.setRecordingDirectory(path))
             s.recordingDirectory = path
         }
+    }
+
+    // MARK: MIDI input (T-053)
+
+    public func armMidiInput(track: NodeIDValue, armed: Bool) {
+        state.withLock { s in
+            s.calls.append(.armMidiInput(track: track, armed: armed))
+            if armed { s.armedMidi.insert(track) } else { s.armedMidi.remove(track) }
+            s.telemetry.armedMidiTracks = UInt32(s.armedMidi.count)
+        }
+    }
+
+    public func midiInputs() -> [MidiInputInfo] { state.withLock { $0.midiInputs } }
+
+    /// T-053: what `midiInputs` reports, for tests.
+    public func setMidiInputs(_ inputs: [MidiInputInfo]) { state.withLock { $0.midiInputs = inputs } }
+
+    /// T-053: recorded. Nothing is rendered; tests post `recordingFinalized` events themselves.
+    public func injectMidi(atSample: Int64, relativeToNow: Bool, status: UInt8, data1: UInt8, data2: UInt8) throws(DAWError) {
+        state.withLock { $0.calls.append(.injectMidi(atSample: atSample, relativeToNow: relativeToNow, status: status, data1: data1, data2: data2)) }
     }
 
     /// T-052: the last `setRecordingDirectory`.

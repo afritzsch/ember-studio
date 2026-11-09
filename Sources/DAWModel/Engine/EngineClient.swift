@@ -158,6 +158,23 @@ public final class EngineClient: EngineProtocol {
     /// REC-002 (T-052).
     public func setRecordingDirectory(_ path: String) { facade.setRecordingDirectory(std.string(path)) }
 
+    // MARK: MIDI input (T-053, REC-010/011)
+
+    /// The player is the track's `GraphNodeID.source`; a track with no instrument simply has none
+    /// in the graph and still records.
+    public func armMidiInput(track: NodeIDValue, armed: Bool) {
+        facade.armMidiInput(track, GraphNodeID.source(of: track), armed)
+    }
+
+    public func midiInputs() -> [MidiInputInfo] {
+        facade.midiInputs().map { MidiInputInfo(uniqueID: $0.uniqueID, name: String($0.name), connected: $0.connected) }
+    }
+
+    public func injectMidi(atSample: Int64, relativeToNow: Bool, status: UInt8, data1: UInt8, data2: UInt8) throws(DAWError) {
+        let size: UInt8 = status & 0xF0 == 0xC0 || status & 0xF0 == 0xD0 ? 2 : 3
+        if let failure = Self.error(facade.injectMidi(atSample, relativeToNow, status, data1, data2, size)) { throw failure }
+    }
+
     public func instantiatePlugin(slot: NodeIDValue, _ plugin: PluginDescriptor) -> JobID {
         facade.instantiatePlugin(slot, Self.cxx(plugin))
     }
@@ -252,6 +269,8 @@ public final class EngineClient: EngineProtocol {
         out.recordDrops = t.recordDrops  // T-052
         out.deviceInputLatency = t.deviceInputLatency
         out.armedTracks = t.armedTracks
+        out.midiInputDrops = t.midiInputDrops  // T-053
+        out.armedMidiTracks = t.armedMidiTracks
         return out
     }
 
@@ -409,7 +428,12 @@ public final class EngineClient: EngineProtocol {
             event.recording = RecordedTake(
                 track: r.track, file: String(r.file), startSample: r.startSample, frames: r.frames,
                 takeIndex: r.takeIndex, channels: r.channels, sampleRate: r.sampleRate, inputPair: r.inputPair,
-                droppedFrames: r.droppedFrames)
+                droppedFrames: r.droppedFrames, endSample: r.midi ? r.endSample : nil,
+                notes: r.midi
+                    ? (0..<r.notes.size()).map { i in
+                        let n = r.notes[i]
+                        return RecordedMidiNote(start: n.start, end: n.end, pitch: n.pitch, velocity: n.velocity, channel: n.channel)
+                    } : nil)
         }
         return event
     }

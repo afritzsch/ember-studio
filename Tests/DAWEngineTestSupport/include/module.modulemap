@@ -41,6 +41,7 @@ module DAWEngineTestSupport {
   header "SessionRateChecks.h"
   header "AUPluginChecks.h"
   header "RecordingChecks.h"
+  header "MidiInputChecks.h"
   requires cplusplus
   export *
 }

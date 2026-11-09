@@ -274,6 +274,10 @@ public struct EngineTelemetry: Hashable, Sendable, Codable {
     public var deviceInputLatency: UInt32 = 0
     /// REC-001 (T-052): tracks armed for recording (`armInput`).
     public var armedTracks: UInt32 = 0
+    /// REC-010/011 (T-053): MIDI input events dropped (a full queue or a full record buffer) and
+    /// the tracks armed for MIDI input.
+    public var midiInputDrops: UInt64 = 0
+    public var armedMidiTracks: UInt32 = 0
 
     public init() {}
 }
@@ -620,6 +624,13 @@ public protocol EngineProtocol: AnyObject, Sendable {
     func armInput(track: NodeIDValue, inputChannelPair: UInt32, armed: Bool)
     /// REC-002 (T-052): see the extension at the end of this file (default: ignored).
     func setRecordingDirectory(_ path: String)
+    /// REC-011 (T-053): arms or disarms MIDI track `track` for live input (see the extension at
+    /// the end of this file; default: ignored).
+    func armMidiInput(track: NodeIDValue, armed: Bool)
+    /// REC-010 (T-053): the MIDI sources CoreMIDI knows (default: none).
+    func midiInputs() -> [MidiInputInfo]
+    /// T-053 test seam (default: unsupported).
+    func injectMidi(atSample: Int64, relativeToNow: Bool, status: UInt8, data1: UInt8, data2: UInt8) throws(DAWError)
     func instantiatePlugin(slot: NodeIDValue, _ plugin: PluginDescriptor) -> JobID
     func pluginState(slot: NodeIDValue) -> Data
     func setPluginState(slot: NodeIDValue, _ state: Data)
@@ -790,9 +801,17 @@ public struct RecordedTake: Hashable, Sendable, Codable {
     /// Input channels 2·inputPair and 2·inputPair + 1.
     public var inputPair: UInt32
     public var droppedFrames: UInt64
+    /// REC-012 (T-053): a MIDI take (`file` empty, `frames` 0): the compensated stop and the
+    /// notes in timeline samples. nil on an audio take.
+    public var endSample: SamplePos?
+    public var notes: [RecordedMidiNote]?
+
+    /// A MIDI take (T-053).
+    public var isMidi: Bool { notes != nil }
 
     public init(track: NodeIDValue, file: String, startSample: SamplePos, frames: Int64, takeIndex: UInt32 = 0,
-                channels: UInt32 = 2, sampleRate: Double, inputPair: UInt32 = 0, droppedFrames: UInt64 = 0) {
+                channels: UInt32 = 2, sampleRate: Double, inputPair: UInt32 = 0, droppedFrames: UInt64 = 0,
+                endSample: SamplePos? = nil, notes: [RecordedMidiNote]? = nil) {
         self.track = track
         self.file = file
         self.startSample = startSample
@@ -802,6 +821,8 @@ public struct RecordedTake: Hashable, Sendable, Codable {
         self.sampleRate = sampleRate
         self.inputPair = inputPair
         self.droppedFrames = droppedFrames
+        self.endSample = endSample
+        self.notes = notes
     }
 }
 
@@ -821,4 +842,45 @@ extension EngineProtocol {
     /// REC-002: where recordings are written (created when needed); "" is the engine's own
     /// per-process temporary folder. Engines without recording ignore it.
     public func setRecordingDirectory(_ path: String) {}
+}
+
+// MARK: T-053 (REC-010..012): MIDI input
+
+/// REC-012: one note of a MIDI take, in timeline samples (latency-compensated).
+public struct RecordedMidiNote: Hashable, Sendable, Codable {
+    public var start: SamplePos
+    public var end: SamplePos
+    public var pitch: UInt8
+    public var velocity: UInt8
+    public var channel: UInt8
+
+    public init(start: SamplePos, end: SamplePos, pitch: UInt8, velocity: UInt8 = 100, channel: UInt8 = 0) {
+        self.start = start
+        self.end = end
+        self.pitch = pitch
+        self.velocity = velocity
+        self.channel = channel
+    }
+}
+
+/// REC-010: a MIDI input source.
+public struct MidiInputInfo: Hashable, Sendable, Codable {
+    public var uniqueID: Int32
+    public var name: String
+    public var connected: Bool
+
+    public init(uniqueID: Int32, name: String, connected: Bool = true) {
+        self.uniqueID = uniqueID
+        self.name = name
+        self.connected = connected
+    }
+}
+
+/// T-053 additions to `EngineProtocol`, with defaults so test doubles compile unchanged.
+extension EngineProtocol {
+    public func armMidiInput(track: NodeIDValue, armed: Bool) {}
+    public func midiInputs() -> [MidiInputInfo] { [] }
+    public func injectMidi(atSample: Int64, relativeToNow: Bool, status: UInt8, data1: UInt8, data2: UInt8) throws(DAWError) {
+        throw .notImplemented("this engine has no MIDI input")
+    }
 }

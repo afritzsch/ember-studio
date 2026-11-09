@@ -266,6 +266,10 @@ public final class Dispatcher {
             return try encode(deviceList())
         case .deviceSet: return try encode(deviceSet(decode(params)))
         case .deviceSimulate: return try encode(deviceSimulate(decode(params)))
+        case .midiInputs:
+            let _: NoParams = try decode(params)
+            return try encode(MidiInputsResult(inputs: try requireEngine().midiInputs()))
+        case .midiInject: return try encode(midiInject(decode(params)))
         case .uiState:
             let _: NoParams = try decode(params)
             return try await configuration.ui!.uiState()
@@ -696,6 +700,25 @@ public final class Dispatcher {
     }
 
     // MARK: device.* (DW-115)
+
+    /// REC-010..012 (T-053): the test seam. Each message arrives as if from a connected source.
+    private func midiInject(_ params: MidiInjectParams) throws -> MidiInjectResult {
+        let engine = try requireEngine()
+        for event in params.events {
+            guard (0x80...0xEF).contains(event.status), (event.data1 ?? 0) <= 127, (event.data2 ?? 0) <= 127 else {
+                throw ControlError.invalidParams("midi.inject: not a channel message \(event.status)")
+            }
+            guard (event.sample == nil) != (event.framesFromNow == nil) else {
+                throw ControlError.invalidParams("midi.inject: give exactly one of sample and framesFromNow")
+            }
+        }
+        for event in params.events {
+            let relative = event.framesFromNow != nil
+            try engine.injectMidi(atSample: event.sample ?? event.framesFromNow ?? 0, relativeToNow: relative,
+                                  status: event.status, data1: event.data1 ?? 0, data2: event.data2 ?? 0)
+        }
+        return MidiInjectResult(accepted: params.events.count)
+    }
 
     private func deviceList() throws -> DeviceListResult {
         let engine = try requireEngine()
