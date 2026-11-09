@@ -236,6 +236,10 @@ struct TelemetryPOD {
     uint64_t recordDrops = 0;
     uint32_t deviceInputLatency = 0;
     uint32_t armedTracks = 0;
+    // REC-010/011 (T-053): MIDI input events dropped (a full queue or a full record buffer, all
+    // time) and the tracks armed for MIDI input (armMidiInput).
+    uint64_t midiInputDrops = 0;
+    uint32_t armedMidiTracks = 0;
 };
 
 struct NodeLatencyPOD {
@@ -301,6 +305,16 @@ struct AssetsReloadPOD {
     uint64_t assetID = 0;           // progress: the asset just done
 };
 
+// T-053 (REC-012): one recorded note of a MIDI take, in timeline samples (latency-compensated).
+struct RecordedNotePOD {
+    int64_t start = 0;
+    int64_t end = 0;
+    uint8_t pitch = 0;
+    uint8_t velocity = 0;
+    uint8_t channel = 0;
+};
+using RecordedNoteVector = std::vector<RecordedNotePOD>;
+
 // REC-004 (T-052): a finished recording, one event per track. `startSample` is where the file's
 // first frame belongs on the timeline, at the session rate, already compensated for input +
 // output latency (REC-003); it can be negative (recording from the very start). The model turns
@@ -317,6 +331,12 @@ struct RecordingPOD {
     double sampleRate = 0;      // the session rate it was recorded at
     uint32_t inputPair = 0;     // channels 2·inputPair, 2·inputPair + 1
     uint64_t droppedFrames = 0; // REC-002
+    // T-053 (REC-012): a MIDI take. `file` stays empty and `frames` is 0; `droppedFrames` counts
+    // events the record buffer had no room for. startSample/endSample are the compensated record
+    // start and stop, the notes are in timeline samples.
+    bool midi = false;
+    int64_t endSample = 0;
+    RecordedNoteVector notes;
 };
 
 struct EngineEventPOD {
@@ -328,6 +348,13 @@ struct EngineEventPOD {
     DeviceChangePOD device;  // deviceChanged
     AssetsReloadPOD reload;  // assetsReloaded (T-056)
     RecordingPOD recording;  // recordingFinalized (T-052); subject = the track
+};
+
+// REC-010 (T-053): one MIDI input source, for the UI and dawctl.
+struct MidiInputInfoPOD {
+    int32_t uniqueID = 0;     // kMIDIPropertyUniqueID
+    std::string name;
+    bool connected = false;   // connected to the input port (every source is, until slots run out)
 };
 
 // T-051, DW-089: what simulateDeviceEvent makes the fake device do.
@@ -523,6 +550,28 @@ public:
     // Disabling keeps the range (or stores [in, out) for later when in < out). An enabled request
     // with in < 0 or in >= out is ignored, leaving punch as it was.
     void setPunch(bool enabled, Tick in, Tick out);
+
+    // MARK: MIDI input (09, T-053; accepted (autobuild, see docs/autobuild/DECISIONS.md))
+    //
+    // REC-011: every connected CoreMIDI source reaches every armed MIDI track on all channels,
+    // and play-through doesn't depend on the monitoring mode. A MIDI take records while the
+    // transport plays with setRecording(true) and some track is armed (realtime mode), and ends
+    // like an audio take: it becomes one recordingFinalized event per armed track, with
+    // `recording.midi` set and the notes, or nothing at all if no note was played.
+
+    // REC-011: arms or disarms MIDI track `track`. `player` is its MidiClipPlayer node (a MIDI
+    // track's GraphNodeID.source), which plays the input through to the track's instrument; a
+    // track with no instrument has no player and still records. A take running ends first
+    // (REC-022: arming is structural). Disarming sends note-offs for notes still held.
+    void armMidiInput(NodeID track, NodeID player, bool armed);
+    // REC-010: the MIDI sources CoreMIDI knows. Empty on offline and fake-device engines, which
+    // have no CoreMIDI input (they have injectMidi).
+    std::vector<MidiInputInfoPOD> midiInputs() const;
+    // T-053 test seam: a MIDI message (1…3 bytes, `size`) arriving as if from a source. While the
+    // transport plays, `atSample` is the transport sample it is struck at (`relativeToNow`:
+    // frames after the block about to render); a position already past, or a stopped transport,
+    // means now. unsupported in offline mode; invalidArgument for a malformed message.
+    FacadeError injectMidi(int64_t atSample, bool relativeToNow, uint8_t status, uint8_t data1, uint8_t data2, uint8_t size);
 
     // MARK: Offline (IO-010..013, DW-057)
 

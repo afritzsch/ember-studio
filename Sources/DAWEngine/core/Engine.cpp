@@ -125,8 +125,13 @@ void Engine::render(RenderTarget& target, uint32_t numFrames) DAW_RT {
     const AudioBufferView& out = target.output;
     const uint32_t n = numFrames < out.numFrames ? numFrames : out.numFrames;
 
+    // REC-010/011 (T-053): the first block of a device cycle anchors the MIDI clock.
+    const uint64_t cycleHostTicks = cycleHostTicks_;
+    cycleHostTicks_ = 0;
+
     if (graph == nullptr || n > graph->maxBlock()) {
         silence(out, n);  // ENG-015
+        if (liveMidi_ != nullptr) liveMidi_->idleBlock(n, cycleHostTicks);  // inputs keep draining
     } else {
         // ENG-041 "advance transport": queued commands apply from this block's first frame
         // (TIME-004), then the block is laid out on the timeline (TIME-005) with the map this
@@ -152,7 +157,10 @@ void Engine::render(RenderTarget& target, uint32_t numFrames) DAW_RT {
         }
         ProcessContext ctx{n, graph->sampleRate(), block, params_};
         ProcessContext timeline{n, graph->sampleRate(), ahead, params_};
+        // REC-011: after the pre-roll, whose chunks are rendered and thrown away.
+        if (liveMidi_ != nullptr) liveMidi_->beginBlock(transport_, n, graph->sampleRate(), cycleHostTicks);
         graph->process(ctx, timeline);
+        if (liveMidi_ != nullptr) liveMidi_->endBlock();
 
         // ENG-041: write master to the target.
         const AudioBufferView master = graph->master(n);

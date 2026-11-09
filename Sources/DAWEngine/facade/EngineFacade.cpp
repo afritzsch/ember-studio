@@ -46,6 +46,7 @@
 #include "graph/GraphCompiler.h"
 #include "graph/NodeRegistry.h"
 #include "io/AudioFileLoader.h"
+#include "io/CoreMidiInput.h"
 #include "io/DeviceMonitor.h"
 #include "io/DriverConfig.h"
 #include "io/ExportSpec.h"
@@ -60,6 +61,7 @@
 #include "nodes/MidiClipPlayer.h"
 #include "nodes/Reverb.h"
 #include "plugins/AUPluginHost.h"
+#include "record/MidiInputRouter.h"
 #include "record/Recorder.h"
 #include "time/TempoMap.h"
 
@@ -239,6 +241,9 @@ struct EngineFacade::Impl {
     void prepareRecording();
     void finalizeRecording();
     void pushTakes(std::vector<FinalizedTake> takes);
+    // REC-012 (T-053), with `mutex` held: the MIDI take ends with the audio one.
+    void finalizeMidiRecording();
+    void pushMidiTakes(std::vector<FinalizedMidiTake> takes);
 
     std::atomic<uint32_t> refs{1};  // BRIDGE-001
     uint64_t instanceID = 0;
@@ -248,6 +253,8 @@ struct EngineFacade::Impl {
     // UI-021 (T-043): preview notes for the tracks' MidiClipPlayers. Declared before `engine`, so
     // it outlives every node that reads it.
     MidiPreviewInbox previewInbox;
+    // REC-010/011 (T-053): live MIDI input. Before `engine` and the nodes that read it.
+    MidiInputRouter midi;
     // PLUG-010 (T-061): the session's Audio Units by device slot, and the auPlugin factory.
     // Declared before `engine`, so it outlives the nodes (they only hold it weakly anyway).
     std::shared_ptr<AUPluginHost> plugins = std::make_shared<AUPluginHost>();
@@ -323,6 +330,7 @@ struct EngineFacade::Impl {
     AudioFileLoader loader;
     std::unique_ptr<DriverAdapter> driver;
     bool driverStarted = false;  // the device should be running (export pauses it)
+    std::unique_ptr<CoreMidiInput> coreMidi;        // REC-010 (T-053): realtime, CoreAudio driver only
     std::unique_ptr<DeviceMonitorHost> deviceHost;  // realtime mode with a driver (T-051)
     std::unique_ptr<DeviceMonitor> monitor;
     std::thread exportThread;    // last: started once everything above exists
@@ -378,6 +386,7 @@ struct EngineFacade::Impl::DeviceHost final : public DeviceMonitorHost {
     void finalizeRecordings() override {
         (void)impl_.engine.transport().setRecording(false);
         impl_.finalizeRecording();
+        impl_.finalizeMidiRecording();  // REC-012 (T-053)
     }
     void stopDriver() override {
         impl_.driver->stop();
@@ -411,6 +420,7 @@ private:
 EngineFacade::Impl::Impl(EngineMode m, const DriverConfigPOD& cfg, FacadeOptions options)
     : mode(m), registerNodes(options.registerNodes), config(cfg) {
     sampleRate = cfg.sampleRate;
+    engine.setLiveMidiInput(&midi);  // REC-011 (T-053), before any driver renders
     if (mode == EngineMode::realtime) {
         driver = std::move(options.driver);
         if (driver) {
@@ -433,6 +443,13 @@ EngineFacade::Impl::Impl(EngineMode m, const DriverConfigPOD& cfg, FacadeOptions
         return hook ? hook(r) : Result<void>{};
     };
 
+    // REC-011 (T-053): armed tracks' MIDI players also read live input. Runs after the preview
+    // registration just below (which wraps this one), so this is the one that stays.
+    registerNodes = [hook = std::move(registerNodes), inbox = &previewInbox, live = &midi](NodeRegistry& r) -> Result<void> {
+        if (auto set = r.set(NodeKind::midiClipPlayer, MidiClipPlayer::kindInfo(inbox, live)); !set) return set;
+        return hook ? hook(r) : Result<void>{};
+    };
+
     // UI-021 (T-043): MIDI players read preview notes from previewInbox. Registered before the
     // creator's hook, which may still replace the kind; kept in registerNodes for rate changes.
     registerNodes = [hook = std::move(registerNodes), inbox = &previewInbox](NodeRegistry& r) -> Result<void> {
@@ -452,6 +469,7 @@ EngineFacade::Impl::Impl(EngineMode m, const DriverConfigPOD& cfg, FacadeOptions
     compiler = std::make_shared<GraphCompiler>(
         engine, registry ? std::move(registry).value() : NodeRegistry::withBuiltins(), sampleRate);
     exportThread = std::thread([this] { exportLoop(); });
+    if (options.coreMidi) coreMidi = std::make_unique<CoreMidiInput>(midi);  // REC-010 (T-053)
     if (driver) {
         deviceHost = std::make_unique<DeviceHost>(*this);
         monitor = std::make_unique<DeviceMonitor>(*deviceHost);
@@ -509,6 +527,7 @@ void EngineFacade::Impl::prepareRecording() {
     if (!driver) return;
     syncRecordLatency();
     pushTakes(recorder.prepare(sampleRate));
+    pushMidiTakes(midi.prepare(sampleRate));  // REC-012 (T-053)
 }
 
 void EngineFacade::Impl::finalizeRecording() { pushTakes(recorder.finalize()); }
@@ -533,6 +552,32 @@ void EngineFacade::Impl::pushTakes(std::vector<FinalizedTake> takes) {
         else if (take.droppedFrames > 0)  // REC-002: the app warns (ToastCenter)
             event.error = facadeError(FacadeErrorCode::io, "recording dropped " + std::to_string(take.droppedFrames) +
                                                                " frames (the disk didn't keep up); they are silent");
+        pushEvent(std::move(event));
+    }
+}
+
+// MARK: MIDI recording (09, T-053)
+
+void EngineFacade::Impl::finalizeMidiRecording() { pushMidiTakes(midi.finalize()); }
+
+void EngineFacade::Impl::pushMidiTakes(std::vector<FinalizedMidiTake> takes) {
+    for (FinalizedMidiTake& take : takes) {
+        EngineEventPOD event;
+        event.type = EngineEventType::recordingFinalized;
+        event.subject = take.track;
+        event.count = take.droppedEvents;
+        event.recording.track = take.track;
+        event.recording.midi = true;
+        event.recording.startSample = take.startSample;
+        event.recording.endSample = take.endSample;
+        event.recording.sampleRate = take.sampleRate;
+        event.recording.droppedFrames = take.droppedEvents;
+        event.recording.notes.reserve(take.notes.size());
+        for (const RecordedMidiNote& note : take.notes)
+            event.recording.notes.push_back(RecordedNotePOD{note.start, note.end, note.pitch, note.velocity, note.channel});
+        if (take.droppedEvents > 0)
+            event.error = facadeError(FacadeErrorCode::io, "MIDI recording dropped " + std::to_string(take.droppedEvents) +
+                                                               " events (the record buffer was full)");
         pushEvent(std::move(event));
     }
 }
@@ -591,6 +636,7 @@ void EngineFacade::Impl::stopForDeviceChange() {
     (void)engine.transport().stop();
     if (engine.transport().playhead().recording) (void)engine.transport().setRecording(false);  // 09
     finalizeRecording();  // IO-021 (2), DW-119
+    finalizeMidiRecording();  // REC-012 (T-053)
     if (driver) driver->stop();
     driverStarted = false;
     applyTransportCommands();  // nothing renders now, so apply them here
@@ -968,6 +1014,8 @@ void EngineFacade::Impl::runExport(JobID jobID, Tick from, Tick to, const Export
             // DW-057: one render thread at a time (02), so the device pauses meanwhile.
             if (driver && driver->running()) driver->stop();
             finalizeRecording();  // DW-064: an export never records; a take running ends here
+            finalizeMidiRecording();  // REC-012 (T-053)
+            midi.setLiveEnabled(false);  // REC-011: an export hears no live input
             exportRunning = true;
             render = true;
         }
@@ -991,6 +1039,7 @@ void EngineFacade::Impl::runExport(JobID jobID, Tick from, Tick to, const Export
     std::lock_guard lock(mutex);
     if (render) {
         exportRunning = false;
+        midi.setLiveEnabled(true);  // REC-011
         if (driverStarted && driver && !stopping) {
             auto restarted = driver->start(engine, driverConfig());
             if (!restarted) {
@@ -1034,6 +1083,7 @@ EngineFacade* EngineFacade::create(EngineMode mode, const DriverConfigPOD& confi
         options.driver = config.driver == DeviceDriverKind::fake  // DW-089
                              ? std::make_unique<FakeDeviceDriverAdapter>(defaultFakeDeviceSpec())
                              : makeDefaultDriverAdapter();
+    options.coreMidi = mode == EngineMode::realtime && config.driver == DeviceDriverKind::coreAudio;  // REC-010
     return EngineFacadeAccess::create(mode, config, std::move(options));
 }
 
@@ -1139,6 +1189,7 @@ void EngineFacade::stop() {
     (void)impl_->engine.transport().stop();
     impl_->applyTransportCommands();
     impl_->finalizeRecording();  // REC-004
+    impl_->finalizeMidiRecording();  // REC-012 (T-053)
 }
 
 void EngineFacade::locate(Tick tick) {
@@ -1148,6 +1199,10 @@ void EngineFacade::locate(Tick tick) {
     // starts at the new position if the transport still records).
     if (impl_->recorder.capturing()) {
         impl_->finalizeRecording();
+        impl_->prepareRecording();
+    }
+    if (impl_->midi.capturing()) {  // REC-012 (T-053): a MIDI take is one stretch of timeline, too
+        impl_->finalizeMidiRecording();
         impl_->prepareRecording();
     }
     (void)impl_->engine.transport().locate(tick);
@@ -1166,6 +1221,7 @@ void EngineFacade::setRecording(bool recording) {
     (void)impl_->engine.transport().setRecording(recording);
     impl_->applyTransportCommands();
     if (!recording) impl_->finalizeRecording();  // REC-004 (a manual punch-out)
+    if (!recording) impl_->finalizeMidiRecording();  // REC-012 (T-053)
 }
 
 void EngineFacade::setRecordingDirectory(const std::string& directory) {
@@ -1313,6 +1369,7 @@ void EngineFacade::armInput(NodeID track, uint32_t inputChannelPair, bool armed)
     // REC-022 (T-052): arming is structural. A take running ends first, so it keeps the tracks
     // it started with; the next one starts with the new set.
     if (impl.recorder.capturing()) impl.finalizeRecording();
+    if (impl.midi.capturing()) impl.finalizeMidiRecording();  // REC-012 (T-053): both end together
     impl.recorder.setArmed(track, inputChannelPair, armed);
     const bool wasEnabled = !impl.armedTracks.empty();
     if (armed)
@@ -1323,6 +1380,39 @@ void EngineFacade::armInput(NodeID track, uint32_t inputChannelPair, bool armed)
         if (auto restarted = impl.restartDriver(); !restarted) impl.pushStartFailed(restarted.error());
     }
     impl.prepareRecording();  // REC-001: the FIFOs exist before the transport records
+}
+
+// MARK: MIDI input (09, T-053)
+
+void EngineFacade::armMidiInput(NodeID track, NodeID player, bool armed) {
+    std::lock_guard lock(impl_->mutex);
+    Impl& impl = *impl_;
+    if (impl.midi.capturing()) impl.finalizeMidiRecording();  // REC-022: arming is structural
+    if (impl.recorder.capturing()) impl.finalizeRecording();  // the audio take ends with it
+    impl.midi.setArmed(track, player, armed);
+    impl.prepareRecording();
+}
+
+std::vector<MidiInputInfoPOD> EngineFacade::midiInputs() const {
+    std::lock_guard lock(impl_->mutex);
+    std::vector<MidiInputInfoPOD> out;
+    if (impl_->coreMidi)
+        for (const MidiSourceInfo& source : impl_->coreMidi->sources())
+            out.push_back(MidiInputInfoPOD{source.uniqueID, source.name, source.connected});
+    return out;
+}
+
+FacadeError EngineFacade::injectMidi(int64_t atSample, bool relativeToNow, uint8_t status, uint8_t data1, uint8_t data2,
+                                     uint8_t size) {
+    std::lock_guard lock(impl_->mutex);
+    if (impl_->mode != EngineMode::realtime)
+        return facadeError(FacadeErrorCode::unsupported, "MIDI can only be injected into a realtime engine");
+    const uint8_t bytes[3] = {status, data1, data2};
+    if (status < 0x80 || status >= 0xF0 || size == 0 || size > 3)
+        return facadeError(FacadeErrorCode::invalidArgument, "not a MIDI channel message");
+    if (!impl_->midi.inject(atSample, relativeToNow, bytes, size))
+        return facadeError(FacadeErrorCode::io, "the MIDI input queue is full");
+    return {};
 }
 
 // PLUG-012 (T-061): an AU is instantiated right here, on the caller's (non-RT) thread, and parked
@@ -1504,6 +1594,8 @@ TelemetryPOD EngineFacade::telemetry() const {
     t.recordDrops = impl_->recorder.droppedFrames();  // REC-002 (T-052)
     t.deviceInputLatency = impl_->driver && impl_->driver->running() ? impl_->recordInputLatency : 0;
     t.armedTracks = static_cast<uint32_t>(impl_->armedTracks.size());
+    t.midiInputDrops = impl_->midi.droppedEvents();                       // REC-010/012 (T-053)
+    t.armedMidiTracks = static_cast<uint32_t>(impl_->midi.armedCount());  // T-053
     if (impl_->driver) {
         t.outputDeviceID = t.deviceRunning ? impl_->driver->current().outputDevice : 0;
         t.processorOverloads = impl_->driver->processorOverloads();

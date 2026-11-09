@@ -18,6 +18,9 @@ struct FacadeOptions {
     std::unique_ptr<DriverAdapter> driver;
     // Runs on the facade's registry after the built-in kinds are in; may add or replace kinds.
     std::function<Result<void>(NodeRegistry&)> registerNodes;
+    // REC-010 (T-053): connect to CoreMIDI. Only the real device driver asks for it (so tests with
+    // driver adapters, and fake-device engines, never touch the MIDI server).
+    bool coreMidi = false;
 };
 
 class EngineFacadeAccess {

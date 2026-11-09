@@ -34,6 +34,7 @@
 #include <memory>
 
 #include "core/NodePool.h"
+#include "core/LiveMidiInput.h"
 #include "core/ParamSlotTable.h"
 #include "core/Realtime.h"
 #include "core/Reclaimer.h"
@@ -75,6 +76,12 @@ public:
     Transport& transport() { return transport_; }
     const Transport& transport() const { return transport_; }
 
+    // REC-010/011 (T-053), non-RT, before anything renders: where live MIDI input comes from.
+    void setLiveMidiInput(LiveMidiInput* input) { liveMidi_ = input; }
+    // RT, the render thread: the host time this device IO cycle started at, for the next block's
+    // LiveMidiInput::beginBlock (DeviceRenderer sets it; offline renders never do).
+    void setCycleHostTicks(uint64_t ticks) DAW_RT { cycleHostTicks_ = ticks; }
+
     // ENG-014: for RT code that is done with a heap object (audio thread only).
     RetireQueue& retireQueue() { return reclaimer_.rtQueue(); }
 
@@ -107,6 +114,9 @@ private:
     uint64_t latencySerial_ = 0;
     bool runPrerolled_ = false;
     void preRoll(const RenderGraph& graph, const TransportBlock& block) DAW_RT;
+    // REC-010/011 (T-053). Set before rendering starts; the ticks are render thread only.
+    LiveMidiInput* liveMidi_ = nullptr;
+    uint64_t cycleHostTicks_ = 0;
 };
 
 } // namespace daw
