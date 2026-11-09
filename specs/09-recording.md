@@ -52,6 +52,15 @@ Clarifications:
 - *Import (REC-004).* `ProjectStore` imports each `recordingFinalized` take when the events are polled (`RecordingImport`, `importRecording`): the engine loads the file under the next model ID, then `CompositeCommand("Record", [ImportAsset, AddClip])` is performed as one undo step. Undo leaves the file on disk.
 - *Punch (REC-005).* The range is transport state (not in the project), set through `transport.setPunch` (13). The loop disables it (REC-030 takes are T-080).
 
+### Contract delta (T-053), accepted (autobuild, see docs/autobuild/DECISIONS.md "T-053 contract", "T-053 routing", "T-053 placement")
+Facade additions are in 08 (same heading). Model side: `EngineSync` turns armed MIDI tracks into `armMidiInput` calls (each arm or disarm; a removed armed track is disarmed; detaching disarms). `ArmTrack` itself is unchanged. `RecordedTake` carries a MIDI take in `notes` (nil for audio) and `endSample`.
+
+Clarifications:
+- *Clock (REC-010).* The clock is the render clock (`MidiInputRouter`): frames rendered, advanced every block, whether the transport plays or not. The audio thread publishes an anchor each IO cycle (host time at cycle start ↔ render sample at cycle start), and CoreMIDI's receive thread converts each event's host timestamp against it. A real event that looks later than the block about to render is due now (a stale anchor after a device stop); one more than `kStaleSeconds` old doesn't sound any more.
+- *Routing (REC-011).* Per block the audio thread merges the input queues in time order into one live stream (the armed tracks' `MidiClipPlayer`s write it into `midiOut`, frame-ordered with the clip's notes), and into the record buffer. Hanging notes: a key held by several inputs sounds once and ends at the last release; a re-sent note-on from the same input is ignored; CC 120/123 end only that input's notes; an input that disappears or whose queue overflows gets a note-off for everything it held. The player remembers what it sent: it releases those notes, the sustain pedal and pitch bend when its track is disarmed, and a re-created player resounds the notes still held after its All Notes Off.
+- *Notes (REC-012).* A note runs from its on to its first matching off (per channel and key, oldest first); an unpaired note closes at stop. Notes before the take began aren't part of it, an off with no on is ignored, and only notes are recorded (no CC, no pedal). The clip starts at the compensated record start (tick 0 at the earliest, before the first note at the latest) and runs to the stop, or further if a note extends past it (a stop inside the loop). A note starts at the tick nearest its sample; a note heard before 0 starts at 0 if it is still sounding, otherwise it is dropped. Loop recording: notes keep their transport position and land in one clip (REC-034 takes are T-080); a note held across a wrap ends at the loop end.
+- *Import (REC-012).* `ProjectStore` imports each MIDI take when the events are polled (`RecordingImport.midiCommand`, `importMidiRecording`): `CompositeCommand("Record", [AddClip, AddNotes])`, one undo step per armed track.
+
 ## Status
 | ID | status | test |
 |---|---|---|
