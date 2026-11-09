@@ -69,3 +69,64 @@ struct RecordingControlTests {
         #expect(store.project.tracks[0].clips.isEmpty && store.project.assets.isEmpty)
     }
 }
+
+// T-053: MIDI input through the control protocol.
+@Suite("MIDI recording control (REC-010..012, T-053)")
+@MainActor
+struct MidiRecordingControlTests {
+    @Test("REC-010: midi.inputs lists the engine's sources; midi.inject validates and forwards messages")
+    func injectAndList() async throws {
+        let (dispatcher, box) = TestDispatchers.fake()
+        #expect(await dispatcher.failure(.midiInputs)?.dawError == "noProject")
+        _ = try await dispatcher.ok(.projectNew, ["name": "m"])
+        box.last.setMidiInputs([MidiInputInfo(uniqueID: 7, name: "Keystation", connected: true)])
+        let inputs = try await dispatcher.ok(.midiInputs)
+        #expect(inputs["inputs"]?[0]?["name"] == "Keystation" && inputs["inputs"]?[0]?["uniqueID"] == 7)
+
+        let result = try await dispatcher.ok(.midiInject, ["events": [
+            ["sample": 24_000, "status": 0x90, "data1": 60, "data2": 100],
+            ["framesFromNow": 100, "status": 0x80, "data1": 60],
+        ]])
+        #expect(result["accepted"] == 2)
+        #expect(box.last.calls.filter { if case .injectMidi = $0 { true } else { false } } == [
+            .injectMidi(atSample: 24_000, relativeToNow: false, status: 0x90, data1: 60, data2: 100),
+            .injectMidi(atSample: 100, relativeToNow: true, status: 0x80, data1: 60, data2: 0),
+        ])
+
+        for bad: JSONValue in [["events": [["sample": 0, "status": 0x12]]],
+                               ["events": [["sample": 0, "status": 0x90, "data1": 200]]],
+                               ["events": [["status": 0x90]]],
+                               ["events": [["sample": 0, "framesFromNow": 0, "status": 0x90]]]]
+        {
+            #expect(await dispatcher.failure(.midiInject, bad)?.dawError == "invalidParams", "\(bad.jsonString())")
+        }
+    }
+
+    @Test("REC-012: a posted MIDI take is a clip with its notes by the time transport.stop answers, one Record undo")
+    func recordFlow() async throws {
+        let (dispatcher, box) = TestDispatchers.fake()
+        _ = try await dispatcher.ok(.projectNew, ["name": "m"])
+        _ = try await dispatcher.ok(.commandApply, ["command": ["type": "AddTrack", "name": "Keys", "kind": "midi"]])
+        let store = try #require(dispatcher.store)
+        let keys = try #require(store.project.tracks.first?.id)
+        _ = try await dispatcher.ok(.commandApply, ["command": ["type": "ArmTrack", "trackID": .int(Int64(keys)), "armed": true]])
+        #expect(box.last.calls.contains(.armMidiInput(track: keys, armed: true)))
+
+        _ = try await dispatcher.ok(.transportRecord, ["enabled": true])
+        _ = try await dispatcher.ok(.transportPlay)
+        box.last.post(EngineEvent(recording: RecordedTake(
+            track: keys, file: "", startSample: 0, frames: 0, sampleRate: 48_000, endSample: 96_000,
+            notes: [RecordedMidiNote(start: 24_000, end: 36_000, pitch: 60, velocity: 90)])))
+        _ = try await dispatcher.ok(.transportStop)
+        let clips = try await dispatcher.ok(.projectGet, ["path": "/tracks/0/clips"])
+        #expect(clips[0]?["start"] == 0 && clips[0]?["length"] == 3840)
+        let notes = try await dispatcher.ok(.projectGet, ["path": "/tracks/0/clips/0/notes"])
+        #expect(notes[0]?["start"] == 960 && notes[0]?["length"] == 480 && notes[0]?["pitch"] == 60 && notes[0]?["velocity"] == 90)
+        #expect(try await dispatcher.ok(.undo)["label"] == "Record")
+        #expect(store.project.tracks[0].clips.isEmpty)
+
+        // engine.events carry the take's notes.
+        let events = try await dispatcher.ok(.engineEvents, [:])
+        #expect(events["events"]?.arrayValue?.contains { $0["event"]?["recording"]?["notes"]?[0]?["pitch"] == 60 } == true)
+    }
+}
