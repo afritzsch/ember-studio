@@ -162,7 +162,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         }
     }
 
-    /// UI-042 (T-082): File > Export… (⇧⌘E) opens the main window's export dialog (`export`), which
+    /// UI-042 (T-082): File > Export… (⇧⌘E) opens the main window's export dialog (`export.dialog`), which
     /// renders and toasts the outcome itself.
     @objc func exportAudio(_ sender: Any?) {
         app.mainWindow?.exportDialog.isOpen = true

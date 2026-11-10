@@ -30,7 +30,7 @@ enum ExportRange: String, CaseIterable, Codable, Sendable {
 final class ExportModel {
     @ObservationIgnored weak var window: ProjectWindowModel?
 
-    /// The panel shows (`export`, File > Export…). Opening it picks a range that exists and a
+    /// The panel shows (`export.dialog`, File > Export…). Opening it picks a range that exists and a
     /// destination that doesn't (unless one was chosen).
     var isOpen = false {
         didSet { if isOpen && !oldValue { prepare() } }
@@ -352,7 +352,7 @@ final class ExportModel {
 
     // MARK: Controls (UI-052)
 
-    /// `export` (always: open/close the panel, like File > Export…); while the panel is open
+    /// `export.dialog` (always: open/close the panel, like File > Export…); while the panel is open
     /// `export.close`, `export.start`, `export.choose`, `export.range.<loop|project|selection>`,
     /// `export.format.<wav|aiff|caf>`, `export.sampleFormat.<int16|int24|float32>`, `export.dither`,
     /// `export.normalize`, `export.tail`, `export.tailMax.<2|5|10|30>` and `export.metronome`. The
@@ -360,7 +360,7 @@ final class ExportModel {
     var controls: [UIControl] {
         let hasEngine = engine != nil
         var controls: [UIControl] = [
-            .toggle("export", "Export…", isOn: isOpen, enabled: hasEngine || isOpen) { [weak self] in self?.isOpen.toggle() },
+            .toggle("export.dialog", "Export…", isOn: isOpen, enabled: hasEngine || isOpen) { [weak self] in self?.isOpen.toggle() },
         ]
         guard isOpen else { return controls }
         let idle = !isRunning
