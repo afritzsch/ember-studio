@@ -10,6 +10,7 @@ Unattended phases started by `/autobuild` (see `.claude/skills/autobuild/SKILL.m
 | 4 | T-044, T-073, T-056, T-043 | all 4 (T-044, T-073, T-056, T-043) | 34 → 49 | M4 complete (M4 goldens, piano roll + previewNote); reverb + `reverb_determinism`; session-rate change with asset re-conversion; one 5-hour pause (~4 h); T-052/053/061/062 found `ready` |
 | 5 | T-052, T-061, T-055, T-072 | all 4 (T-055 part 1, T-072, T-052, T-072 follow-up, T-055 follow-up, T-061) | 50 → 75 | User-authorized final phase (week ≥ 50%). Recording (REC-001..005), AU hosting, audio prefs + arm/monitor, delay; DW-148/DW-172 autosave flakes fixed at the root (MODEL-041 blocked the main actor); two 5-hour pauses and a Mac sleep |
 | 6 | T-053, T-062, T-070, T-076 | all 4 (T-076, T-062, T-070, T-053) + DW-214 AU crash fix | 1 → 20 | New run (week reset). M5 needs only T-054; VST3 + EQ + mixer done; `NodeRegistry::paramInfo` and `nanBlocks` telemetry; a production AU teardown crash found and fixed; one 5-hour pause (~4 h, T-076 merged during it) |
+| 7 | T-054, T-064, T-074, T-082 | all 4 (T-082, T-064, T-054, T-074) | 20 → 42 | Final phase (user asked to stop after it). M5 complete (input monitoring); host bypass + NaN guard + safe mode; automation lanes + player; export dialog with normalize. Two 5-hour pauses (~3.7 h, ~4 h); T-082/T-064 merged during the second. UI-010 perf smoke failed in most full runs (load, DW-223) |
 
 ## Phase notes
 
@@ -108,8 +109,45 @@ Unattended phases started by `/autobuild` (see `.claude/skills/autobuild/SKILL.m
 - T-054 merged: test.sh 11/12 (only UI-010, DW-223), swift test 2× green. Worker closed. M5 complete.
 - T-074 merged after its worker merged main twice (T-064/T-082, then T-054; kept both sides): test.sh 12/12, swift test 2× failed only UI-010 (DW-223). Worker closed. T-075 and T-077 now ready.
 - Lead spec items: DW-187, DW-188, DW-195 done.
+- End: 4/4 merged, main green apart from the UI-010 load flake (T-074 trial merge test.sh 12/12), week 42%, five-hour window 31%, no worker session left open. Run stopped as the user asked (final phase).
 
 ## Summary for the user
+
+This run (the second) had two phases, 6 and 7 (2026-11-09 → 2026-11-10). The week went 1% → 42%. It stopped after phase 7 because you asked.
+
+**Merged in this run (8 tasks plus one crash fix, all on `main`, pushed):**
+- Phase 6:
+  - T-053 CoreMIDI + MIDI recording, T-062 VST3 hosting, T-070 EQ, T-076 mixer view.
+  - DW-214: a real crash when an Apple V2 AU was destroyed right after parameter changes. Fixed with a deferred release plus a lifecycle lock.
+- Phase 7:
+  - T-054 input monitoring, which **completes M5**.
+  - T-064 host bypass, plugin NaN guard and crash marker + safe-mode open.
+  - T-074 automation lanes, player and plugin param path.
+  - T-082 export dialog, with a new normalize option.
+- Milestones:
+  - M2–M5 are complete.
+  - M6 still needs T-063 (plugin editors) and T-065 (device chain UI).
+  - M7 still needs T-075 (automation recording + lane UI) and T-077 (M7 goldens).
+  - M8 still needs T-080, T-081, T-083 and T-084.
+
+**Decisions to review:** `docs/autobuild/DECISIONS.md` gained 16 rows in this run (phases 6–7), all taken without you. Each row says what to change if you disagree. The biggest ones:
+- Arming a track is now structural (a new graph), and the default `auto` mode monitors an armed track while it records.
+- Bypassed devices now stay in the graph behind a latency-matched pass-through. Safe mode bypasses every plugin for the session only, without writing to the document.
+- Automation edits are undoable, and adding points creates the lane.
+- Export normalize targets −0.1 dBFS.
+- Every source reaches every armed MIDI track (there is no input picker yet).
+
+Open questions only you can answer are in `docs/handover/HANDOVER.md` → *Open questions for the user*. New ones: the export dialog's "Choose…" needs a manual check (DW-222); monitoring has no feedback protection (DW-230); and should removing a send or device also delete its automation lanes (DW-234)?
+
+**Tasks parked:** none. No task was stopped unfinished, and there are no `wip` tasks or WIP branches. 5 tasks are `ready`: T-063, T-075, T-077, T-080, T-083.
+
+**Flaky test to know about:** UI-010's perf smoke (`perFrame < 16 ms`) failed in most full test runs in phase 7, even with the workers paused, because other apps were loading the machine. It passes alone every time (DW-223). Every merge was judged by that.
+
+**Permission prompts that blocked work:** none in this run. `git worktree remove --force` is still denied in auto mode, so merged worktrees stay on disk; the list is in HANDOVER → *Sessions only the user can close*.
+
+**Sessions you should close:** the conductor ("macDAW") once it reports. Every phase-7 worker is closed, and this lead (7) is closed by the conductor.
+
+### Earlier run (phases 1–5)
 
 The run had five phases (2026-11-02 → 2026-11-04). The week went 0% → 75%; phase 5 ran past WEEK_STOP because you authorized it.
 
