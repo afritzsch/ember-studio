@@ -65,6 +65,11 @@ The Interfaces above are implemented as written. The additions below are additiv
   - `SetAutomationMode {target, mode}` creates an empty lane if needed.
   - Every inverse is `SetAutomationLane {channel, target, lane?}`, which sets the lane to exactly that lane with its ID, or removes it. It is registered like any command.
 
+### Clarification (T-088): lanes leave with their target (DW-234, user decision; docs/autobuild/DECISIONS.md "T-088 cascade")
+This replaces the sentence of the T-074 delta that says a lane outlives its removed send or device. The Interfaces don't change.
+- Removing a send or device slot removes the lanes driving it in the same undo step: `RemoveSend`, `RemoveDevice`, `RemoveInstrument`, `SetInstrument` replacing an instrument, `RestoreInstrument` replacing a slot with another ID, and `RemoveBus` for the sends into the bus. Undo restores the target and then its lanes, with their IDs, points and mode (`SetAutomationLane` steps of one `CompositeCommand`), and redo removes both again. 07 "Contract delta (T-088)" has the full rule.
+- A lane whose target is missing anyway (a file saved before T-088, or `SetAutomationLane` on a missing target) still validates and is left out of the graph. Restoring its send or device adopts it. Undoing that restore puts the lane back as it was, so undo stays exact.
+
 ## Status
 | ID | status | test |
 |---|---|---|
