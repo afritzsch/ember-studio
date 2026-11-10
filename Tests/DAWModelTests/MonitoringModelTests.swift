@@ -86,6 +86,25 @@ struct MonitoringModelTests {
         #expect(monitorInputs(engine) == [true, false, true, false])
     }
 
+    @Test("REC-020..022: the monitors cross the bridge and the real engine accepts them; SetMonitoring publishes no new graph")
+    func realEngineAcceptsMonitors() async throws {
+        let engine = try EngineClient(.realtime(DriverConfig(sampleRate: 48_000, driver: .fake)))
+        let store = ProjectStore(project: project())
+        let sync = try store.attachEngine(engine, debounce: .zero)
+        let mic = store.project.tracks[0].id
+        let applied = engine.waitForGraph(engine.graphStatus().submittedVersion, timeout: .seconds(5))
+        #expect(applied.lastError == nil && applied.publishedVersion == applied.submittedVersion)
+        try store.perform(SetMonitoring(trackID: mic, mode: .on))
+        #expect(engine.graphStatus().submittedVersion == applied.submittedVersion, "a slot write, no graph")
+        #expect(engine.telemetry().monitorInput)
+        try store.perform(ArmTrack(trackID: mic, armed: true, inputPair: 1))
+        let rearmed = engine.waitForGraph(engine.graphStatus().submittedVersion, timeout: .seconds(5))
+        #expect(rearmed.submittedVersion > applied.submittedVersion && rearmed.lastError == nil)
+        #expect(rearmed.publishedVersion == rearmed.submittedVersion)
+        sync.invalidate()
+        #expect(!engine.telemetry().monitorInput && engine.telemetry().rtViolations == 0)
+    }
+
     @Test("REC-020: a project opened with `on` monitoring asks for input at attach")
     func onAtAttach() throws {
         var p = project()
