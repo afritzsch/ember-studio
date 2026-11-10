@@ -81,7 +81,7 @@ public enum ControlMethod: String, CaseIterable, Hashable, Sendable {
     public var summary: String {
         switch self {
         case .projectNew: "Start a new empty project {name, sampleRate?, engine?} → {projectID}"
-        case .projectOpen: "Open a project folder {path, recover?, engine?} → {loadReport}"
+        case .projectOpen: "Open a project folder {path, recover?, engine?, safeMode?} → {loadReport, safeMode?}"
         case .projectSave: "Save the project {path?} → {}"
         case .projectGet: "The project JSON, or the subtree at a JSON Pointer {path?}"
         case .commandApply: "Apply one Command {command: {type, …}} → {ok, createdIDs, label}"

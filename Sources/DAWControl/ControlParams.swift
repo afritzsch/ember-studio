@@ -67,11 +67,16 @@ public struct ProjectOpenParams: Codable, Hashable, Sendable {
     public var recover: Bool?
     /// Default: offline.
     public var engine: EngineParams?
+    /// PLUG-021 (T-064): open with every AU/VST3 slot host-bypassed for this session (slots,
+    /// params and state kept; the document isn't changed). Default false.
+    public var safeMode: Bool?
 }
 
 public struct ProjectOpenResult: Codable, Hashable, Sendable {
     /// DW-107: DAWModel's report (offline assets, migration, recovery, repairs).
     public var loadReport: ProjectLoadReport
+    /// PLUG-021 (T-064): whether the project runs in safe mode.
+    public var safeMode: Bool? = nil
 }
 
 public struct ProjectSaveParams: Codable, Hashable, Sendable {

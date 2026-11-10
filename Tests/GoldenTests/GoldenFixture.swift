@@ -13,7 +13,8 @@ import Foundation
 ///   registers a test-only node (TEST-004) under a real kind for this fixture's engine. Under
 ///   `audioClipPlayer` it stands in only for tracks without clips. Types: `sine` (frequency Hz,
 ///   level), `impulse` (level at `offset`, `offset + samples`, …; `samples` 0 fires once; 1 is
-///   a constant), `fakeLatency` (`samples` frames), `nan`. One per kind. `allocating` is left
+///   a constant), `fakeLatency` (`samples` frames), `nan`, `latentMute` (silence, reporting `samples` frames of
+///   latency; T-064). One per kind. `allocating` is left
 ///   out on purpose: deliberate RT violations belong in RtTrapTests (14, "C++ unit tests").
 /// - `# @expect {"field": "peakDb", "value": -6.02, "tolerance": 0.01, "range": {"start": 0, "end": 512}}`
 ///   checks a field of `audio.analyze` on the golden render (every channel for per-channel
@@ -23,7 +24,7 @@ import Foundation
 ///   and silent on the right).
 struct GoldenFixture: Sendable {
     struct TestNode: Hashable, Sendable, Decodable {
-        enum NodeType: String, Hashable, Sendable, Decodable { case sine, impulse, fakeLatency, nan }
+        enum NodeType: String, Hashable, Sendable, Decodable { case sine, impulse, fakeLatency, nan, latentMute }
 
         var kind: NodeKind
         var type: NodeType

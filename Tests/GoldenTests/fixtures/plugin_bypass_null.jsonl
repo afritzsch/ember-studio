@@ -1,0 +1,29 @@
+# plugin_bypass_null (T-064, PLUG-018 golden null test): host-side bypass passes a latent device's
+# input through, delayed by exactly the latency PDC planned with, so a bypassed path nulls against
+# a plain phase-inverted copy, and turning bypass on is a slot write (SetDeviceBypass).
+# Test node (TEST-004): every `delay` insert is a LatentMuteNode(1000): silence, reporting 1000
+# samples of latency, so a device that ran instead of being bypassed would be heard as silence.
+# IDs: master 1, Bypassed 2 (insert 3), Plain 4, Active 5 (insert 6), Reference 7, tone asset 8.
+#   L: "Bypassed" (delay insert, bypassed by SetDeviceBypass) and "Plain" (phase inverted) both
+#      play the tone at tick 0. MIX-021 delays Plain by 1000 at the master input, the bypass delays
+#      the tone by 1000, so they null sample for sample: L is silent throughout.
+#   R: "Active" (the same delay insert, running: silence) and "Reference" (the tone). Only the
+#      reference is heard, at frame 0 despite 1000 frames of graph latency (MIX-023 pre-roll).
+# GoldenReferenceTests checks every sample.
+# @node {"kind": "delay", "type": "latentMute", "samples": 1000}
+# @expect {"field": "frames", "value": 36000}
+# @expect {"field": "peakDb", "value": -240, "channel": 0}
+# @expect {"field": "peakDb", "value": -9.031, "tolerance": 0.001, "channel": 1, "range": {"start": 0, "end": 12000}}
+# @expect {"field": "peakDb", "value": -240, "channel": 1, "range": {"start": 12000, "end": 36000}}
+project.new {"name": "plugin_bypass_null", "sampleRate": 48000}
+command.apply {"command": {"type": "RestoreTrack", "index": 0, "track": {"id": 2, "name": "Bypassed", "kind": "audio", "color": {"red": 0.5, "green": 0.5, "blue": 0.5}, "clips": [], "takeFolders": [], "inserts": [{"id": 3, "kind": {"format": "builtin", "node": "delay"}, "params": [], "bypass": false}], "strip": {"gain": 1, "pan": -1, "mute": false, "solo": false, "phaseInvert": false}, "sends": [], "output": {"kind": "master"}, "armed": false, "monitoring": "auto", "automation": []}}}
+command.apply {"command": {"type": "RestoreTrack", "index": 1, "track": {"id": 4, "name": "Plain", "kind": "audio", "color": {"red": 0.5, "green": 0.5, "blue": 0.5}, "clips": [], "takeFolders": [], "inserts": [], "strip": {"gain": 1, "pan": -1, "mute": false, "solo": false, "phaseInvert": true}, "sends": [], "output": {"kind": "master"}, "armed": false, "monitoring": "auto", "automation": []}}}
+command.apply {"command": {"type": "RestoreTrack", "index": 2, "track": {"id": 5, "name": "Active", "kind": "audio", "color": {"red": 0.5, "green": 0.5, "blue": 0.5}, "clips": [], "takeFolders": [], "inserts": [{"id": 6, "kind": {"format": "builtin", "node": "delay"}, "params": [], "bypass": false}], "strip": {"gain": 1, "pan": 1, "mute": false, "solo": false, "phaseInvert": false}, "sends": [], "output": {"kind": "master"}, "armed": false, "monitoring": "auto", "automation": []}}}
+command.apply {"command": {"type": "RestoreTrack", "index": 3, "track": {"id": 7, "name": "Reference", "kind": "audio", "color": {"red": 0.5, "green": 0.5, "blue": 0.5}, "clips": [], "takeFolders": [], "inserts": [], "strip": {"gain": 1, "pan": 1, "mute": false, "solo": false, "phaseInvert": false}, "sends": [], "output": {"kind": "master"}, "armed": false, "monitoring": "auto", "automation": []}}}
+asset.import {"path": "assets/tone_1k_48k.wav"}
+command.apply {"command": {"type": "AddClip", "trackID": 2, "start": 0, "assetID": 8}}
+command.apply {"command": {"type": "AddClip", "trackID": 4, "start": 0, "assetID": 8}}
+command.apply {"command": {"type": "AddClip", "trackID": 5, "start": 0, "assetID": 8}}
+command.apply {"command": {"type": "AddClip", "trackID": 7, "start": 0, "assetID": 8}}
+command.apply {"command": {"type": "SetDeviceBypass", "slotID": 3, "bypass": true}}
+render.offline {"from": 0, "to": 1440, "path": "plugin_bypass_null.wav", "tail": false}
