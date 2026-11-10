@@ -25,7 +25,7 @@ All processors are `daw::Node` subclasses, stereo in/out, with parameters throug
 - Notes are chased (user decision, DW-103, T-041): playback that starts inside a note (play, locate, loop start, or a tempo edit that moved the playhead's tick) sounds it from that frame, for its remaining length. On every segment that doesn't continue the previous one, after the hanging notes' offs, each note with `start < startTick` whose `tickToSample(start + length)` is after the segment's first sample gets its on at the segment's first frame (in note-start order), under the same capacity rule as any other on.
 - "Hanging notes" are the notes the player has started and not yet ended. Each gets exactly one note-off (velocity 64): at its end; at the first frame of a segment that doesn't continue the previous one's ticks (loop wrap, locate, or a tempo edit that moved the playhead's tick), before that segment's ons; or at frame 0 of a stopped block. The offs are explicit per note, not CC 123.
 - A new instance can't know what the instance it replaces left on, so its first non-empty block starts with All Notes Off (CC 123) on all 16 channels.
-- `midiOut` has fixed capacity. A note-on is written only if room stays for its own off and the offs of all held notes, so a full writer drops notes and never leaves one hanging.
+- `midiOut` has fixed capacity. A note-on is written only if room stays for its own off and the offs of all held notes, so a full writer drops notes and never leaves one hanging. Held audition notes count too (T-043, DW-187): the writer reserves `numActive + numPreviewOn + 2`, and the player merges `MidiPreviewInbox` events (`previewNote`, 08) at frame 0 of the block.
 
 ### Channel & utility
 | ID | Requirement | Acceptance |

@@ -383,15 +383,15 @@ Recorded by the lead from worker reports.
 | DW-184 | T-056 | Control: a method or `wait` flag on `command.apply` that blocks until re-conversion finishes, with CTL-031 progress (today clients poll `engine.telemetry.assetsReloadPending`) | B | todo |
 | DW-185 | T-056 | `RestoreSessionSampleRate` JSON requires `clipOffsets`/`zoneLoops` even when empty (hand-written scripts must pass `[]`) | M (minor) | todo |
 | DW-186 | T-051/T-056 | If the latest graph description is rejected during a rate change, the old-rate graph keeps rendering until the next accepted description | E | todo |
-| DW-187 | T-043 | 06 MidiClipPlayer "Capacity": the writer reserve now includes held preview notes (`numActive + numPreviewOn + 2`) and the player merges `MidiPreviewInbox` events at frame 0 | spec (lead) | todo |
-| DW-188 | T-043 | 13 `ui.*` paragraph should list the `pianoRoll.*` control ids and `ui.state.windows[].pianoRoll` (documented in 12 *Piano roll details*) | spec (lead) | todo |
+| DW-187 | T-043 | 06 MidiClipPlayer "Capacity": the writer reserve now includes held preview notes (`numActive + numPreviewOn + 2`) and the player merges `MidiPreviewInbox` events at frame 0 | spec (lead) | done (lead, phase 7) |
+| DW-188 | T-043 | 13 `ui.*` paragraph should list the `pianoRoll.*` control ids and `ui.state.windows[].pianoRoll` (documented in 12 *Piano roll details*) | spec (lead) | done (lead, phase 7) |
 | DW-189 | T-043 | Headless `engine.previewNote` in dawctl/dawmcp so agents can check instruments without the app (today only `ui.perform pianoRoll.key.<n>` in attach mode) | B | todo |
 | DW-190 | T-043 | A held preview note is cut and retriggered when its player is re-created (graph rebuild while a key is held); no hang | E (low) | todo |
 | DW-191 | T-043 | Piano roll 60 fps check with Instruments on a dense clip; per-asset peak refresh during a re-conversion pass (today waveforms update once at `finished`) | U | todo |
 | DW-192 | T-055 | Telemetry has no input latency (IO-005 `inputLatency`) and no buffer size the device actually runs: the audio panel shows output latency only and the last requested buffer. Add `TelemetryPOD.inputLatency`/`bufferFrames` (additive 08 delta) | E+B | todo |
 | DW-193 | T-055 | `AudioDeviceInfo` doesn't list a device's supported rates / buffer range, so the panel offers every IO-003 value and the engine refuses what the device can't run. Expose `DeviceCaps.rates` + buffer range | E+B | todo |
 | DW-194 | T-055 | `Dispatcher.deviceSet` builds the next config from `engine.mode` (the creation config), so `device.set` after a buffer change resets the buffer. The facade could report its current `DriverConfigPOD` | B | todo |
-| DW-195 | T-055 | 13's `ui.*` paragraph should list the `prefs.audio.*` control ids and `ui.state.windows[].audioPreferences` (documented in 12 *Audio preferences details*), like DW-188 | spec (lead) | todo |
+| DW-195 | T-055 | 13's `ui.*` paragraph should list the `prefs.audio.*` control ids and `ui.state.windows[].audioPreferences` (documented in 12 *Audio preferences details*), like DW-188 | spec (lead) | done (lead, phase 7) |
 | DW-196 | T-072 | `ParamInfo` has no step/enum metadata: the delay's `note` (0…13, labels in `Delay::kNotes`) and its `sync`/`pingpong` switches reach the model/UI as linear floats. A `steps`/value-label field is an 06 Interfaces change | spec (user) + D/U | todo |
 | DW-197 | T-072 | The `locate_reset` golden could use a real delay/reverb tail now (DW-162 is covered at unit level) | D (T-077) | todo |
 | DW-198 | T-052 | `ProjectWindowModel` calls `engine.setRecording` directly; it should go through `store.engineSync?.setRecording(_:)` so takes of an unsaved project land in the per-project temp folder | U (T-055) | done (T-055) |
