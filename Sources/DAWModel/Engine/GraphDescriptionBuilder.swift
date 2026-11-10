@@ -132,8 +132,15 @@ public enum GraphDescriptionBuilder {
     /// disabled, so the solo-resolved 1 that `paramValues` writes holds and solo never leaks
     /// through an automated mute.
     static func automation(_ project: Project, runtime: RuntimeIDs) -> [EngineGraph.Automation] {
-        let muted = SoloResolver.mutedChannels(in: project)
         var out: [EngineGraph.Automation] = []
+        // Solo is resolved only when a mute lane needs it (DW-032: builds stay cheap without lanes).
+        var resolved: Set<NodeIDValue>?
+        func muted() -> Set<NodeIDValue> {
+            if let resolved { return resolved }
+            let set = SoloResolver.mutedChannels(in: project)
+            resolved = set
+            return set
+        }
         project.forEachAutomationLane { lane, _ in
             guard !lane.points.isEmpty else { return }
             let points = lane.points.map {
@@ -146,7 +153,7 @@ public enum GraphDescriptionBuilder {
             }
             switch lane.target {
             case .strip(let channel, .mute):
-                let soloMuted = muted.contains(channel) && project.strip(of: channel)?.mute == false
+                let soloMuted = project.strip(of: channel)?.mute == false && muted().contains(channel)
                 let enabled = lane.isEnabled && !soloMuted
                 emit(runtime.stripParam(channel, ParamLayout.Strip.mute), enabled: enabled)
                 for send in project.sends(of: channel) ?? [] { emit(runtime.sendMuteParam(send.id), enabled: enabled) }
