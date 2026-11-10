@@ -49,8 +49,10 @@
 #include "automation/AutomationSet.h"
 #include "core/AudioBufferPool.h"
 #include "core/AudioBufferView.h"
+#include "core/InputMonitoring.h"
 #include "core/Node.h"
 #include "core/NodeIO.h"
+#include "core/ParamSlotTable.h"
 #include "core/Realtime.h"
 #include "core/Result.h"
 #include "core/Telemetry.h"
@@ -184,6 +186,15 @@ struct RenderFeedDesc {
     std::shared_ptr<DelayLine> delayLine = nullptr;
 };
 
+// REC-020..022 (T-054): a monitored step's settings, from GraphDescription::monitors. The mode
+// is read from `modeSlot` every block (a slot, no rebuild); `armed` and `inputPair` are fixed per
+// graph (structural).
+struct RenderMonitorDesc {
+    ParamID modeSlot = 0;
+    uint32_t inputPair = 0;
+    bool armed = false;
+};
+
 struct RenderStepDesc {
     std::shared_ptr<Node> node;  // prepared (ENG-013), normally from the NodePool
     RenderPortDesc input;
@@ -203,6 +214,9 @@ struct RenderStepDesc {
     // MIDI inputs gathered into NodeIO::midiIn, merged in this order on equal frames.
     uint32_t midiCapacity = 0;
     std::vector<RenderMidiInputDesc> midiInputs;
+    // REC-020/021 (T-054): the step is a monitored track's clip player (MonitorDesc). While
+    // monitoring is active, the device input pair replaces its output before it feeds anything.
+    std::optional<RenderMonitorDesc> monitor = std::nullopt;
 };
 
 struct RenderGraphDesc {
@@ -263,13 +277,20 @@ public:
     // ENG-041, the per-node part of a block: for each step in order, process, then feed its
     // output (through any PDC delay, MIX-021) to its consumers. Steps flagged `timeline` get
     // `timeline` (MIX-023), the others `ctx`; both must have the same numFrames <= maxBlock().
-    void process(ProcessContext& ctx, ProcessContext& timeline) const DAW_RT;
+    // REC-021 (T-054): `monitor` is the device input monitored steps may swap in (default: none,
+    // so clip players play; see MonitorInput).
+    void process(ProcessContext& ctx, ProcessContext& timeline, const MonitorInput& monitor = {}) const DAW_RT;
     // Same, with no latency compensation (every step gets `ctx`).
     void process(ProcessContext& ctx) const DAW_RT { process(ctx, ctx); }
 
     // AUTO-001 (T-074): the graph's automation players, null without lanes. The set keeps
     // audio-thread state (cursors), so it is handed out mutable; only the render thread uses it.
     AutomationSet* automation() const DAW_RT { return automation_.get(); }
+
+    // REC-020 (T-054), tests and diagnostics: how many steps are monitored, and whether the
+    // monitored step `i` (in step order) had monitoring active in the block just processed.
+    uint32_t numMonitors() const DAW_RT { return static_cast<uint32_t>(monitors_.size()); }
+    bool monitorActive(uint32_t i) const DAW_RT { return i < monitors_.size() && monitorState_[i].active; }
 
     // The master bus for the block just processed; empty when the graph has none.
     AudioBufferView master(uint32_t numFrames) const DAW_RT;
@@ -313,6 +334,9 @@ private:
     AudioBufferView input(uint32_t buffer, uint32_t numFrames) const DAW_RT;
     void feed(const Step& step, uint32_t numFrames) const DAW_RT;
     MidiEventSpan gatherMidi(const Step& step, uint32_t numFrames) const DAW_RT;
+    // REC-021 (T-054): swaps the device input into monitored step `m`'s output.
+    void applyMonitor(uint32_t m, const ProcessContext& ctx, const MonitorInput& in,
+                      const AudioBufferView& out, uint32_t numFrames) const DAW_RT;
 
     double sampleRate_ = 0;
     uint32_t maxBlock_ = 0;
@@ -337,6 +361,21 @@ private:
     std::unique_ptr<MidiEventSpan[]> mergeSpans_;
     std::unique_ptr<uint32_t[]> mergeCursors_;
     std::unique_ptr<AutomationSet> automation_;  // AUTO-001 (T-074)
+    // REC-020/021 (T-054): monitored steps in step order, and each one's state (audio thread
+    // only): the crossfade position (0: clip player, 1: input; < 0: not set yet, so the first
+    // block snaps) and whether monitoring was active.
+    struct Monitor {
+        uint32_t step;
+        ParamID modeSlot;
+        uint32_t inputPair;
+        bool armed;
+    };
+    struct MonitorState {
+        float mix = -1.0f;
+        bool active = false;  // REC-020's verdict for the last block
+    };
+    std::vector<Monitor> monitors_;
+    std::unique_ptr<MonitorState[]> monitorState_;
 };
 
 } // namespace daw

@@ -160,6 +160,9 @@ public final class EngineClient: EngineProtocol {
     /// REC-002 (T-052).
     public func setRecordingDirectory(_ path: String) { facade.setRecordingDirectory(std.string(path)) }
 
+    /// T-054 (DW-067 extension): device input for `on` monitoring without an arm.
+    public func setMonitorInput(_ wanted: Bool) { facade.setMonitorInput(wanted) }
+
     // MARK: MIDI input (T-053, REC-010/011)
 
     /// The player is the track's `GraphNodeID.source`; a track with no instrument simply has none
@@ -274,6 +277,8 @@ public final class EngineClient: EngineProtocol {
         out.nanBlocks = t.nanBlocks  // T-070
         out.midiInputDrops = t.midiInputDrops  // T-053
         out.armedMidiTracks = t.armedMidiTracks
+        out.monitoringLatency = t.monitoringLatency  // T-054
+        out.monitorInput = t.monitorInput
         return out
     }
 
@@ -332,6 +337,9 @@ public final class EngineClient: EngineProtocol {
         for lane in graph.automation {
             builder.addAutomation(lane.laneID, lane.target, lane.enabled)
             for p in lane.points { builder.addAutomationPoint(p.tick.raw, p.value, p.curve, p.shape) }
+        }
+        for m in graph.monitors {  // T-054 (REC-020..022)
+            builder.addMonitor(m.player, m.modeSlot, m.inputPair, m.armed)
         }
         return builder.description()
     }

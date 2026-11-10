@@ -68,7 +68,7 @@ struct GraphDescriptionBuilderTests {
         for n in graph.nodes where n.kind == .gain { #expect(n.numParams == ParamLayout.Send.count) }
     }
 
-    @Test("MODEL-020: pure; names, colors, arm state and param values don't change the graph")
+    @Test("MODEL-020: pure; names, colors, monitoring modes and param values don't change the graph")
     func pure() throws {
         let project = GraphFixtures.routing()
         let runtime = RuntimeIDs.sequential(for: project, catalog: testCatalog)
@@ -79,12 +79,52 @@ struct GraphDescriptionBuilderTests {
         edited.name = "renamed"
         edited.tracks[0].name = "Lead"
         edited.tracks[0].color = TrackColor(red: 1, green: 0, blue: 0)
-        edited.tracks[0].armed = true
+        edited.tracks[0].monitoring = .on  // REC-022 (T-054): a slot, not structure
         edited.tracks[0].strip = ChannelStripState(gain: 0.1, pan: 1, mute: true, solo: true, phaseInvert: true)
         edited.tracks[0].sends[0].level = 0
         edited.tracks[0].inserts[0].params = [ParamValue(index: 0, value: 0.9)]
         edited.buses[1].strip.solo = true
         #expect(GraphDescriptionBuilder.build(edited, runtime: runtime) == graph, "param-only edits aren't structural (MODEL-021)")
+
+        // REC-022 (T-054): arming and the input pair are structural (the track's monitor), so they
+        // change the graph; the monitoring mode only reaches its slot.
+        var armed = project
+        armed.tracks[0].armed = true
+        let armedGraph = GraphDescriptionBuilder.build(armed, runtime: runtime)
+        #expect(armedGraph != graph)
+        #expect(armedGraph.monitors.first { $0.player == GraphNodeID.source(of: project.tracks[0].id) }?.armed == true)
+        var paired = project
+        paired.tracks[0].inputPair = 3
+        #expect(GraphDescriptionBuilder.build(paired, runtime: runtime) != graph)
+    }
+
+    @Test("REC-020..022: every audio track's clip player gets a monitor with its arm, input pair and mode slot")
+    func monitors() throws {
+        var project = GraphFixtures.routing()
+        project.tracks[0].monitoring = .off
+        let audio = project.tracks.filter { $0.kind == .audio }
+        #expect(!audio.isEmpty)
+        let runtime = RuntimeIDs.sequential(for: project, catalog: testCatalog)
+        let graph = GraphDescriptionBuilder.build(project, runtime: runtime)
+        #expect(graph.monitors.count == audio.count)
+        for track in audio {
+            let monitor = try #require(graph.monitors.first { $0.player == GraphNodeID.source(of: track.id) })
+            #expect(monitor.armed == track.armed && monitor.inputPair == track.inputPair)
+            #expect(monitor.modeSlot == runtime.paramID(GraphNodeID.monitor(of: track.id), 0))
+        }
+        // The slots hold the modes: off 0, on 1, auto 2.
+        let values = GraphDescriptionBuilder.paramValues(project, runtime: runtime, catalog: testCatalog)
+        for track in audio {
+            let slot = try #require(runtime.paramID(GraphNodeID.monitor(of: track.id), 0))
+            #expect(values[slot] == EngineGraph.MonitoringSlot.value(track.monitoring))
+        }
+        #expect(EngineGraph.MonitoringSlot.value(.off) == 0 && EngineGraph.MonitoringSlot.value(.on) == 1
+            && EngineGraph.MonitoringSlot.value(.auto) == 2)
+        // MIDI tracks have none (play-through ignores the mode, REC-011).
+        for track in project.tracks where track.kind == .midi {
+            #expect(!graph.monitors.contains { $0.player == GraphNodeID.source(of: track.id) })
+            #expect(runtime.params[GraphNodeID.monitor(of: track.id)] == nil)
+        }
     }
 
     @Test("MODEL-020: send taps, sidechain tap and bypass follow the send design")

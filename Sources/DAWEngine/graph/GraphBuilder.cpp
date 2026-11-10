@@ -1,6 +1,7 @@
 #include "graph/GraphBuilder.h"
 
 #include <algorithm>
+#include <optional>
 #include <string>
 #include <unordered_set>
 #include <utility>
@@ -133,6 +134,23 @@ Result<std::unique_ptr<RenderGraph>> GraphBuilder::build(const GraphDescription&
         for (uint32_t n : sorted.cycle) ids.push_back(desc.nodes[n].id);
         std::sort(ids.begin(), ids.end());
         return makeCycleError(std::move(ids));
+    }
+
+    // REC-020..022 (T-054): one monitor per clip player with audio output, its mode slot allocated
+    // (DW-030: the audio thread reads it unchecked in Release), a valid input pair.
+    std::vector<std::optional<RenderMonitorDesc>> monitors(numNodes);
+    for (const MonitorDesc& m : desc.monitors) {
+        const auto it = index.find(m.player);
+        const std::string name = "monitor of " + nodeName(m.player);
+        if (it == index.end()) return invalid(name + ": no such node");
+        if (desc.nodes[it->second].kind != NodeKind::audioClipPlayer)
+            return invalid(name + ": not an audioClipPlayer");
+        if (monitors[it->second]) return invalid("duplicate " + name);
+        if (m.modeSlot >= params.capacity() || !params.isAllocated(m.modeSlot))
+            return invalid(name + ": mode slot " + std::to_string(m.modeSlot) + " is not allocated");
+        if (m.inputPair >= kMaxMonitorInputPairs)
+            return invalid(name + ": input pair " + std::to_string(m.inputPair) + " out of range");
+        monitors[it->second] = RenderMonitorDesc{m.modeSlot, m.inputPair, m.armed};
     }
 
     // TIME-003. The model has validated the map already; this is the defensive check.
@@ -305,6 +323,7 @@ Result<std::unique_ptr<RenderGraph>> GraphBuilder::build(const GraphDescription&
         step.timeline = readsTimeline(desc.nodes[n].kind);
         step.midiCapacity = midiCapacity[n];
         step.midiInputs = std::move(midiInputs[n]);
+        step.monitor = monitors[n];  // REC-021 (T-054)
         graph.steps.push_back(std::move(step));
         // MIX-020: telemetry's per-node table lists the latent nodes.
         if (const uint32_t latency = nodes[n]->latencySamples(); latency > 0)

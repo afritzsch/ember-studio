@@ -89,7 +89,7 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 | T-051 | E | DeviceMonitor, hot-swap sequence, xrun detection, EngineEvents | IO-020..023 | T-050 | done |
 | T-052 | E | Audio recording: FIFOs, disk writer, latency comp, finalize, punch | REC-001..005 | T-050, T-009 | done |
 | T-053 | E | CoreMIDI input + MIDI recording | REC-010..012 | T-040 | done |
-| T-054 | E | Input monitoring modes | REC-020..022 | T-052 | wip(t-054-input-monitoring) |
+| T-054 | E | Input monitoring modes | REC-020..022 | T-052 | done |
 | T-055 | U | Audio preferences, device toasts, arm/monitor buttons | UI-040, UI-004 | T-051, T-034 | done |
 | T-056 | E+M | Session sample-rate change (re-convert assets, re-prepare) | IO-033, MODEL-005 (`SetSessionSampleRate`) | T-051 | done |
 
@@ -423,3 +423,8 @@ Recorded by the lead from worker reports.
 | DW-224 | T-064 | Safe mode still instantiates and prepares every plugin (only processing is bypassed), so a plugin that crashes in instantiation/prepare/state restore still takes the app down. Option: build plugin slots as absent in safe mode (keep stored state), load on enable | P (with T-083) | todo |
 | DW-225 | T-064 | Bypassing an instrument plugin stops its MIDI, so held notes can hang until it is enabled again; send all-notes-off (or the held note-offs) on a bypass toggle | P | todo |
 | DW-226 | T-064 | Mixer inserts can now toggle bypass with `SetDeviceBypass` (12 still says read-only until DW-149); in safe mode the UI shows the document's bypass, not the forced one; T-083 should show safe mode (e.g. `ui.state`); `ToastCenter` treats `pluginMisbehaved` like `pluginCrashed` | U (T-065/T-083) | todo |
+| DW-227 | T-054 | The mixer strip's monitor menu (`MixerView`) doesn't show the monitoring latency line (only the track header does) | U | todo |
+| DW-228 | T-054 | When playback starts with monitoring active, the MIX-023 pre-roll has no input to give, so a monitored track behind L samples of PDC has an L-frame gap (silence chosen over clip leak); a short input history could fill it | E | todo |
+| DW-229 | T-054 | `monitoringLatency` includes the device input latency only once input runs (armed track or `on` monitoring); an unarmed `auto` track shows output + graph only. Query the input device's latency with input off (IO-005) | E (io) | todo |
+| DW-230 | T-054 | No feedback protection: monitoring through a loopback or speaker → mic howls; recording goldens through the fake loopback must set monitoring off (`record_loopback_alignment` does). Maybe a toast/doc note | U/docs | todo |
+| DW-231 | T-054, T-074 | Load-sensitive tests besides UI-010: CTL-031 progress steps (`ProgressTests`) and REC-005 punch (`RecordingChecks.cpp:248`) each failed once under full parallel load and pass alone (DW-172) | testing | todo |

@@ -10,6 +10,9 @@
 # The click's first sample is the loudest of a beat (level 0.5 · cos 0), heard through the Mic
 # strip's and the master's centre pans (√½ each): 0.25 = −12.041 dBFS. Sample 23999 is silent and
 # 24000 is the click's first: off by one sample either way would fail (REC-003: ±1).
+# T-054: the track's monitoring is off. With the default `auto`, an armed track monitors while it
+# records (REC-020), and through the loopback that is a feedback loop: the take would hold the
+# click's echoes, which isn't what this fixture checks.
 # @expect {"field": "frames", "value": 120000}
 # @expect {"field": "peakDb", "value": -240, "range": {"start": 0, "end": 23999}}
 # @expect {"field": "peakDb", "value": -12.041, "tolerance": 0.002, "range": {"start": 24000, "end": 24001}}
@@ -20,6 +23,7 @@
 project.new {"name": "record_loopback_alignment", "sampleRate": 48000, "engine": {"mode": "realtime", "driver": "fake"}}
 command.apply {"command": {"type": "AddTrack", "kind": "audio", "name": "Mic"}}
 command.apply {"command": {"type": "ArmTrack", "trackID": 2, "armed": true, "inputPair": 0}}
+command.apply {"command": {"type": "SetMonitoring", "trackID": 2, "mode": "off"}}
 transport.setMetronome {"enabled": true, "level": 0.5}
 transport.setPunch {"enabled": true, "start": 480, "end": 3360}
 transport.record {"enabled": true}
