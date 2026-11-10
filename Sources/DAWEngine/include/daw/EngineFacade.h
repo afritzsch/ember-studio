@@ -408,6 +408,11 @@ public:
                  uint32_t numParams, const std::string& configJSON) {
         desc_.nodes.push_back(NodeDesc{id, kind, configVersion, firstParam, numParams, configJSON});
     }
+    // PLUG-018 (T-064): addNode with a host-side bypass slot (NodeDesc::bypassParam).
+    void addBypassableNode(NodeID id, NodeKind kind, uint32_t configVersion, ParamID firstParam,
+                           uint32_t numParams, const std::string& configJSON, ParamID bypassParam) {
+        desc_.nodes.push_back(NodeDesc{id, kind, configVersion, firstParam, numParams, configJSON, bypassParam});
+    }
     void addEdge(uint64_t edgeID, NodeID from, NodeID to, EdgeKind kind, uint8_t toPort) {
         desc_.edges.push_back(EdgeDesc{edgeID, from, to, kind, toPort});
     }
