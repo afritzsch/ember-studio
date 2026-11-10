@@ -78,6 +78,16 @@ struct CommandRegistryTests {
         ArmTrack(trackID: 3, armed: true, inputPair: 2),
         ArmTrack(trackID: 3, armed: false),
         SetMonitoring(trackID: 3, mode: .auto),
+        // T-074 (11, MODEL-005 automation)
+        AddAutomationPoint(target: .strip(channel: 2, param: .gain), point: AutomationPoint(tick: 0, value: 0.5)),
+        AddAutomationPoints(target: .device(slot: 4, index: 1),
+                            points: [AutomationPoint(tick: 0, value: 0, curve: .exp(2)), AutomationPoint(tick: 960, value: 1, curve: .hold)]),
+        RemoveAutomationPoints(target: .sendLevel(send: 5), ticks: [0, 960]),
+        MoveAutomationPoints(target: .strip(channel: 2, param: .pan), ticks: [480], deltaTicks: -10, deltaValue: 0.25),
+        SetAutomationMode(target: .strip(channel: 2, param: .mute), mode: .off),
+        SetAutomationLane(channel: 2, target: .strip(channel: 2, param: .gain),
+                          lane: AutomationLane(id: 9, target: .strip(channel: 2, param: .gain), points: [AutomationPoint(tick: 0, value: 1)])),
+        SetAutomationLane(channel: 2, target: .strip(channel: 2, param: .gain), lane: nil),
     ]
 
     @Test("MODEL-006: built-in type strings are stable and unique")
@@ -95,6 +105,8 @@ struct CommandRegistryTests {
             "SetMetronome",
             "SetSessionSampleRate", "RestoreSessionSampleRate",
             "ArmTrack", "SetMonitoring",
+            "AddAutomationPoint", "AddAutomationPoints", "RemoveAutomationPoints", "MoveAutomationPoints",
+            "SetAutomationMode", "SetAutomationLane",
         ])
         let all = CommandRegistry.registered.map { $0.type }
         #expect(Set(all).count == all.count)
