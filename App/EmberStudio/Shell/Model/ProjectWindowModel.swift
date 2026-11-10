@@ -39,7 +39,25 @@ struct TrackHeaderModel: Identifiable {
     let monitorControls: [UIControl]
     let inputControls: [UIControl]
 
+    /// REC-021 (T-054): what monitoring this track's input costs, shown read-only in its monitor
+    /// menu. Audio tracks only (MIDI play-through ignores the mode, REC-011).
+    var monitoringLatency: MonitoringLatency? = nil
+
     var controls: [UIControl] { [selectControl, armControl, muteControl, soloControl] + monitorControls + inputControls }
+
+    /// REC-021 (T-054): software monitoring latency, device input + output + graph latency
+    /// (`EngineTelemetry.monitoringLatency`), in samples and at the session rate in ms.
+    struct MonitoringLatency: Equatable {
+        let samples: UInt32
+        let milliseconds: Double
+
+        init(_ telemetry: EngineTelemetry) {
+            samples = telemetry.monitoringLatency
+            milliseconds = telemetry.sampleRate > 0 ? Double(telemetry.monitoringLatency) / telemetry.sampleRate * 1000 : 0
+        }
+
+        var title: String { "Latency \(samples) samples (\(String(format: "%.1f", milliseconds)) ms)" }
+    }
 
     /// "In 1-2": the device channels an input pair records (1-based, as audio interfaces label them).
     static func inputTitle(_ pair: UInt32) -> String { "In \(2 * pair + 1)-\(2 * pair + 2)" }
@@ -186,7 +204,8 @@ final class ProjectWindowModel: Identifiable {
                         guard track.inputPair != pair else { return }
                         self?.perform(ArmTrack(trackID: track.id, armed: track.armed, inputPair: pair))
                     }
-                } : [])
+                } : [],
+                monitoringLatency: track.kind == .audio ? .init(telemetry) : nil)  // REC-021 (T-054)
         }
     }
 

@@ -12,7 +12,8 @@ import Foundation
 ///        "selection": {"tracks": [ids], "clips": [ids]},
 ///        "zoom": {"pixelsPerBeat": 32}, "scroll": {"x": 0, "y": 0, "viewportHeight": 480},
 ///        "visibleTracks": [ids],
-///        "tracks": [{"id", "name", "kind", "mute", "solo", "selected", "armed", "inputPair", "monitoring"}],
+///        "tracks": [{"id", "name", "kind", "mute", "solo", "selected", "armed", "inputPair", "monitoring",
+///                    "monitoringLatency": {"samples", "ms"} | null (T-054, REC-021; null for MIDI tracks)}],
 ///        "transport": {"playing", "recording", "tick"},
 ///        "toolbar": {"position", "time", "tempo", "signature", "loop": {"enabled", "start", "end"} | null,
 ///                    "metronome", "dspLoadPercent", "xruns"},
@@ -68,6 +69,10 @@ enum UIStateDumper {
                     // T-055 (REC-001, REC-020): arm, input pair, monitoring.
                     "armed": .bool(track.armed), "inputPair": .int(Int64(track.inputPair)),
                     "monitoring": .string(track.monitoring.rawValue),
+                    // T-054 (REC-021): software monitoring latency, audio tracks.
+                    "monitoringLatency": track.monitoringLatency.map { latency -> JSONValue in
+                        ["samples": .int(Int64(latency.samples)), "ms": .double(latency.milliseconds)]
+                    } ?? .null,
                 ]
             }),
             "transport": [
