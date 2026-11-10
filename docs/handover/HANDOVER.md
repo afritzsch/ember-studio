@@ -14,6 +14,7 @@ Autobuild stopped: user asked to finish after phase 7. To continue, start a new 
 - Phase 7 week usage: 20% → 42% (two 5-hour pauses of ~3.7 h and ~4 h; T-082 and T-064 merged during the second).
 
 ## Suggested next wave (for a new run)
+- **User review after phase 7 (see DECISIONS.md → User review):** all phase 6–7 decisions confirmed. Schedule early: DW-149 insert-chain commands, DW-234 (delete lanes with their send/device, one undo step), DW-230 feedback guard for monitoring. Backlog: per-track MIDI input picker, DW-232.
 - **T-075** automation recording + lane UI (U+M, M7): read DW-236 (only automatable params) and DW-237 (stopped writes) first.
 - **T-077** M7 goldens (D): could also take DW-232 (wrap jump for the other built-ins).
 - **T-063** plugin editors (P+U, M6): needs vstgui4 or an own `IPlugView` test plugin (DW-208) and the plugin → model param path (DW-204). U overlaps T-075; pick one U task per wave, or run T-063 with a strict file split.
@@ -152,7 +153,7 @@ Autobuild stopped: user asked to finish after phase 7. To continue, start a new 
   - Review the eight phase-7 decisions in `docs/autobuild/DECISIONS.md` (T-054 contract/auto, T-064 bypass/crash marker/NaN event, T-074 contract/wrap jump, T-082 normalize).
   - DW-222: the export dialog's "Choose…" (NSSavePanel) needs a manual check in the app.
   - DW-230: monitoring has no feedback protection (a speaker → mic setup howls when `auto` monitors an armed track while recording).
-  - DW-234: should removing a send/device also remove the automation lanes that target it (today they stay and come back on undo)?
+  - Answered by the user after phase 7: the eight phase-6 and eight phase-7 decisions are confirmed; DW-230 → add a feedback guard; DW-234 → delete lanes with their target in one undoable step (see DECISIONS.md → User review).
 
 ## Your first job
 1. This run stopped because the user asked. A new run starts with `/autobuild`; its first lead is phase 8.
