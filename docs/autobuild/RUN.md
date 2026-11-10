@@ -94,6 +94,11 @@ Unattended phases started by `/autobuild` (see `.claude/skills/autobuild/SKILL.m
 
 - End: 4/4 merged plus the DW-214 fix, main green (test.sh 12/12, swift test 2× after the last merge), week 20%, five-hour window 61%, no worker session left open. Next: phase 7.
 
+### Phase 7 (2026-11-10)
+- Wave: T-054 input monitoring (E, M5: last M5 task), T-064 host bypass / NaN guard / crash marker (P, M6), T-074 automation (E+M, M7; owns the new `automation/` modules), T-082 export dialog (U, M8). T-063 waits (P+U overlaps T-064 and T-082); T-080 waits (E+M overlaps T-054 and T-074).
+- Start: week 20%, five-hour window 63% (reset at 1794297600).
+- Pre-decisions in DECISIONS.md: T-054 contract and `auto` evaluation; T-064 bypass command, crash marker and NaN event; T-074 contract; T-082 normalize and selection.
+
 ## Summary for the user
 
 The run had five phases (2026-11-02 → 2026-11-04). The week went 0% → 75%; phase 5 ran past WEEK_STOP because you authorized it.
