@@ -5,7 +5,8 @@
 namespace daw {
 
 ParamSlotTable::ParamSlotTable(uint32_t capacity)
-    : slots_(new ParamSlot[capacity]), capacity_(capacity), allocated_(capacity, false) {}
+    : slots_(new ParamSlot[capacity]), capacity_(capacity), afterWrap_(new AfterWrap[capacity]),
+      allocated_(capacity, false) {}
 
 ParamSlotTable::~ParamSlotTable() = default;
 

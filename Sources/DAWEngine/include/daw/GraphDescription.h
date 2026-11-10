@@ -40,8 +40,18 @@ struct TempoPointDesc { Tick tick; double bpm; };              // mirrors daw::T
 struct TimeSigDesc    { Tick tick; int32_t num; int32_t den; }; // mirrors daw::TimeSigEvent (03)
 struct TempoMapDesc   { std::vector<TempoPointDesc> tempos; std::vector<TimeSigDesc> timeSigs; };
 
+// 11-automation Interfaces (AUTO-001, T-074): one lane, additive to 05. Points are sorted by
+// tick (strictly increasing); `value` is normalized 0…1 and GraphBuilder maps it through the
+// target's range (ParamInfo, or the hosted plugin's parameter). `curve` shapes the segment that
+// starts at the point (AutomationCurve, automation/AutomationCurve.h): 0 linear, 1 hold (step),
+// 2 exponential with `shape`. A disabled lane (mode `off`, AUTO-005) is ignored.
+struct AutomationPointDesc { Tick tick; float value; uint8_t curve; float shape; };
+struct AutomationDesc { uint64_t laneID; ParamID target; std::vector<AutomationPointDesc> points; bool enabled; };
+
 struct GraphDescription { uint64_t version; std::vector<NodeDesc> nodes; std::vector<EdgeDesc> edges;
                           std::vector<ClipDesc> audioClips; std::vector<NoteDesc> notes;
-                          TempoMapDesc tempo; NodeID master; };
+                          TempoMapDesc tempo; NodeID master;
+                          std::vector<AutomationDesc> automation{};  // AUTO-001 (T-074), additive
+};
 
 } // namespace daw

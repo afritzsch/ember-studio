@@ -142,6 +142,12 @@ void Engine::render(RenderTarget& target, uint32_t numFrames) DAW_RT {
         // don't reset: they can fall mid-block, and nodes handle them per segment (TIME-006).
         if (transport_.locatedWhilePlaying()) graph->resetTimelineNodes();
 
+        // AUTO-002/003/005 (T-074): automation writes this block's values into the param slots
+        // before anything renders, the pre-roll included. It follows the transport's own block,
+        // not the MIX-023 look-ahead: automation isn't latency compensated (AUTO-010, MIX-025).
+        params_.beginBlock();
+        if (AutomationSet* automation = graph->automation()) automation->apply(block, params_);
+
         // MIX-023: timeline nodes run graph->latency() samples ahead, and a new run of playback
         // is pre-rolled first (Engine.h).
         const uint32_t latency = graph->latency();

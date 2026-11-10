@@ -84,9 +84,38 @@ public:
         return slots_[id];
     }
 
+    // AUTO-003 (T-074): a slot's value after a loop wrap inside the current block. The render
+    // thread opens each block with beginBlock(); automation then registers, for a block with two
+    // transport segments, the value a slot takes from the wrap frame on (setAfterWrap), and nodes
+    // that honor it read it with afterWrap() (ParamSmoother.h wrapJump) to jump there instead of
+    // ramping across the loop's discontinuity. An entry counts only in the block that set it.
+    // Render thread only (relaxed atomics, so a stray reader is merely stale, never torn).
+    void beginBlock() DAW_RT { block_.fetch_add(1, std::memory_order_relaxed); }
+    void setAfterWrap(ParamID id, float value) DAW_RT {
+        DAW_RT_ASSERT(id < capacity_);
+        afterWrap_[id].value.store(value, std::memory_order_relaxed);
+        afterWrap_[id].block.store(block_.load(std::memory_order_relaxed), std::memory_order_relaxed);
+    }
+    bool afterWrap(ParamID id, float& value) const DAW_RT {
+        DAW_RT_ASSERT(id < capacity_);
+        if (afterWrap_[id].block.load(std::memory_order_relaxed) != block_.load(std::memory_order_relaxed))
+            return false;
+        value = afterWrap_[id].value.load(std::memory_order_relaxed);
+        return true;
+    }
+
 private:
     const std::unique_ptr<ParamSlot[]> slots_;
     const uint32_t capacity_;
+
+    // AUTO-003 (T-074): the after-wrap entries, stamped with the block that set them. Stamps
+    // start at 0 and the block counter at 1, so nothing counts before the first setAfterWrap.
+    struct AfterWrap {
+        std::atomic<float> value{0.0f};
+        std::atomic<uint32_t> block{0};
+    };
+    const std::unique_ptr<AfterWrap[]> afterWrap_;
+    std::atomic<uint32_t> block_{1};
 
     // Allocation state. Only allocate()/free() and the non-RT queries touch it, under the lock;
     // RT paths never do.

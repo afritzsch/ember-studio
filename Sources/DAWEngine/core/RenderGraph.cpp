@@ -325,6 +325,7 @@ Result<std::unique_ptr<RenderGraph>> RenderGraph::create(RenderGraphDesc desc) {
     graph->nodeLatencies_ = std::move(desc.nodeLatencies);
     graph->buffers_ = std::move(desc.buffers);
     graph->tempo_ = std::move(*tempo);
+    graph->automation_ = std::move(desc.automation);  // AUTO-001 (T-074)
     return graph;
 }
 
