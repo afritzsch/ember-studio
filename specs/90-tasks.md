@@ -98,8 +98,8 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 |---|---|---|---|---|---|
 | T-060 | P | PluginScanner + cache + blocklist | PLUG-001..004 | T-001 | done |
 | T-061 | P | AU hosting node (FX + instrument), params, state, latency | PLUG-010, 012..016 (AU) | T-021, T-014 | done |
-| T-062 | P | VST3 hosting node + build SDK `again` test plugin | PLUG-011..016 (VST3) | T-021, T-014 | wip(t-062-vst3-hosting) |
-| T-063 | P+U | Plugin editor windows (AU view controller, VST3 IPlugView) | PLUG-017 | T-061, T-062, T-032 | todo |
+| T-062 | P | VST3 hosting node + build SDK `again` test plugin | PLUG-011..016 (VST3) | T-021, T-014 | done |
+| T-063 | P+U | Plugin editor windows (AU view controller, VST3 IPlugView) | PLUG-017 | T-061, T-062, T-032 | ready |
 | T-064 | P | Host bypass, NaN guard, crash marker + safe-mode open | PLUG-018, 020..022 | T-061 | ready |
 | T-065 | U | Device chain view (generic UI from ParamInfo), plugin manager | UI-032, UI-041 | T-063 | todo |
 
@@ -404,3 +404,9 @@ Recorded by the lead from worker reports.
 | DW-205 | T-061 | A session-rate change re-instantiates the slot's AU synchronously on daw.compile (state carried over); may need to be async for slow out-of-process AUv3s | P (T-064 or later) | todo |
 | DW-206 | T-076 | UI-031's acceptance names Instruments (no SwiftUI invalidation per frame; today a `withObservationTracking` test) and UI-030's smooth scrolling with 100 strips is unmeasured; real mouse drag/double-click on faders only tested with synthesized NSEvents; occlusion pause has no test | U / user | todo |
 | DW-207 | T-076 | `MeterReading` holds one peak/RMS per channel strip, so mixer meters are a single bar, not L/R. Stereo meters need a two-channel reading (08 Interfaces change) | E+B / user | todo |
+| DW-208 | T-062 | The test VST3 bundles compile `again` against a VSTGUI stub (`Tests/VST3TestPlugin/vstgui-shim`; bootstrap doesn't fetch vstgui4), so `createView` returns an empty view. Editor tests (PLUG-017) need vstgui4 fetched or a test plugin with its own `IPlugView`. No plugin needed the main thread for its controller, but no third-party VST3 (VSTGUI/JUCE) has been hosted | P (T-063) | todo |
+| DW-209 | T-062 | VST3 restart flags other than kLatencyChanged (kParamValuesChanged, kParamTitlesChanged, kIoChanged, kReloadComponent) are ignored; plugin output parameter changes are received in a fixed-capacity list and dropped. Untested branches: the mono-sidechain bus-arrangement fallback and an empty state section | P (T-063) | todo |
+| DW-210 | T-062 | Only note on/off reach VST3 plugins: MIDI CC, pitch bend and aftertouch need `IMidiMapping` → parameter changes | P | todo |
+| DW-211 | T-062 | VST3 `setupProcessing` always uses `kRealtime`, offline renders included, because `PrepareInfo` has no offline flag | E + P | todo |
+| DW-212 | T-062 | `VST3PluginHost` repeats `AUPluginHost`'s slot logic (adoption, parking, pending state); a shared template would remove ~150 lines | P (cleanup) | todo |
+| DW-213 | T-062 | VST3 parameter values are normalized: `pluginInfoJSON` reports min 0, max 1, canRamp false, so the model, automation and generic UI see 0…1 for VST3 slots (display strings need `getParamStringByValue`) | P + U (T-065) | todo |

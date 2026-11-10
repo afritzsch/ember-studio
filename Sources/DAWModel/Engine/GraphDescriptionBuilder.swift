@@ -269,19 +269,26 @@ private struct Emitter {
 extension DeviceSlot {
     /// DW-140: the node's `configJSON`. A sampler with zones gets `{"zones": [...]}` in the
     /// format of 06 "Sampler semantics", keys sorted so equal zones give equal strings (MODEL-021
-    /// compares graphs); an AU gets its identifier and state (T-061); every other slot gets "".
+    /// compares graphs); an AU or VST3 plugin gets its identifier and state (T-061, T-062); every other slot gets "".
     var configJSON: String {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
         // PLUG-010/016 (T-061): an AU slot's identifier and its stored state (base64 of the binary
         // plist), `{"identifier": …, "state": …}` (plugins/AUPluginConfig.h). The engine applies the
         // state when it makes the slot's AU (a project being opened) or when it changes later.
-        if case .au(let descriptor) = kind {
-            struct AUConfig: Encodable {
+        // PLUG-011/016 (T-062): a VST3 slot's config is the same shape (identifier `path#classUID`,
+        // state = the engine's state container, plugins/VST3PluginConfig.h).
+        let pluginIdentifier: String? = switch kind {
+        case .au(let descriptor): descriptor.identifier
+        case .vst3(let descriptor): descriptor.identifier
+        default: nil
+        }
+        if let pluginIdentifier {
+            struct PluginConfig: Encodable {
                 var identifier: String
                 var state: String?
             }
-            let config = AUConfig(identifier: descriptor.identifier, state: pluginState?.base64EncodedString())
+            let config = PluginConfig(identifier: pluginIdentifier, state: pluginState?.base64EncodedString())
             guard let data = try? encoder.encode(config) else { return "" }
             return String(decoding: data, as: UTF8.self)
         }

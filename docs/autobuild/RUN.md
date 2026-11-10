@@ -81,6 +81,10 @@ Unattended phases started by `/autobuild` (see `.claude/skills/autobuild/SKILL.m
 
 - T-076 merged during the pause on a quiet machine: test.sh 11/11, swift test 2× green. Worker closed. M7's mixer view done; DW-202 closed.
 
+- Resumed T-053, T-062, T-070 at 1794279732 (five-hour window 0%, week 12%).
+
+- T-062 merged: test.sh 12/12 (new `test-plugins` stage), swift test 2× green. Worker closed. T-063 (plugin editors) now ready.
+
 ## Summary for the user
 
 The run had five phases (2026-11-02 → 2026-11-04). The week went 0% → 75%; phase 5 ran past WEEK_STOP because you authorized it.

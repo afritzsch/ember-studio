@@ -18,6 +18,14 @@
 
 namespace daw {
 
+// The JSON shape shared by both plugin kinds (T-062: VST3PluginConfig.h): a string "identifier"
+// (required, not validated here) and an optional base64 "state". Non-RT.
+struct PluginConfigFields {
+    std::string identifier;
+    std::vector<uint8_t> state;   // empty: none
+};
+Result<PluginConfigFields> parsePluginConfigFields(std::string_view configJSON);
+
 struct AUPluginConfig {
     std::string identifier;       // canonical form (formatAUIdentifier)
     AUComponentID component;
