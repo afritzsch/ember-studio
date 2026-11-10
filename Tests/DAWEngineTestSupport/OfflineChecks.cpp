@@ -875,6 +875,99 @@ CheckResult offlineTailMaxLength() {
 
 // MARK: IO-013
 
+// MARK: T-082 normalize
+
+CheckResult offlineNormalize() {
+    CheckResult checks;
+    TempDir dir;
+    const double target = std::pow(10.0, kNormalizePeakDb / 20.0);
+    auto peakOf = [](const Channels& channels) {
+        double peak = 0;
+        for (const auto& ch : channels)
+            for (float x : ch) peak = std::max(peak, std::fabs(static_cast<double>(x)));
+        return peak;
+    };
+    struct Run {
+        bool ok = false;
+        Channels sink;
+        OfflineRenderStats stats;
+    };
+    // A fresh engine per run: sine + seeded noise, 1 s, a short tail.
+    auto render = [&](const std::filesystem::path& file, AudioSampleFormat sample, bool normalize, bool dither,
+                      double amplitude) {
+        Run run;
+        Engine engine;
+        std::vector<std::unique_ptr<Node>> sources;
+        sources.push_back(std::make_unique<SineSource>(440, 0.3 * amplitude));
+        sources.push_back(std::make_unique<NoiseSource>(7, static_cast<float>(0.05 * amplitude)));
+        if (!publish(engine, std::move(sources))) return run;
+        ExportSpec spec = exportSpec(file, AudioFileType::wav, sample);
+        spec.normalize = normalize;
+        spec.dither = dither;
+        spec.blockSize = 700;  // the last block is cut: pass two must follow the kept frames
+        spec.tail.maxSeconds = 0.25;
+        Capture capture;
+        spec.sink = capture.sink();
+        OfflineDriver driver;
+        run.ok = driver.render(engine, 0, kOneSecond, spec, nullptr).ok();
+        run.sink = std::move(capture.channels);
+        run.stats = driver.lastRender();
+        return run;
+    };
+
+    // Off (the default): the file is what the graph made; the peak is reported, gain 1.
+    const Run plain = render(dir.path() / "plain.wav", AudioSampleFormat::float32, false, false, 1);
+    DAW_CHECK(plain.ok && plain.stats.rtViolations == 0);
+    DAW_CHECK(plain.stats.normalizeGain == 1);
+    DAW_CHECK(plain.stats.peak > 0 && plain.stats.peak == peakOf(plain.sink));
+    DAW_CHECK(plain.stats.framesWritten == 48000 + 12000);
+
+    // On, float32: every sample is the plain render times one gain, the peak lands on −0.1 dBFS,
+    // and the file holds what the sink saw.
+    const Run norm = render(dir.path() / "norm.wav", AudioSampleFormat::float32, true, false, 1);
+    DAW_CHECK(norm.ok && norm.stats.rtViolations == 0);
+    DAW_CHECK(norm.stats.peak == plain.stats.peak);
+    DAW_CHECK(std::fabs(norm.stats.normalizeGain - target / plain.stats.peak) < 1e-12);
+    DAW_CHECK(norm.stats.framesWritten == plain.stats.framesWritten);
+    DAW_CHECK(norm.sink.size() == 2 && norm.sink[0].size() == plain.sink[0].size());
+    const float gain = static_cast<float>(norm.stats.normalizeGain);
+    bool scaled = norm.sink.size() == plain.sink.size();
+    for (size_t c = 0; scaled && c < norm.sink.size(); ++c)
+        for (size_t i = 0; scaled && i < norm.sink[c].size(); ++i) scaled = norm.sink[c][i] == plain.sink[c][i] * gain;
+    DAW_CHECK(scaled);
+    DAW_CHECK(std::fabs(peakOf(norm.sink) - target) < 1e-6);
+    auto back = readBack(dir.path() / "norm.wav", kRate);
+    DAW_CHECK(back.ok());
+    if (back.ok()) {
+        DAW_CHECK(sameBits(back.value(), norm.sink));
+    }
+
+    // A quiet render is raised as well (gain > 1), still to −0.1 dBFS.
+    const Run quiet = render(dir.path() / "quiet.wav", AudioSampleFormat::float32, true, false, 0.1);
+    DAW_CHECK(quiet.ok && quiet.stats.normalizeGain > 9);
+    DAW_CHECK(std::fabs(peakOf(quiet.sink) - target) < 1e-6);
+
+    // On, int16 with dither: normalized before quantizing, so nothing clips and the file's peak is
+    // within dither (±1 LSB) and rounding of the target; two runs give the same bytes (IO-011).
+    const Run a16 = render(dir.path() / "a16.wav", AudioSampleFormat::int16, true, true, 1);
+    const Run b16 = render(dir.path() / "b16.wav", AudioSampleFormat::int16, true, true, 1);
+    DAW_CHECK(a16.ok && b16.ok && a16.stats.clippedSamples == 0);
+    DAW_CHECK(fileBytes(dir.path() / "a16.wav") == fileBytes(dir.path() / "b16.wav"));
+    auto info = readFileInfo(dir.path() / "a16.wav");
+    DAW_CHECK(info.ok() && info.value().bitsPerChannel == 16 && info.value().frames == plain.stats.framesWritten);
+    auto back16 = readBack(dir.path() / "a16.wav", kRate);
+    DAW_CHECK(back16.ok());
+    if (back16.ok()) {
+        DAW_CHECK(std::fabs(peakOf(back16.value()) - target) <= 2.5 / 32768.0);
+    }
+
+    // Silence stays silence: gain 1, no division by zero.
+    const Run silent = render(dir.path() / "silent.wav", AudioSampleFormat::float32, true, false, 0);
+    DAW_CHECK(silent.ok && silent.stats.peak == 0 && silent.stats.normalizeGain == 1);
+    DAW_CHECK(peakOf(silent.sink) == 0);
+    return checks;
+}
+
 CheckResult offlineRunsInRtScope() {
     CheckResult checks;
     Engine engine;

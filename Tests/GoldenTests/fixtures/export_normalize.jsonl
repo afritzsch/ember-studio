@@ -1,0 +1,15 @@
+# export_normalize (UI-042, T-082): render.offline {normalize: true} scales the export so its
+# sample peak is -0.1 dBFS, before dither and quantization (DECISIONS "T-082 normalize").
+# The graph is sine_through_graph's: a 1 kHz full-scale SineNode (TEST-004) through the track and
+# master strips at unity, centre pan, peaking at 0.5 (-6.02 dBFS) per channel. Normalize raises it
+# by 5.92 dB to a -0.1 dBFS peak (0.98855), so the RMS moves from -9.03 to -3.11 dBFS. Written as
+# 24-bit WAV (render.offline doesn't dither), so the scaled samples are quantized after the gain;
+# one second, no tail.
+# @node {"kind": "audioClipPlayer", "type": "sine", "frequency": 1000, "level": 1}
+# @expect {"field": "frames", "value": 48000}
+# @expect {"field": "peakDb", "value": -0.1, "tolerance": 0.001}
+# @expect {"field": "rmsDb", "value": -3.11, "tolerance": 0.01}
+# @expect {"field": "spectrumPeakHz", "value": 1000, "tolerance": 1}
+project.new {"name": "export_normalize", "sampleRate": 48000}
+command.apply {"command": {"type": "AddTrack", "name": "Sine", "kind": "audio"}}
+render.offline {"from": 0, "to": 1920, "path": "export_normalize.wav", "tail": false, "sampleFormat": "int24", "normalize": true}
