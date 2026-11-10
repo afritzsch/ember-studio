@@ -122,7 +122,7 @@ DSP effects (T-070..073) depend only on the Node API and can be **pulled forward
 |---|---|---|---|---|---|
 | T-080 | E+M | Loop recording takes, TakeFolder, comp model, flattening | REC-030..034 | T-052, T-035 | ready |
 | T-081 | U | Take folder / comp editing UI | UI-016 | T-080, T-033 | todo |
-| T-082 | U | Export dialog | UI-042 | T-009, T-032 | wip(t-082-export-dialog) |
+| T-082 | U | Export dialog | UI-042 | T-009, T-032 | done |
 | T-083 | U | Crash recovery dialog | UI-043 | T-031, T-064 | todo |
 | T-084 | E | Sanitizer CI jobs, perf smoke, GitHub Actions | TEST-007, 008, BUILD-009 | T-077 | todo |
 
@@ -373,7 +373,7 @@ Recorded by the lead from worker reports.
 | DW-174 | T-071 | Meters (strip post-fader, compressor GR) can't be read through the control protocol: `dawctl`/`dawmcp` have no meter method, only the facade's `meter(node)` / `EngineProtocol.meter`. Add one (13 delta); a typed GR reading could come with it | B | todo |
 | DW-175 | T-071 | `nodes/BuiltinNodes.h` doc comment lists the registered kinds but not `compressor` (one line) | D | done (T-073) |
 | DW-176 | T-071 | TEST-008 perf (64 × EQ + Comp ≥ 20× realtime): the compressor does a per-sample `log10` + `exp` in double, unmeasured. If too slow, add a below-knee fast path | D (T-077 / T-084) | todo |
-| DW-177 | T-026 | Export dialog (T-082) must leave the click out by default: go through `render.offline` (which does it) or set `store.engineSync?.isMetronomeSuppressed = true` around `renderOffline`; an "Include metronome" checkbox maps to `includeMetronome` | U (T-082) | todo |
+| DW-177 | T-026 | Export dialog (T-082) must leave the click out by default: go through `render.offline` (which does it) or set `store.engineSync?.isMetronomeSuppressed = true` around `renderOffline`; an "Include metronome" checkbox maps to `includeMetronome` | U (T-082) | done (T-082: the export dialog holds the click slot at 0 unless "Include Metronome") |
 | DW-178 | T-026 | `paramInfoJSON(.gain)` now publishes GainNode's 2 slots, so a device slot of built-in kind `.gain` gets level/mute slots (it had none). Sends are unaffected (`ParamLayout.Send`). Check when insert chains land (DW-149) | M | todo |
 | DW-179 | T-034 | Arrow keys aren't bound to `clip.nudge.left|right|up|down`; `KeyChord` drops function keys today (UX choice) | U | todo |
 | DW-180 | T-034 | Toolbar tempo/signature are display only; editing them (`SetTempoEvent` / `SetTimeSignature`) from the toolbar is a possible follow-up | U | todo |
@@ -415,3 +415,8 @@ Recorded by the lead from worker reports.
 | DW-216 | T-053 | The app has no MIDI input listing or picker; every source goes to every armed MIDI track (autobuild decision "T-053 routing"); facade `midiInputs` / `midi.inputs` are ready for a UI | U | todo |
 | DW-217 | T-070 (DW-214) | `AUInstance::instantiate` (`AudioComponentInstanceNew`) isn't under the AU lifecycle lock; no crash seen, but the same CoreAudio rule may apply | P | todo |
 | DW-218 | T-070 (DW-214) | The VST3 host wasn't examined for an analogous teardown-vs-callback race (e.g. `restartComponent`/latency timer vs destruction) | P | todo |
+| DW-219 | T-082 | `render.offline` never sets `ExportSpec.dither`, although 13 and `RenderOfflineParams.sampleFormat`'s doc say int16/int24 are TPDF-dithered. Add `dither?` (default on for integer formats) or fix the doc. The app dialog does dither | B | todo |
+| DW-220 | T-082 | No way to cancel a running export: the facade has no cancel for render jobs, so the export dialog has no Cancel (closing the panel lets the export finish; the toolbar shows progress) | B+U | todo |
+| DW-221 | T-082 | `AppModel.export(_:to:)` is only used by the UI-001 test now that File > Export… opens the dialog; remove it with UI-001's Status text | U | todo |
+| DW-222 | T-082 | Export dialog "Choose…" (NSSavePanel) is covered only by a stubbed test; check it by hand in the app | U (manual) | todo |
+| DW-223 | T-082 | UI-010's perf smoke (`perFrame < 16 ms`) fails whenever the machine is loaded (53–104 ms under four workers or other apps, 9–12 ms alone); make it load-tolerant or move it to a perf-only job (DW-172) | U | todo |

@@ -47,6 +47,10 @@ struct OfflineRenderStats {
     uint64_t rtViolations = 0;  // IO-013: this thread's RT trap count over all render calls (0 in Release)
     uint64_t clippedSamples = 0;
     double renderSeconds = 0;   // wall time of the render loop, file writes included
+    // T-082: the largest |sample| rendered (before normalizing), and the gain ExportSpec::normalize
+    // applied (1 without it, or for silence).
+    double peak = 0;
+    double normalizeGain = 1;
 };
 
 class OfflineDriver {

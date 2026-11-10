@@ -150,6 +150,9 @@ struct OfflineResultPOD {
     uint64_t rtViolations = 0;    // IO-013: the render thread's own count (0 in Release)
     uint64_t clippedSamples = 0;
     double renderSeconds = 0;
+    // T-082: the rendered sample peak (before normalizing) and the gain normalize applied (1 without).
+    double peak = 0;
+    double normalizeGain = 1;
 };
 
 struct JobStatus {
@@ -186,6 +189,9 @@ struct ExportSpecPOD {
     // T-036: keep the transport's loop and wrap at its end (ExportSpec::followLoop); false plays
     // the range straight through.
     bool followLoop = false;
+    // T-082 (UI-042): scale the export so its sample peak is −0.1 dBFS, before dither and
+    // quantization (ExportSpec::normalize). false keeps today's render bit for bit.
+    bool normalize = false;
 };
 
 // MARK: Graph status (DW-047)

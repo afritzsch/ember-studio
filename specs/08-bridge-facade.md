@@ -242,6 +242,22 @@ Swift (`EngineProtocol.swift`, in its own block at the end): `RecordedMidiNote`,
 
 Affected: T-053 only. T-054 (monitoring) is untouched: play-through ignores the monitoring mode by decision. T-080 (loop takes) builds on the record buffer's pass numbers. Tests: `MidiInputTests` (DAWEngineTests; REC-010 with synthetic timestamps, block boundaries, loop wrap, disarm while held, overflow, a real CoreMIDI virtual source, RT trap 0), `MidiRecordingModelTests`, `MidiRecordingControlTests`.
 
+### Contract delta (T-082), accepted (autobuild, see docs/autobuild/DECISIONS.md "T-082 normalize")
+UI-042 asks for a normalize option in the export dialog. **Additive and defaulted**: no existing field changes meaning, and an export without it is bit-identical to before.
+```cpp
+struct ExportSpecPOD {    // after followLoop
+  bool normalize = false; // scale the export so its sample peak is −0.1 dBFS, before dither and quantization
+};
+struct OfflineResultPOD { // after renderSeconds
+  double peak = 0;          // the rendered sample peak (linear, before normalizing)
+  double normalizeGain = 1; // the gain normalize applied (1 without it, or for silence)
+};
+```
+- **Where (04, io).** `ExportSpec::normalize` and `kNormalizePeakDb = −0.1` (`io/ExportSpec.h`); `OfflineRenderStats` gets `peak` and `normalizeGain`. With `normalize`, `OfflineDriver` renders the range and tail once, as always (the RT trap, transport handling and determinism are unchanged), but writes the kept frames as interleaved float32 to an anonymous temp file (`tmpfile()`: unique per render and removed when closed, 00 §9) instead of the writer and the sink, tracking the peak. Then it reads the file back in `blockSize` chunks, scaled by `10^(−0.1/20) / peak` (gain 1 when the peak is 0 or not finite), into the `AudioFileWriter`, which dithers and quantizes as before, and the sink. Off the audio thread (the export thread); deterministic (IO-011): one render, one gain.
+- **Swift.** `ExportSpec.normalize` (default false), `OfflineRenderResult.peak` / `.normalizeGain`; `EngineClient` maps them; `FakeEngine` records each `ExportSpec` (`exportSpecs`) and can fail the next render (`failNextRender`), test hooks only.
+
+Affected: T-082 only. Tests: `OfflineDriverTests.normalize` (`offlineNormalize`), golden `export_normalize`, `ExportDialogTests`.
+
 ## Status
 | ID | status | test |
 |---|---|---|

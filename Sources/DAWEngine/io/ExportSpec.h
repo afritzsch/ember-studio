@@ -51,7 +51,15 @@ struct ExportSpec {
     // tickToSample(to) − tickToSample(from) frames (plus the tail) of playback from `from`, but
     // it wraps at the loop end the way live playback does (03 "Transport semantics").
     bool followLoop = false;
+    // T-082 (UI-042): scale the whole export so its sample peak is kNormalizePeakDb, before
+    // dither and quantization. The driver renders into a float temp file first, measures the
+    // peak, then writes the file (and the sink) from it, so the render itself runs once and stays
+    // deterministic (IO-011). Silence stays silence (gain 1).
+    bool normalize = false;
 };
+
+// T-082: −0.1 dBFS leaves room for inter-sample overs on conversion (DECISIONS "T-082 normalize").
+inline constexpr double kNormalizePeakDb = -0.1;
 
 // Reported after every block. The total isn't known up front: the tail ends early when the
 // output goes quiet, so `maxFrames` is the upper bound (range + maximum tail).

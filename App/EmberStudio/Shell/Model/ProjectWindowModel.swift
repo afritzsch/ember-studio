@@ -112,6 +112,8 @@ final class ProjectWindowModel: Identifiable {
     let audioPrefs = AudioPreferencesModel()
     /// UI-030/031/033 (T-076): the Mixer tab's channel strips, meters and routing pickers.
     let mixer = MixerModel()
+    /// UI-042 (T-082): the export dialog (File > Export…, `export`).
+    let exportDialog = ExportModel()
 
     init(id: Int, store: ProjectStore, toasts: ToastCenter = ToastCenter()) {
         self.id = id
@@ -121,6 +123,7 @@ final class ProjectWindowModel: Identifiable {
         pianoRoll.window = self
         audioPrefs.window = self
         mixer.window = self
+        exportDialog.window = self
         audioPrefs.refreshDevices()
         // UI-004: device toasts name devices (also ones that are gone) and offer the audio settings.
         toasts.deviceName = { [weak self] id in self?.audioPrefs.name(of: id) }
@@ -151,6 +154,7 @@ final class ProjectWindowModel: Identifiable {
         requestedRecording = nil
         scrollY = 0
         audioPrefs.engineReplaced()
+        exportDialog.documentReplaced()  // T-082
     }
 
     // MARK: Derived
@@ -295,6 +299,7 @@ final class ProjectWindowModel: Identifiable {
         controls += arrange.controls
         controls += pianoRoll.controls
         controls += audioPrefs.controls
+        controls += exportDialog.controls  // T-082
         controls += toasts.controls
         return controls
     }

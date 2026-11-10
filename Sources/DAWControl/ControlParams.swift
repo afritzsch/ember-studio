@@ -224,6 +224,9 @@ public struct RenderOfflineParams: Codable, Hashable, Sendable {
     /// T-026 (docs/autobuild/DECISIONS.md Q1): include the project metronome's click when it is
     /// on. Default false: exports leave the click out.
     public var includeMetronome: Bool?
+    /// T-082 (UI-042): scale the export so its sample peak is −0.1 dBFS, before dither and
+    /// quantization. Default false.
+    public var normalize: Bool?
 }
 
 public struct RenderOfflineResult: Codable, Hashable, Sendable {
@@ -236,6 +239,8 @@ public struct RenderOfflineResult: Codable, Hashable, Sendable {
     /// IO-013: the render thread's own RT trap count. Must be 0.
     public var rtViolations: UInt64
     public var clippedSamples: UInt64
+    /// T-082: with `normalize`, the gain applied (linear; 1 for silence). Absent otherwise.
+    public var normalizeGain: Double?
 }
 
 // MARK: audio.*

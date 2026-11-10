@@ -162,22 +162,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         }
     }
 
+    /// UI-042 (T-082): File > Export… (⇧⌘E) opens the main window's export dialog (`export.dialog`), which
+    /// renders and toasts the outcome itself.
     @objc func exportAudio(_ sender: Any?) {
-        guard let window = app.mainWindow else { return }
-        let panel = NSSavePanel()
-        panel.nameFieldStringValue = window.store.project.name + ".wav"
-        panel.allowedContentTypes = [.wav]
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        Task { @MainActor in
-            do {
-                let result = try await app.export(window, to: url)
-                window.toasts.post(.info, .info, title: "Exported \(url.lastPathComponent)",
-                                   message: String(format: "%.1f s in %.2f s", Double(result.framesWritten) / max(result.sampleRate, 1),
-                                                   result.renderSeconds))
-            } catch {
-                presentError("Export failed", error)
-            }
-        }
+        app.mainWindow?.exportDialog.isOpen = true
     }
 
     @objc func closeProjectWindow(_ sender: Any?) {

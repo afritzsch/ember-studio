@@ -492,6 +492,10 @@ public struct OfflineRenderResult: Hashable, Sendable, Codable {
     public var rtViolations: UInt64 = 0
     public var clippedSamples: UInt64 = 0
     public var renderSeconds: Double = 0
+    /// T-082: the rendered sample peak (linear, before normalizing) and the gain `normalize`
+    /// applied (1 without it).
+    public var peak: Double = 0
+    public var normalizeGain: Double = 1
 
     public init() {}
 
@@ -559,6 +563,9 @@ public struct ExportSpec: Hashable, Sendable, Codable {
     /// T-036: keep the transport's loop and wrap at its end; false (the default) plays the range
     /// straight through with the loop off (`daw::ExportSpecPOD::followLoop`).
     public var followLoop = false
+    /// T-082 (UI-042): scale the export so its sample peak is −0.1 dBFS, before dither and
+    /// quantization (`daw::ExportSpecPOD::normalize`). Off by default.
+    public var normalize = false
 
     public init(path: String, fileType: FileType = .wav, sampleFormat: SampleFormat = .float32,
                 dither: Bool = false, ditherSeed: UInt64 = 0x6d61_6344_4157_0035, numChannels: UInt32 = 2,
