@@ -53,6 +53,8 @@
 
 namespace daw {
 
+class MidiInputRouter;  // REC-011 (T-053), record/MidiInputRouter.h
+
 // UI-021 (T-043): notes the UI auditions on a MIDI track (EngineFacade::previewNote). The facade
 // posts them here; the track's MidiClipPlayer merges them into its MIDI output at frame 0 of its
 // next block, so they reach the track's instrument (sampler or plugin) on the same path as the
@@ -139,12 +141,16 @@ public:
     // Non-RT. The registry entry for NodeKind::midiClipPlayer (registerBuiltinNodes): no audio
     // output, notes from NodeCreateInfo::notes. UI-021: with `preview`, each player also plays
     // the preview notes posted for its NodeID (the facade registers it that way, T-043).
-    static NodeKindInfo kindInfo(MidiPreviewInbox* preview = nullptr);
+    // REC-011 (T-053): with `live`, a player whose track is armed also plays the router's live
+    // MIDI input.
+    static NodeKindInfo kindInfo(MidiPreviewInbox* preview = nullptr, MidiInputRouter* live = nullptr);
 
     // Non-RT. Takes the notes in any order and drops invalid ones (see above).
     static std::unique_ptr<MidiClipPlayer> create(std::span<const NoteDesc> notes,
-                                                  MidiPreviewInbox* preview = nullptr, NodeID id = 0);
-    explicit MidiClipPlayer(std::vector<Note> notes, MidiPreviewInbox* preview = nullptr, NodeID id = 0);
+                                                  MidiPreviewInbox* preview = nullptr, NodeID id = 0,
+                                                  MidiInputRouter* live = nullptr);
+    explicit MidiClipPlayer(std::vector<Note> notes, MidiPreviewInbox* preview = nullptr, NodeID id = 0,
+                            MidiInputRouter* live = nullptr);
 
     void prepare(const PrepareInfo& info) override;
     void reset() DAW_RT override;
@@ -167,11 +173,25 @@ private:
     // A note-on is written only if room stays for its own off and every held note's (preview
     // notes included, UI-021).
     bool roomForOn(const MidiEventWriter& out) const DAW_RT {
-        return out.capacity() - out.size() >= numActive_ + numPreviewOn_ + 2;
+        return out.capacity() - out.size() >= reserved() + 2;
     }
+    // Writer slots held back for what must still be ended: notes on (clip, preview and live),
+    // live pedals down and live bends off centre.
+    uint32_t reserved() const DAW_RT;
     // UI-021: the inbox's events for this player, at frame 0 (and, for a new instance, its held
     // notes again after the All Notes Off).
     void playPreview(MidiEventWriter& out, bool resync) DAW_RT;
+    // REC-011 (T-053). beginLive: this block's live span (empty unless the track is armed), the
+    // releases of a track just disarmed, and a new instance's held notes again. flushLive: the
+    // live events up to `frame` into the writer, so its output stays in frame order.
+    void beginLive(MidiEventWriter& out) DAW_RT;
+    void flushLive(MidiEventWriter& out, uint32_t frame) DAW_RT;
+    void playLive(MidiEventWriter& out, const MidiEvent& event) DAW_RT;
+    void releaseLive(MidiEventWriter& out) DAW_RT;
+    bool liveOn(uint8_t channel, uint8_t pitch) const DAW_RT {
+        return (liveOn_[channel][pitch >> 6] >> (pitch & 63)) & 1;
+    }
+    void setLiveOn(uint8_t channel, uint8_t pitch, bool on) DAW_RT;
 
     std::vector<Note> notes_;  // sorted by start
     std::vector<Tick> maxEnd_; // maxEnd_[i] = max(notes_[0..i].end), non-decreasing (chase)
@@ -191,6 +211,18 @@ private:
     int previewBox_ = -1;          // find() hint
     uint64_t previewOn_[2] = {};   // pitches this instance turned on, channel kChannel
     uint32_t numPreviewOn_ = 0;
+
+    // REC-011 live input (audio thread only, besides the pointer). What this instance turned on,
+    // so it can end exactly that when the track is disarmed; a re-created instance sounds the
+    // router's held notes again after its All Notes Off, like previews (UI-021).
+    MidiInputRouter* live_ = nullptr;
+    MidiEventSpan liveSpan_{};
+    uint32_t liveCursor_ = 0;
+    bool liveNew_ = true;            // the first real block of this instance is still to come
+    uint64_t liveOn_[16][2] = {};
+    uint32_t numLiveOn_ = 0;
+    uint16_t livePedal_ = 0;         // channels this instance has the pedal down on
+    uint16_t liveBend_ = 0;          // channels this instance has bent off centre
 };
 
 } // namespace daw

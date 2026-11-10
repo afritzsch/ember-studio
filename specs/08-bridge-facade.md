@@ -220,6 +220,28 @@ DSP-040 asks the NaN guards to bump telemetry (DW-142). **Additive and defaulted
 
 Affected: T-070 only. No other task's calls change.
 
+### Contract delta (T-053), accepted (autobuild, see docs/autobuild/DECISIONS.md "T-053 contract", "T-053 routing", "T-053 placement")
+09's REC-010..012 need MIDI input listing, arming, a test seam for timestamped MIDI, a finalize event carrying the recorded notes and a drop counter. Everything is **additive and defaulted**: `recordingFinalized` already was an `EngineEventType` case, and no existing field changes meaning.
+```cpp
+struct RecordedNotePOD { int64_t start, end; uint8_t pitch, velocity, channel; };   // timeline samples, compensated
+using RecordedNoteVector = std::vector<RecordedNotePOD>;
+struct RecordingPOD { /* T-052 */ bool midi = false; int64_t endSample = 0; RecordedNoteVector notes; };   // a MIDI take
+struct MidiInputInfoPOD { int32_t uniqueID; std::string name; bool connected; };
+// TelemetryPOD gains:  uint64_t midiInputDrops = 0; uint32_t armedMidiTracks = 0;
+void armMidiInput(NodeID track, NodeID player, bool armed);          // player: the track's MidiClipPlayer (GraphNodeID.source)
+std::vector<MidiInputInfoPOD> midiInputs() const;                    // CoreMIDI sources; empty on offline and fake-device engines
+FacadeError injectMidi(int64_t atSample, bool relativeToNow, uint8_t status, uint8_t data1, uint8_t data2, uint8_t size);   // test seam
+```
+- **Routing (REC-011).** Every connected CoreMIDI source reaches every armed MIDI track on all channels, whatever the track's monitoring mode. Live events reach the instrument through the track's `MidiClipPlayer` (the T-045 MIDI path), so a track with no instrument has no player and records but sounds nothing. PDC for clips is unchanged.
+- **Takes.** A MIDI take records while the transport plays with `setRecording(true)` and a MIDI track armed, in realtime mode with a driver, and ends like an audio take (T-052 "Takes"). Each armed track then gets one `recordingFinalized` event with `recording.midi` set, `recording.file` empty and `frames` 0; `droppedFrames` counts events the record buffer had no room for (`error` is set then). If no note was played, there is no event.
+- **Placement (REC-012).** `startSample`/`endSample` and the notes are timeline samples: the transport sample an event was struck at minus the running device's output latency (IO-005), so the position the player heard. PDC isn't subtracted: the transport position already is what the graph outputs (MIX-023). With the loop on, a note keeps its transport position on the pass it was heard in, and one held across a wrap ends at the loop end.
+- **Seam.** `injectMidi` is the test seam (`midi.inject`, 13): one MIDI message as if from a connected source, `atSample` a transport sample (`relativeToNow`: frames from the block about to render). A position already past, or a stopped transport, means now. Injected events hold back until their block; real CoreMIDI events are always due. Unsupported in offline mode.
+- **Engine seams (facade-internal).** `core/LiveMidiInput.h` (`Engine::setLiveMidiInput`, `beginBlock`/`endBlock`/`idleBlock`, called after any MIX-023 pre-roll, so pre-roll chunks consume nothing), and `Engine::setCycleHostTicks` (DeviceRenderer sets it per IO cycle: the MIDI clock's anchor). `FacadeOptions::coreMidi` connects the facade to CoreMIDI (`io/CoreMidiInput`, thread `daw.midi`); only the default CoreAudio engine asks for it, so tests with driver adapters and fake devices never touch the MIDI server.
+
+Swift (`EngineProtocol.swift`, in its own block at the end): `RecordedMidiNote`, `RecordedTake.endSample/notes/isMidi`, `MidiInputInfo`, `EngineTelemetry.midiInputDrops/armedMidiTracks`, and the requirements `armMidiInput(track:armed:)`, `midiInputs()` and `injectMidi(atSample:relativeToNow:status:data1:data2:)`, with defaults in a protocol extension (no-op, empty, `notImplemented`), so other conformers compile unchanged. `FakeEngine` records the calls and has `setMidiInputs(_:)`; `EngineClient` passes `GraphNodeID.source(of: track)` as the player.
+
+Affected: T-053 only. T-054 (monitoring) is untouched: play-through ignores the monitoring mode by decision. T-080 (loop takes) builds on the record buffer's pass numbers. Tests: `MidiInputTests` (DAWEngineTests; REC-010 with synthetic timestamps, block boundaries, loop wrap, disarm while held, overflow, a real CoreMIDI virtual source, RT trap 0), `MidiRecordingModelTests`, `MidiRecordingControlTests`.
+
 ## Status
 | ID | status | test |
 |---|---|---|

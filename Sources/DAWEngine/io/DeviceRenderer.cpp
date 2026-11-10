@@ -27,6 +27,7 @@ void DeviceRenderer::renderCycle(float* const* output, uint32_t outputChannels,
         std::memset(output[c], 0, std::size_t{numFrames} * sizeof(float));
 
     const uint64_t startTicks = Telemetry::clockTicks();  // IO-023
+    engine_.setCycleHostTicks(startTicks);                // REC-010: the MIDI clock's anchor
 
     // Per-block views into the cycle's buffers (CONV-RT-01: on the stack).
     float* outBlock[kMaxDeviceChannels];

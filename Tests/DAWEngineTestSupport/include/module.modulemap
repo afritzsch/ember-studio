@@ -43,6 +43,7 @@ module DAWEngineTestSupport {
   header "AUPluginChecks.h"
   header "VST3PluginChecks.h"
   header "RecordingChecks.h"
+  header "MidiInputChecks.h"
   requires cplusplus
   export *
 }

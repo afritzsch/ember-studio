@@ -332,6 +332,32 @@ public struct DeviceSimulateParams: Codable, Hashable, Sendable {
     public var sampleRate: Double?
 }
 
+// MARK: midi.* (T-053, REC-010..012)
+
+public struct MidiInputsResult: Codable, Hashable, Sendable {
+    public var inputs: [MidiInputInfo]
+}
+
+/// REC-010..012 (T-053): `midi.inject`, the test seam that feeds timestamped MIDI as if from a
+/// connected source, so MIDI recording can be scripted without hardware.
+public struct MidiInjectParams: Codable, Hashable, Sendable {
+    public struct Event: Codable, Hashable, Sendable {
+        /// Transport sample it is struck at (the note lands at this minus the output latency). Left
+        /// out, or the transport stopped: at once, plus `framesFromNow`.
+        public var sample: Int64?
+        public var framesFromNow: Int64?
+        /// A channel message: 0x80…0xEF.
+        public var status: UInt8
+        public var data1: UInt8?
+        public var data2: UInt8?
+    }
+    public var events: [Event]
+}
+
+public struct MidiInjectResult: Codable, Hashable, Sendable {
+    public var accepted: Int
+}
+
 /// After `device.set` / `device.simulate`: where the engine ended up, and the events it raised.
 public struct DeviceStateResult: Codable, Hashable, Sendable {
     /// 0: none running.

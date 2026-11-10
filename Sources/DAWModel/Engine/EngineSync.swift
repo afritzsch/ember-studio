@@ -74,6 +74,8 @@ public final class EngineSync {
     private var pendingLoads: [JobID] = []
     /// REC-001 (T-052): the audio tracks armed in the engine, with their input pair.
     private var pushedArms: [NodeIDValue: UInt32] = [:]
+    /// REC-011 (T-053): the MIDI tracks armed in the engine.
+    private var pushedMidiArms: Set<NodeIDValue> = []
     /// REC-002 (T-052): the recordings directory last given to the engine.
     private var pushedRecordingDirectory: String?
     /// T-052: the project folder, if it has one (`ProjectStore` points it at `folderURL`).
@@ -101,6 +103,7 @@ public final class EngineSync {
         flush()
         pushLoop()
         pushArms()
+        pushMidiArms()
     }
 
     /// Whether a structural change is waiting for its debounce window.
@@ -124,6 +127,7 @@ public final class EngineSync {
         writeParams()
         pushLoop()
         pushArms()
+        pushMidiArms()
         let graph = GraphDescriptionBuilder.build(project, runtime: runtime)
         candidate = graph
         if graph != appliedGraph || hasUnusedParams() { scheduleApply() }
@@ -286,6 +290,16 @@ public final class EngineSync {
         pushedArms = wanted
     }
 
+    /// REC-011 (T-053): each armed MIDI track gets the MIDI input (`armMidiInput`), whatever its
+    /// monitoring mode, and a track that loses the arm or goes away is disarmed.
+    private func pushMidiArms() {
+        let wanted = Set(project.tracks.lazy.filter { $0.kind == .midi && $0.armed }.map(\.id))
+        guard wanted != pushedMidiArms else { return }
+        for track in pushedMidiArms.subtracting(wanted).sorted() { engine.armMidiInput(track: track, armed: false) }
+        for track in wanted.subtracting(pushedMidiArms).sorted() { engine.armMidiInput(track: track, armed: true) }
+        pushedMidiArms = wanted
+    }
+
     /// Drains the engine's events, handles them and returns them for the caller to act on too
     /// (BRIDGE-004: the app polls at 60 Hz, the CLI per tick).
     public func pollEvents() -> [EngineEvent] {
@@ -306,6 +320,8 @@ public final class EngineSync {
             engine.armInput(track: track, inputChannelPair: pair, armed: false)
         }
         pushedArms = [:]
+        for track in pushedMidiArms.sorted() { engine.armMidiInput(track: track, armed: false) }  // T-053
+        pushedMidiArms = []
         for range in runtime.params.values { engine.freeParams(range.first, count: range.count) }
         for range in retired { engine.freeParams(range.first, count: range.count) }
         runtime = RuntimeIDs()

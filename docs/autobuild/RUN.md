@@ -87,6 +87,8 @@ Unattended phases started by `/autobuild` (see `.claude/skills/autobuild/SKILL.m
 
 - T-070 merged (EQ, `NodeRegistry::paramInfo`, `nanBlocks` telemetry, sampler NaN guard, `routing` fixture through EngineClient). test.sh failed only on the AUDelay param flake (DW-214, also seen by T-053 without T-070); plain swift test 2× green. T-070's worker takes DW-214 as a follow-up.
 
+- T-053 merged after its worker merged main twice (T-062's chained `registerNodes`, T-070's telemetry fields; kept both): test.sh 12/12, swift test 2× green. Worker closed. M5 now needs only T-054.
+
 ## Summary for the user
 
 The run had five phases (2026-11-02 → 2026-11-04). The week went 0% → 75%; phase 5 ran past WEEK_STOP because you authorized it.

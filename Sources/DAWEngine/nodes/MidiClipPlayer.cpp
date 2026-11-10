@@ -6,6 +6,7 @@
 #include <utility>
 
 #include "core/ProcessContext.h"
+#include "record/MidiInputRouter.h"
 #include "time/TransportSegments.h"
 
 namespace daw {
@@ -100,16 +101,16 @@ bool MidiPreviewInbox::held(int index, uint8_t pitch, uint8_t& velocity) const D
 
 // MARK: MidiClipPlayer
 
-NodeKindInfo MidiClipPlayer::kindInfo(MidiPreviewInbox* preview) {
-    NodeKindInfo info{[preview](const NodeCreateInfo& create) -> Result<std::unique_ptr<Node>> {
-        return std::unique_ptr<Node>(MidiClipPlayer::create(create.notes, preview, create.desc.id));
+NodeKindInfo MidiClipPlayer::kindInfo(MidiPreviewInbox* preview, MidiInputRouter* live) {
+    NodeKindInfo info{[preview, live](const NodeCreateInfo& create) -> Result<std::unique_ptr<Node>> {
+        return std::unique_ptr<Node>(MidiClipPlayer::create(create.notes, preview, create.desc.id, live));
     }};
     info.audioOutput = false;  // MIDI only: its instrument hangs off a MIDI edge
     return info;
 }
 
 std::unique_ptr<MidiClipPlayer> MidiClipPlayer::create(std::span<const NoteDesc> descs, MidiPreviewInbox* preview,
-                                                       NodeID id) {
+                                                       NodeID id, MidiInputRouter* live) {
     std::vector<Note> notes;
     notes.reserve(descs.size());
     for (const NoteDesc& d : descs) {
@@ -117,11 +118,11 @@ std::unique_ptr<MidiClipPlayer> MidiClipPlayer::create(std::span<const NoteDesc>
         notes.push_back(Note{d.start, d.start + d.length, d.pitch,
                              std::clamp<uint8_t>(d.velocity, 1, 127), d.channel});
     }
-    return std::make_unique<MidiClipPlayer>(std::move(notes), preview, id);
+    return std::make_unique<MidiClipPlayer>(std::move(notes), preview, id, live);
 }
 
-MidiClipPlayer::MidiClipPlayer(std::vector<Note> notes, MidiPreviewInbox* preview, NodeID id)
-    : notes_(std::move(notes)), preview_(preview), id_(id) {
+MidiClipPlayer::MidiClipPlayer(std::vector<Note> notes, MidiPreviewInbox* preview, NodeID id, MidiInputRouter* live)
+    : notes_(std::move(notes)), preview_(preview), id_(id), live_(live) {
     std::stable_sort(notes_.begin(), notes_.end(),
                      [](const Note& a, const Note& b) { return a.start < b.start; });
     active_.resize(notes_.size());
@@ -134,6 +135,119 @@ void MidiClipPlayer::prepare(const PrepareInfo&) {
     havePos_ = false;
     previewOn_[0] = previewOn_[1] = 0;
     numPreviewOn_ = 0;
+    for (auto& channel : liveOn_) channel[0] = channel[1] = 0;
+    numLiveOn_ = 0;
+    livePedal_ = liveBend_ = 0;
+}
+
+uint32_t MidiClipPlayer::reserved() const DAW_RT {
+    return numActive_ + numPreviewOn_ + numLiveOn_ + static_cast<uint32_t>(std::popcount(livePedal_)) +
+           static_cast<uint32_t>(std::popcount(liveBend_));
+}
+
+// MARK: REC-011 live input (T-053)
+
+void MidiClipPlayer::setLiveOn(uint8_t channel, uint8_t pitch, bool on) DAW_RT {
+    uint64_t& word = liveOn_[channel][pitch >> 6];
+    const uint64_t bit = uint64_t(1) << (pitch & 63);
+    if (on) {
+        word |= bit;
+        ++numLiveOn_;
+    } else {
+        word &= ~bit;
+        --numLiveOn_;
+    }
+}
+
+void MidiClipPlayer::releaseLive(MidiEventWriter& out) DAW_RT {
+    for (uint8_t channel = 0; channel < kNumChannels; ++channel) {
+        const uint8_t status = uint8_t(kNoteOff | channel);
+        for (uint8_t w = 0; w < 2; ++w) {
+            uint64_t bits = liveOn_[channel][w];
+            while (bits != 0) {  // bounded: 64 bits per word
+                const auto pitch = static_cast<uint8_t>(w * 64 + std::countr_zero(bits));
+                bits &= bits - 1;
+                out.push(MidiEvent{0, 3, {status, pitch, kReleaseVelocity}});
+            }
+            liveOn_[channel][w] = 0;
+        }
+        const auto bit = static_cast<uint16_t>(1u << channel);
+        if (livePedal_ & bit) out.push(MidiEvent{0, 3, {uint8_t(kControlChange | channel), 64, 0}});
+        if (liveBend_ & bit) out.push(MidiEvent{0, 3, {uint8_t(0xE0 | channel), 0, 64}});
+    }
+    numLiveOn_ = 0;
+    livePedal_ = liveBend_ = 0;
+}
+
+void MidiClipPlayer::beginLive(MidiEventWriter& out) DAW_RT {
+    liveSpan_ = {};
+    liveCursor_ = 0;
+    if (live_ == nullptr || !live_->blockActive()) return;  // pre-roll, or no input at all
+
+    const bool isNew = liveNew_;
+    liveNew_ = false;
+    if (!live_->isArmed(id_)) {
+        // Nothing may hang when the track is disarmed (T-053 notes).
+        if (reserved() != numActive_ + numPreviewOn_) releaseLive(out);
+        return;
+    }
+    if (isNew) {
+        // After this instance's All Notes Off: the notes still held sound again. The bounded scan
+        // runs once per instance (CONV-RT-04); pedal and bend survive in the instrument.
+        for (uint8_t channel = 0; channel < kNumChannels; ++channel) {
+            for (uint8_t pitch = 0; pitch < 128; ++pitch) {
+                uint8_t velocity = 0;
+                if (!live_->heldNote(channel, pitch, velocity) || !roomForOn(out)) continue;
+                if (out.push(MidiEvent{0, 3, {uint8_t(kNoteOn | channel), pitch, velocity}}))
+                    setLiveOn(channel, pitch, true);
+            }
+        }
+        livePedal_ = live_->pedalMask();
+        liveBend_ = live_->bendMask();
+    }
+    liveSpan_ = live_->events();
+}
+
+void MidiClipPlayer::playLive(MidiEventWriter& out, const MidiEvent& e) DAW_RT {
+    const uint8_t kind = e.data[0] & 0xF0, channel = e.data[0] & 0x0F;
+    if (kind == kNoteOn && e.data[2] > 0) {
+        if (liveOn(channel, e.data[1]) || !roomForOn(out)) return;  // dropped, never hanging
+        if (out.push(e)) setLiveOn(channel, e.data[1], true);
+        return;
+    }
+    if (kind == kNoteOff || kind == kNoteOn) {
+        if (!liveOn(channel, e.data[1])) return;
+        out.push(e);
+        setLiveOn(channel, e.data[1], false);
+        return;
+    }
+    const auto bit = static_cast<uint16_t>(1u << channel);
+    const bool isPedal = kind == kControlChange && e.data[1] == 64;
+    const bool isBend = kind == 0xE0;
+    // An event that starts something that must be ended later keeps room for that too.
+    const uint32_t need = (isPedal && e.data[2] >= 64) || (isBend && !(e.data[1] == 0 && e.data[2] == 64)) ? 2 : 1;
+    if (out.capacity() - out.size() < reserved() + need) {
+        // Ending is always allowed: the room was reserved when it started.
+        const bool ends = (isPedal && e.data[2] < 64 && (livePedal_ & bit)) ||
+                          (isBend && e.data[1] == 0 && e.data[2] == 64 && (liveBend_ & bit));
+        if (!ends) return;
+    }
+    if (!out.push(e)) return;
+    if (isPedal) {
+        if (e.data[2] >= 64) livePedal_ |= bit;
+        else livePedal_ &= static_cast<uint16_t>(~bit);
+    } else if (isBend) {
+        if (e.data[1] == 0 && e.data[2] == 64) liveBend_ &= static_cast<uint16_t>(~bit);
+        else liveBend_ |= bit;
+    }
+}
+
+void MidiClipPlayer::flushLive(MidiEventWriter& out, uint32_t frame) DAW_RT {
+    for (; liveCursor_ < liveSpan_.size(); ++liveCursor_) {  // bounded by the span
+        const MidiEvent& e = liveSpan_[liveCursor_];
+        if (e.frameOffset > frame) return;
+        playLive(out, e);
+    }
 }
 
 void MidiClipPlayer::playPreview(MidiEventWriter& out, bool resync) DAW_RT {
@@ -200,6 +314,7 @@ void MidiClipPlayer::chase(const TransportBlock& block, const TransportSegment& 
         const Note& n = notes_[i];
         if (n.end < seg.startTick || block.tempo->tickToSample(n.end) <= seg.startSample) continue;
         if (!roomForOn(out)) continue;  // dropped, never hanging
+        flushLive(out, seg.frameOffset);  // REC-011: frame order
         out.push(MidiEvent{seg.frameOffset, 3, {uint8_t(kNoteOn | n.channel), n.pitch, n.velocity}});
         activate(static_cast<uint32_t>(i));
     }
@@ -214,6 +329,7 @@ void MidiClipPlayer::activate(uint32_t index) DAW_RT {
 }
 
 void MidiClipPlayer::releaseAll(MidiEventWriter& out, uint32_t frame) DAW_RT {
+    flushLive(out, frame);  // REC-011: frame order
     for (uint32_t i = numActive_; i > 0; --i) {
         const Note& n = notes_[active_[i - 1]];
         out.push(MidiEvent{frame, 3, {uint8_t(kNoteOff | n.channel), n.pitch, kReleaseVelocity}});
@@ -242,12 +358,14 @@ void MidiClipPlayer::playSegment(const TransportBlock& block, const TransportSeg
         const Tick onTick = next < notes_.size() ? notes_[next].start : kNever;
         if (offTick < seg.endTick && offTick <= onTick) {
             const Note& n = notes_[active_[--numActive_]];
+            flushLive(out, frameOfTick(block, seg, offTick));  // REC-011: frame order
             out.push(MidiEvent{frameOfTick(block, seg, offTick), 3,
                                {uint8_t(kNoteOff | n.channel), n.pitch, kReleaseVelocity}});
         } else if (onTick < seg.endTick) {
             // Keep room for this note's off and every other note's still to come.
             const Note& n = notes_[next];
             if (roomForOn(out)) {
+                flushLive(out, frameOfTick(block, seg, onTick));  // REC-011: frame order
                 out.push(MidiEvent{frameOfTick(block, seg, onTick), 3,
                                    {uint8_t(kNoteOn | n.channel), n.pitch, n.velocity}});
                 activate(static_cast<uint32_t>(next));
@@ -271,15 +389,18 @@ void MidiClipPlayer::process(ProcessContext& ctx, NodeIO& io) DAW_RT {
         announced_ = true;
     }
     if (preview_) playPreview(out, resync);  // UI-021, at frame 0 whether the transport plays or not
+    beginLive(out);  // REC-011, whether the transport plays or not
 
     const TransportBlock& block = ctx.transport;
     if (block.numSegments == 0 || block.tempo == nullptr) {
         // Stopped: end everything now; whatever plays next starts as a jump.
         releaseAll(out, 0);
         havePos_ = false;
+        flushLive(out, std::numeric_limits<uint32_t>::max());
         return;
     }
     forEachSegment(block, [&](const TransportSegment& seg) DAW_RT { playSegment(block, seg, out); });
+    flushLive(out, std::numeric_limits<uint32_t>::max());  // REC-011: what's after the last clip event
 }
 
 } // namespace daw

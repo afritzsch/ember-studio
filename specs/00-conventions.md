@@ -34,6 +34,7 @@ Named threads, created only by `DAWEngine`:
 | `daw.diskwrite` | Writes recorded audio from FIFOs to disk |
 | `daw.loader` | Decodes and resamples audio files into RAM |
 | `daw.device` | Reacts to device notifications (IO-020..022): runs the hot-swap sequence through the facade, never on `daw.audio` (T-051) |
+| `daw.midi` | Owns the CoreMIDI client (REC-010): connects sources as they appear, closes gone ones; CoreMIDI's own receive thread feeds the input queues (T-053) |
 
 In Swift, the model is `@MainActor`-isolated in the app. In `dawctl`/`dawmcp` it runs on a single serial actor.
 

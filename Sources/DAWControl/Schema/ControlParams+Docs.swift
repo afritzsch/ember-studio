@@ -134,6 +134,12 @@ extension DeviceSetParams: JSONSchemaDocumented {
     }
 }
 
+extension MidiInjectParams: JSONSchemaDocumented {
+    public static var jsonSchemaDocs: [String: String] {
+        ["events": "In order. Each: {status: 0x80…0xEF, data1?, data2?, sample? (transport sample it is struck at), framesFromNow?}"]
+    }
+}
+
 extension DeviceSimulateParams: JSONSchemaDocumented {
     public static var jsonSchemaDocs: [String: String] {
         [
