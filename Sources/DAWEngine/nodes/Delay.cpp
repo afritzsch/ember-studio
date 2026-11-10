@@ -55,10 +55,13 @@ uint32_t Delay::crossfadeFrames(double rate) DAW_RT {
     return n < 1.0 ? 1u : static_cast<uint32_t>(n);
 }
 
-NodeKindInfo Delay::kindInfo() {
-    return NodeKindInfo{[](const NodeCreateInfo& create) -> Result<std::unique_ptr<Node>> {
-        return std::unique_ptr<Node>(std::make_unique<Delay>(create.desc.firstParam, create.desc.numParams));
+NodeKindInfo Delay::kindInfo(Telemetry* telemetry) {
+    NodeKindInfo info{[telemetry](const NodeCreateInfo& create) -> Result<std::unique_ptr<Node>> {
+        return std::unique_ptr<Node>(
+            std::make_unique<Delay>(create.desc.firstParam, create.desc.numParams, telemetry));
     }};
+    info.paramInfo = kParamInfo;  // DSP-041
+    return info;
 }
 
 void Delay::prepare(const PrepareInfo& info) {
@@ -113,7 +116,10 @@ void Delay::process(ProcessContext& ctx, NodeIO& io) DAW_RT {
     if ((hasInput && !allFinite(in, n)) || cap_ == 0) {
         for (uint32_t c = 0; c < out.numChannels; ++c) std::memset(out.channels[c], 0, std::size_t{n} * sizeof(float));
         clear();
-        if (cap_ != 0) nanBlocks_.fetch_add(1, std::memory_order_relaxed);
+        if (cap_ != 0) {
+            nanBlocks_.fetch_add(1, std::memory_order_relaxed);
+            if (telemetry_ != nullptr) telemetry_->countNanBlock();  // DW-142
+        }
         return;
     }
 

@@ -1534,6 +1534,7 @@ TelemetryPOD EngineFacade::telemetry() const {
     t.recordDrops = impl_->recorder.droppedFrames();  // REC-002 (T-052)
     t.deviceInputLatency = impl_->driver && impl_->driver->running() ? impl_->recordInputLatency : 0;
     t.armedTracks = static_cast<uint32_t>(impl_->armedTracks.size());
+    t.nanBlocks = s.nanBlocks;  // DW-142 (T-070)
     if (impl_->driver) {
         t.outputDeviceID = t.deviceRunning ? impl_->driver->current().outputDevice : 0;
         t.processorOverloads = impl_->driver->processorOverloads();
@@ -1571,15 +1572,9 @@ size_t EngineFacade::pollEvents(EngineEventPOD* out, size_t max) {
     return n;
 }
 
-// CTL engine.paramInfo. Only the kinds whose nodes publish ParamInfo so far; "[]" for the rest.
+// CTL engine.paramInfo, DSP-041: the kind's table from the registry; "[]" for kinds without one.
 std::string EngineFacade::paramInfoJSON(NodeKind kind) const {
-    std::span<const ParamInfo> params;
-    if (kind == NodeKind::channelStrip) params = ChannelStrip::kParamInfo;
-    if (kind == NodeKind::compressor) params = Compressor::kParamInfo;  // DSP-041
-    if (kind == NodeKind::gain) params = GainNode::kParamInfo;            // DW-160 (T-026): sends, MIX-007
-    if (kind == NodeKind::metronome) params = Metronome::kParamInfo;      // DW-160 (T-026): TIME-010 slots
-    if (kind == NodeKind::reverb) params = Reverb::kParamInfo;            // DSP-041 (T-073)
-    if (kind == NodeKind::delay) params = Delay::kParamInfo;              // DSP-041 (T-072)
+    const std::span<const ParamInfo> params = NodeRegistry::paramInfo(kind);
     std::string json = "[";
     for (const ParamInfo& p : params) {
         if (json.size() > 1) json += ",";

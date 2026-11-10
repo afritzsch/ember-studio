@@ -14,6 +14,7 @@
 #include "core/Result.h"
 #include "core/Telemetry.h"
 #include "daw/GraphDescription.h"
+#include "dsp/ParamInfo.h"
 #include "graph/LatencyReporter.h"
 
 namespace daw {
@@ -48,6 +49,9 @@ struct NodeKindInfo {
     // MIX-005: nodes of this kind get a MeterID (channelStrip). When all kMaxMeters are taken,
     // further nodes get kNoMeter.
     bool meters = false;
+    // DSP-041: the kind's parameter table, published through NodeRegistry::paramInfo. Static
+    // storage (each node's kParamInfo); empty for kinds without params.
+    std::span<const ParamInfo> paramInfo{};
 };
 
 class NodeRegistry {
@@ -59,10 +63,20 @@ public:
     static NodeRegistry withBuiltins();
 
     // Registers or replaces the factory for `kind`. invalidArgument if `info.create` is empty.
+    // An `info` without a param table keeps the one the kind already has: the table describes
+    // the kind, not one factory (test nodes registered under real kinds, TEST-004).
     Result<void> set(NodeKind kind, NodeKindInfo info);
+
+    // DSP-041: gives `kind` a param table without touching its factory, before or after set().
+    void setParamInfo(NodeKind kind, std::span<const ParamInfo> table);
 
     // Null when `kind` has no factory.
     const NodeKindInfo* find(NodeKind kind) const;
+
+    // 06 Interfaces, DSP-041: the built-in kinds' parameter tables, independent of any one
+    // engine's registry. Empty for kinds without published params (hosted plugins report theirs
+    // per instance, PLUG-015). Any thread; non-RT.
+    static std::span<const ParamInfo> paramInfo(NodeKind kind);
 
 private:
     static constexpr std::size_t kNumKinds = static_cast<std::size_t>(NodeKind::bus) + 1;

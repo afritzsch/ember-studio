@@ -212,6 +212,14 @@ VST3 hosting fills the same calls for `.vst3` descriptors. No signature, field o
 - `instantiatePlugin`, `getPluginState`/`setPluginState` and `pluginInfoJSON` work for VST3 slots (10 "Contract delta (T-062)"): state is the `EVS3` blob; `pluginInfoJSON` has the same shape, with `address`/`id` = the ParamID, `min` 0, `max` 1, `canRamp` false (normalized values). The facade routes each call by which host knows the slot; a `setPluginState` for a slot no host knows yet is held for its first plugin of either format.
 - `pluginCrashed` events carry VST3 failures the same way.
 
+### Contract delta (T-070), accepted (autobuild, see docs/autobuild/DECISIONS.md)
+DSP-040 asks the NaN guards to bump telemetry (DW-142). **Additive and defaulted**; no existing field or call changes.
+- `TelemetryPOD` gains `uint64_t nanBlocks = 0;` (and `TelemetrySnapshot`, `Telemetry::countNanBlock()`): the blocks the built-in effects' NaN guards silenced since the engine was created; each effect's silenced block counts once, so a bad input feeding two effects counts twice. It is a relaxed atomic bumped on the audio thread.
+- Swift `EngineTelemetry.nanBlocks` mirrors it, so `engine.telemetry` (13) reports it.
+- `paramInfoJSON` keeps its signature; it now reads `NodeRegistry::paramInfo(NodeKind)` (06 Interfaces, DSP-041). `.sampler` and `.eq` return their tables instead of `"[]"`.
+
+Affected: T-070 only. No other task's calls change.
+
 ## Status
 | ID | status | test |
 |---|---|---|

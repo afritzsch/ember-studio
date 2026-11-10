@@ -35,7 +35,7 @@
 //
 // NaN guard (DSP-040): a block whose input or key holds a NaN or ±Inf outputs silence and starts
 // the detector afresh (e = 0, m = 0), so one bad block can't poison later ones. It is counted in
-// nanBlocks(); Telemetry has no processor NaN counter yet (DW-142).
+// nanBlocks() and in Telemetry when the factory was given one (DW-142).
 //
 // Gain-reduction meter (DSP-031): with a MeterTarget, process() writes the gain reduction to the
 // node's telemetry meter every block, as linear gain factors (1 = no reduction, makeup not
@@ -94,9 +94,9 @@ public:
     // `telemetry` with the MeterID GraphBuilder assigns; null means no metering.
     static NodeKindInfo kindInfo(Telemetry* telemetry);
 
-    // `firstParam` / `numParams` as in the NodeDesc.
-    Compressor(ParamID firstParam, uint32_t numParams, MeterTarget meter = {})
-        : firstParam_(firstParam), numParams_(numParams), meter_(meter) {}
+    // `firstParam` / `numParams` as in the NodeDesc. `telemetry` counts NaN blocks (DW-142).
+    Compressor(ParamID firstParam, uint32_t numParams, MeterTarget meter = {}, Telemetry* telemetry = nullptr)
+        : firstParam_(firstParam), numParams_(numParams), meter_(meter), telemetry_(telemetry) {}
 
     void prepare(const PrepareInfo& info) override;
     void process(ProcessContext& ctx, NodeIO& io) DAW_RT override;
@@ -112,6 +112,7 @@ private:
     ParamID firstParam_;
     uint32_t numParams_;
     MeterTarget meter_;
+    Telemetry* telemetry_;
     double sampleRate_ = 48000.0;
     double rmsCoeff_ = 0.0;  // β
     double env_ = 0.0;       // e, dB

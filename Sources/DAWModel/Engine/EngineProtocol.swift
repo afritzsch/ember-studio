@@ -274,6 +274,8 @@ public struct EngineTelemetry: Hashable, Sendable, Codable {
     public var deviceInputLatency: UInt32 = 0
     /// REC-001 (T-052): tracks armed for recording (`armInput`).
     public var armedTracks: UInt32 = 0
+    /// DSP-040 (T-070, DW-142): blocks the built-in effects' NaN guards silenced.
+    public var nanBlocks: UInt64 = 0
 
     public init() {}
 }

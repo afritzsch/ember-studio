@@ -231,6 +231,10 @@ struct EngineClientTests {
         // DW-160 (T-026): sends (GainNode) and the metronome publish their slots; kinds without
         // published ParamInfo still give an empty list.
         #expect(ParamCatalog.parseDefaults(engine.paramInfoJSON(.gain)) == [1, 0])
+        // DSP-041, DW-141 (T-070): the sampler and EQ publish their tables through the registry; a
+        // sampler's slots start at the defaults it runs at without them, so no project changes sound.
+        #expect(ParamCatalog.parseDefaults(engine.paramInfoJSON(.sampler)) == [0.002, 0.3, 1, 0.2, 1])
+        #expect(ParamCatalog.parseDefaults(engine.paramInfoJSON(.eq)).count == 22)
         #expect(engine.paramInfoJSON(.audioClipPlayer) == "[]")  // no params (reverb publishes since T-073)
         // T-061 (PLUG-012/016): an AU is instantiated and parked for the slot; its state crosses as
         // Data (a binary plist), and a state it refuses is reported as an event.

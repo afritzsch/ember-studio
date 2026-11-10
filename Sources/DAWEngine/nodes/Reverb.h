@@ -52,7 +52,7 @@
 //
 // NaN guard (DSP-040): a block whose input holds a NaN or ±Inf outputs silence and clears the
 // network (lines, pre-delay, filters), so one bad block can't poison the tail. It is counted in
-// nanBlocks(); Telemetry has no processor NaN counter yet (DW-142).
+// nanBlocks() and in Telemetry when the factory was given one (DW-142).
 //
 // Delay memory is allocated in prepare() for the longest lines (size 1) and pre-delay (200 ms) at
 // the session rate; process() never allocates. Latency 0: the pre-delay is part of the effect.
@@ -71,6 +71,7 @@
 #include "core/ParamSlotTable.h"
 #include "core/ParamSmoother.h"
 #include "core/Realtime.h"
+#include "core/Telemetry.h"
 #include "dsp/ParamInfo.h"
 #include "graph/NodeRegistry.h"
 
@@ -108,7 +109,7 @@ public:
     static std::span<const ParamInfo> paramInfo() { return kParamInfo; }
 
     // Non-RT. The registry entry for NodeKind::reverb (registerBuiltinNodes).
-    static NodeKindInfo kindInfo();
+    static NodeKindInfo kindInfo(Telemetry* telemetry = nullptr);
 
     // The delay line lengths L_i in frames for `size` (clamped to 0 … 1) at `rate`.
     static std::array<uint32_t, kLines> lineLengths(double size, double rate);
@@ -116,7 +117,8 @@ public:
     static double tailSeconds(double decaySeconds, double db = 60.0) { return decaySeconds * db / 60.0; }
 
     // `firstParam` / `numParams` as in the NodeDesc.
-    Reverb(ParamID firstParam, uint32_t numParams) : firstParam_(firstParam), numParams_(numParams) {}
+    Reverb(ParamID firstParam, uint32_t numParams, Telemetry* telemetry = nullptr)
+        : firstParam_(firstParam), numParams_(numParams), telemetry_(telemetry) {}
 
     void prepare(const PrepareInfo& info) override;
     void process(ProcessContext& ctx, NodeIO& io) DAW_RT override;
@@ -133,6 +135,7 @@ private:
 
     ParamID firstParam_;
     uint32_t numParams_;
+    Telemetry* telemetry_;  // DW-142: NaN blocks count here; null when not wired
     double sampleRate_ = 48000.0;
 
     // Ring buffers, power-of-two sized: line i is lines_[i·lineCap_ … (i+1)·lineCap_), the

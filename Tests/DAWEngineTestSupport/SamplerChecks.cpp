@@ -7,6 +7,7 @@
 #include <cmath>
 #include <complex>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <numbers>
 #include <random>
@@ -19,6 +20,7 @@
 #include "core/ParamSlotTable.h"
 #include "core/ProcessContext.h"
 #include "core/RtTrap.h"
+#include "core/Telemetry.h"
 #include "nodes/Sampler.h"
 
 using namespace daw;
@@ -539,6 +541,53 @@ CheckResult samplerThroughGraphBuilder() {
     // A bad config fails the build.
     auto bad = rig.build(desc(R"({"zones": [{"assetID": 7, "lowKey": 99, "highKey": 1}]})", 3));
     DAW_CHECK(!bad.ok() && bad.error().code == ErrorCode::invalidArgument);
+    return checks;
+}
+
+CheckResult samplerNanGuard() {
+    CheckResult checks;
+    nodes::Rig rig;
+    // A 0.5 one-shot asset with a NaN at frame 1000: one note at tick 0 reaches it in block 1.
+    rig.addAsset(nodes::makeAsset(8, 1, 48000, [](uint32_t, int64_t i) {
+        return i == 1000 ? std::numeric_limits<float>::quiet_NaN() : 0.5f;
+    }));
+    GraphDescription d = nodes::baseDescription();
+    d.nodes.push_back(NodeDesc{2, NodeKind::midiClipPlayer, 1, 0, 0, {}});
+    d.nodes.push_back(NodeDesc{4, NodeKind::sampler, 1, 0, 0, R"({"zones": [{"assetID": 8, "rootKey": 60}]})"});
+    d.edges.push_back(EdgeDesc{1, 2, 4, EdgeKind::midi, 0});
+    d.edges.push_back(EdgeDesc{2, 4, 1, EdgeKind::audio, 0});
+    d.notes.push_back(NoteDesc{2, 0, 3840, 60, 127, 0});
+    DAW_CHECK(rig.publish(d));
+    DAW_CHECK(rig.transport().locate(0) && rig.transport().play());
+    rig.renderFrames(4096, [] { return 512u; });
+
+    auto node = rig.engine().nodes().get(4);
+    DAW_CHECK(node != nullptr);
+    if (node) {
+        auto& sampler = static_cast<Sampler&>(*node);
+        DAW_CHECK(sampler.nanBlocks() == 1);  // only the block holding frame 1000
+        DAW_CHECK(sampler.soundingVoices() == 0 && sampler.fadingVoices() == 0);  // the voice stopped
+    }
+    DAW_CHECK(rig.engine().telemetry().snapshot().nanBlocks == 1);
+    DAW_CHECK(rig.left().size() == 4096);
+    if (rig.left().size() == 4096) {
+        bool soundBefore = false, silentAfter = true, finite = true;
+        for (size_t i = 0; i < 512; ++i) soundBefore = soundBefore || rig.left()[i] != 0.0f;
+        for (size_t i = 512; i < 4096; ++i) silentAfter = silentAfter && rig.left()[i] == 0.0f && rig.right()[i] == 0.0f;
+        for (float x : rig.left()) finite = finite && std::isfinite(x);
+        DAW_CHECK(soundBefore && silentAfter && finite);
+    }
+    DAW_CHECK(rig.violations() == 0);
+
+    // A clean asset never trips it.
+    nodes::Rig clean;
+    clean.addAsset(constant(7, 48000, 0.5f));
+    d.nodes[2].configJSON = R"({"zones": [{"assetID": 7, "rootKey": 60}]})";
+    DAW_CHECK(clean.publish(d));
+    DAW_CHECK(clean.transport().locate(0) && clean.transport().play());
+    clean.renderFrames(4096, [] { return 512u; });
+    DAW_CHECK(clean.engine().telemetry().snapshot().nanBlocks == 0);
+    DAW_CHECK(clean.violations() == 0);
     return checks;
 }
 

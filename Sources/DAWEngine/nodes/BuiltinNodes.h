@@ -8,7 +8,8 @@
 //   midiClipPlayer   DSP-003; MIDI only (no audio output), notes are fixed at creation (DW-051,
 //                    see MidiClipPlayer.h)
 //   sampler          DSP-020..023; zones from configJSON, fixed at creation (DW-051, see
-//                    Sampler.h), assets from `lookup`; params beyond numParams use defaults
+//                    Sampler.h), assets from `lookup`; params beyond numParams use defaults;
+//                    NaN blocks count into `telemetry` (DW-142)
 //   channelStrip     DSP-010 / MIX-005 gain, pan, mute, phase; needs numParams >=
 //                    ChannelStrip::kNumParams (invalidArgument otherwise). Meters into
 //                    `telemetry` (the engine's) with the MeterID GraphBuilder assigns (DW-048,
@@ -21,10 +22,14 @@
 //                    input when one is routed (MIX-008); 7 params, slots beyond numParams use
 //                    their defaults; meters its gain reduction into `telemetry` (see Compressor.h).
 //   reverb           DSP-033 8-line FDN reverb (Reverb): params size, decay, damping, predelay,
-//                    mix; slots beyond numParams use their defaults (see Reverb.h).
+//                    mix; slots beyond numParams use their defaults; NaN blocks count into
+//                    `telemetry` (see Reverb.h).
 //   delay            DSP-032 stereo/ping-pong delay (Delay): params time, sync, note, feedback,
-//                    lowpass, pingpong, mix; slots beyond numParams use their defaults (see
-//                    Delay.h).
+//                    lowpass, pingpong, mix; slots beyond numParams use their defaults; NaN blocks
+//                    count into `telemetry` (see Delay.h).
+//   eq               DSP-030 six-band RBJ EQ (Eq): HP, low shelf, 2× peak, high shelf, LP; 22 params,
+//                    slots beyond numParams use their defaults; NaN blocks count into `telemetry`
+//                    (see Eq.h).
 
 #include "core/Result.h"
 #include "core/Telemetry.h"

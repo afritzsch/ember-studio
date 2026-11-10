@@ -132,4 +132,32 @@ struct RoutingEngineTests {
         #expect(after.lastError == nil && store.project.tracks[0].sends.isEmpty)
         #expect(engine.telemetry().rtViolations == 0)
     }
+
+    /// The fixture's device slots: Vox has EQ 7 (with a stored param) and sidechained compressor
+    /// 8; Group's bypassed compressor 9, Main's EQ 10, Verb's reverb 11, the master's delay 12.
+    @Test("DW-096: the routing fixture through EngineClient: every built-in effect kind builds in the real engine with its full param table; renders with 0 RT violations")
+    func routingFixture() async throws {
+        let project = try GraphFixtures.project(named: "routing")
+        let engine = try EngineClient(.offline(sampleRate: 48_000))
+        let store = ProjectStore(project: project)
+        let sync = try store.attachEngine(engine, debounce: .zero)
+        await sync.settle()
+        let status = await engine.graphApplied(engine.graphStatus().submittedVersion)
+        #expect(status.lastError == nil, "the routing fixture compiles: \(String(describing: status.lastError))")
+        #expect(sync.lastError == nil)
+
+        // DW-112, DW-178: published tables size the slots; a stored param doesn't grow them.
+        let eqSlots = ParamCatalog.parseDefaults(engine.paramInfoJSON(.eq)).count
+        #expect(eqSlots == 22)
+        #expect(sync.runtime.params[7]?.count == UInt32(eqSlots))
+        #expect(sync.runtime.params[10]?.count == UInt32(eqSlots))
+        #expect(sync.runtime.params[8]?.count == 7 && sync.runtime.params[9]?.count == 7)
+        #expect(sync.runtime.params[11]?.count == 5 && sync.runtime.params[12]?.count == 7)
+
+        let spec = ExportSpec(path: "", blockSize: 512, tailEnabled: false)
+        let render = await engine.waitForJob(engine.renderOffline(from: 0, to: 960, spec: spec))
+        #expect(render.state == .succeeded)
+        #expect(render.render?.rtViolations == 0)
+        #expect(engine.telemetry().rtViolations == 0 && engine.telemetry().nanBlocks == 0)
+    }
 }

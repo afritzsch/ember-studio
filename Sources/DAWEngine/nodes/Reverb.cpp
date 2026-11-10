@@ -68,10 +68,13 @@ float snap(float x) DAW_RT { return std::fabs(x) < Reverb::kSnap ? 0.0f : x; }
 
 std::array<uint32_t, Reverb::kLines> Reverb::lineLengths(double size, double rate) { return lengthsFor(size, rate); }
 
-NodeKindInfo Reverb::kindInfo() {
-    return NodeKindInfo{[](const NodeCreateInfo& create) -> Result<std::unique_ptr<Node>> {
-        return std::unique_ptr<Node>(std::make_unique<Reverb>(create.desc.firstParam, create.desc.numParams));
+NodeKindInfo Reverb::kindInfo(Telemetry* telemetry) {
+    NodeKindInfo info{[telemetry](const NodeCreateInfo& create) -> Result<std::unique_ptr<Node>> {
+        return std::unique_ptr<Node>(
+            std::make_unique<Reverb>(create.desc.firstParam, create.desc.numParams, telemetry));
     }};
+    info.paramInfo = kParamInfo;  // DSP-041
+    return info;
 }
 
 void Reverb::prepare(const PrepareInfo& info) {
@@ -130,7 +133,10 @@ void Reverb::process(ProcessContext& ctx, NodeIO& io) DAW_RT {
     if ((hasInput && !allFinite(in, n)) || lineCap_ == 0) {
         for (uint32_t c = 0; c < out.numChannels; ++c) std::memset(out.channels[c], 0, std::size_t{n} * sizeof(float));
         clear();
-        if (lineCap_ != 0) nanBlocks_.fetch_add(1, std::memory_order_relaxed);
+        if (lineCap_ != 0) {
+            nanBlocks_.fetch_add(1, std::memory_order_relaxed);
+            if (telemetry_ != nullptr) telemetry_->countNanBlock();  // DW-142
+        }
         return;
     }
 

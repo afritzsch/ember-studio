@@ -49,9 +49,11 @@ std::vector<float> makeShape(double sampleRate, double hz) {
 } // namespace
 
 NodeKindInfo Metronome::kindInfo() {
-    return NodeKindInfo{[](const NodeCreateInfo& create) -> Result<std::unique_ptr<Node>> {
+    NodeKindInfo info{[](const NodeCreateInfo& create) -> Result<std::unique_ptr<Node>> {
         return std::unique_ptr<Node>(std::make_unique<Metronome>(create.desc.firstParam, create.desc.numParams));
     }};
+    info.paramInfo = kParamInfo;  // DSP-041
+    return info;
 }
 
 Tick Metronome::firstBeatAtOrAfter(const TempoMap& tempo, Tick tick) DAW_RT {
