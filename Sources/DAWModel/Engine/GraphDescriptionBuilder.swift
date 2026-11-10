@@ -12,6 +12,8 @@ import Foundation
 /// bus:         bus(input) → inserts… → strip(bus)
 /// master:      bus(input) → inserts… → strip(master) → master(output)
 /// metronome:   metronome(master) → master(output)    (T-026, always there; its slots switch it)
+/// monitor:     every audio track's clip player gets a `Monitor` (T-054, REC-020..022): its arm
+///              and input pair, and a mode slot owned by `GraphNodeID.monitor(of: track)`
 /// strip → input of the output target (a bus or the master)
 /// send:        tap → gain(send) → input of the target bus
 ///              post-fader tap = the strip; pre-fader tap = the node feeding the strip
@@ -49,6 +51,12 @@ public enum GraphDescriptionBuilder {
                         fadeIn: clip.fadeIn, fadeOut: clip.fadeOut))
                 }
                 head = source
+                // REC-020..022 (T-054): the track's input can replace its clips. Arm and input
+                // pair are structural; the mode is the monitor slot (`paramValues`).
+                if let slot = runtime.paramID(GraphNodeID.monitor(of: track.id), 0) {
+                    b.graph.monitors.append(.init(player: source, modeSlot: slot, inputPair: track.inputPair,
+                                                  armed: track.armed))
+                }
             case .midi:
                 if let instrument = track.instrument, !instrument.bypass {
                     b.node(source, .midiClipPlayer)
@@ -131,6 +139,7 @@ public enum GraphDescriptionBuilder {
         out[GraphNodeID.metronome(of: project.master.id)] = ParamLayout.Metronome.count
         for track in project.tracks {
             out[track.id] = ParamLayout.Strip.count
+            if track.kind == .audio { out[GraphNodeID.monitor(of: track.id)] = 1 }  // T-054, REC-022
             for send in track.sends { out[send.id] = ParamLayout.Send.count }
         }
         for bus in project.buses {
@@ -181,6 +190,10 @@ public enum GraphDescriptionBuilder {
         for track in project.tracks {
             strip(track.id, track.strip)
             sends(track.id, track.sends)
+            // REC-020/022 (T-054): SetMonitoring is this slot write, never a rebuild.
+            if track.kind == .audio {
+                set(GraphNodeID.monitor(of: track.id), 0, EngineGraph.MonitoringSlot.value(track.monitoring))
+            }
         }
         for bus in project.buses {
             strip(bus.id, bus.strip)

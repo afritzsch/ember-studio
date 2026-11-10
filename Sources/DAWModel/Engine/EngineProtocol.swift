@@ -160,6 +160,35 @@ public struct EngineGraph: Hashable, Sendable {
         }
     }
 
+    /// REC-020..022 (T-054, `daw::MonitorDesc`): an audio track's input monitoring. While it is
+    /// active (REC-020, the engine evaluates `modeSlot`'s `MonitoringSlot` value per block), input
+    /// pair `inputPair` replaces `player`'s output into the track's chain (REC-021). `armed` and
+    /// `inputPair` are structural; the mode is a slot, so `SetMonitoring` never rebuilds.
+    public struct Monitor: Hashable, Sendable {
+        public var player: NodeIDValue
+        public var modeSlot: ParamID
+        public var inputPair: UInt32
+        public var armed: Bool
+
+        public init(player: NodeIDValue, modeSlot: ParamID, inputPair: UInt32 = 0, armed: Bool = false) {
+            self.player = player
+            self.modeSlot = modeSlot
+            self.inputPair = inputPair
+            self.armed = armed
+        }
+    }
+
+    /// The slot values of `Monitor.modeSlot` (`daw::MonitoringMode`).
+    public enum MonitoringSlot {
+        public static func value(_ mode: Track.Monitoring) -> Float {
+            switch mode {
+            case .off: 0
+            case .on: 1
+            case .auto: 2
+            }
+        }
+    }
+
     public var nodes: [Node]
     public var edges: [Edge]
     public var audioClips: [Clip]
@@ -168,6 +197,8 @@ public struct EngineGraph: Hashable, Sendable {
     public var tempoEvents: [TempoEvent]
     public var timeSignatures: [TimeSignatureEvent]
     public var master: NodeIDValue
+    /// T-054: one per audio track (additive; empty for graphs built by hand).
+    public var monitors: [Monitor] = []
 
     /// 120 bpm, 4/4, no nodes.
     public init(nodes: [Node] = [], edges: [Edge] = [], audioClips: [Clip] = [], notes: [Note] = [],
@@ -280,6 +311,11 @@ public struct EngineTelemetry: Hashable, Sendable, Codable {
     /// the tracks armed for MIDI input.
     public var midiInputDrops: UInt64 = 0
     public var armedMidiTracks: UInt32 = 0
+    /// REC-021 (T-054): software monitoring latency in samples, device input + device output +
+    /// graph latency (the PDC every path into the master is aligned to); 0 while no device runs.
+    public var monitoringLatency: UInt32 = 0
+    /// T-054: `setMonitorInput`'s flag (device input runs for `on` monitoring without an arm).
+    public var monitorInput: Bool = false
 
     public init() {}
 }
@@ -629,6 +665,9 @@ public protocol EngineProtocol: AnyObject, Sendable {
     /// REC-011 (T-053): arms or disarms MIDI track `track` for live input (see the extension at
     /// the end of this file; default: ignored).
     func armMidiInput(track: NodeIDValue, armed: Bool)
+    /// T-054 (DW-067 extension): device input also runs while `wanted` (an audio track monitors
+    /// `on`, which needs no arm). See the extension at the end of this file (default: ignored).
+    func setMonitorInput(_ wanted: Bool)
     /// REC-010 (T-053): the MIDI sources CoreMIDI knows (default: none).
     func midiInputs() -> [MidiInputInfo]
     /// T-053 test seam (default: unsupported).
@@ -885,4 +924,9 @@ extension EngineProtocol {
     public func injectMidi(atSample: Int64, relativeToNow: Bool, status: UInt8, data1: UInt8, data2: UInt8) throws(DAWError) {
         throw .notImplemented("this engine has no MIDI input")
     }
+}
+
+/// T-054 additions to `EngineProtocol`, with defaults so test doubles compile unchanged.
+extension EngineProtocol {
+    public func setMonitorInput(_ wanted: Bool) {}
 }

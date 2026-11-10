@@ -36,6 +36,8 @@ public final class FakeEngine: EngineProtocol {
         /// T-053 (REC-011).
         case armMidiInput(track: NodeIDValue, armed: Bool)
         case injectMidi(atSample: Int64, relativeToNow: Bool, status: UInt8, data1: UInt8, data2: UInt8)
+        /// T-054 (DW-067 extension).
+        case setMonitorInput(Bool)
     }
 
     private struct State {
@@ -248,6 +250,14 @@ public final class FakeEngine: EngineProtocol {
         state.withLock { s in
             s.calls.append(.setRecordingDirectory(path))
             s.recordingDirectory = path
+        }
+    }
+
+    /// T-054: recorded, and mirrored in `telemetry().monitorInput`.
+    public func setMonitorInput(_ wanted: Bool) {
+        state.withLock { s in
+            s.calls.append(.setMonitorInput(wanted))
+            s.telemetry.monitorInput = wanted
         }
     }
 

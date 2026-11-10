@@ -76,6 +76,8 @@ public final class EngineSync {
     private var pushedArms: [NodeIDValue: UInt32] = [:]
     /// REC-011 (T-053): the MIDI tracks armed in the engine.
     private var pushedMidiArms: Set<NodeIDValue> = []
+    /// T-054: the last `setMonitorInput` (device input for `on` monitoring without an arm).
+    private var pushedMonitorInput = false
     /// REC-002 (T-052): the recordings directory last given to the engine.
     private var pushedRecordingDirectory: String?
     /// T-052: the project folder, if it has one (`ProjectStore` points it at `folderURL`).
@@ -104,6 +106,7 @@ public final class EngineSync {
         pushLoop()
         pushArms()
         pushMidiArms()
+        pushMonitorInput()
     }
 
     /// Whether a structural change is waiting for its debounce window.
@@ -128,6 +131,7 @@ public final class EngineSync {
         pushLoop()
         pushArms()
         pushMidiArms()
+        pushMonitorInput()
         let graph = GraphDescriptionBuilder.build(project, runtime: runtime)
         candidate = graph
         if graph != appliedGraph || hasUnusedParams() { scheduleApply() }
@@ -300,6 +304,16 @@ public final class EngineSync {
         pushedMidiArms = wanted
     }
 
+    /// REC-020/021 (T-054): `on` monitors without an arm, so the device input must run while an
+    /// audio track's mode is `on` (DW-067 runs it only while something is armed). The modes
+    /// themselves reach the engine as slot values (`paramValues`); this only switches the input.
+    private func pushMonitorInput() {
+        let wanted = project.tracks.contains { $0.kind == .audio && $0.monitoring == .on }
+        guard wanted != pushedMonitorInput else { return }
+        engine.setMonitorInput(wanted)
+        pushedMonitorInput = wanted
+    }
+
     /// Drains the engine's events, handles them and returns them for the caller to act on too
     /// (BRIDGE-004: the app polls at 60 Hz, the CLI per tick).
     public func pollEvents() -> [EngineEvent] {
@@ -322,6 +336,8 @@ public final class EngineSync {
         pushedArms = [:]
         for track in pushedMidiArms.sorted() { engine.armMidiInput(track: track, armed: false) }  // T-053
         pushedMidiArms = []
+        if pushedMonitorInput { engine.setMonitorInput(false) }  // T-054
+        pushedMonitorInput = false
         for range in runtime.params.values { engine.freeParams(range.first, count: range.count) }
         for range in retired { engine.freeParams(range.first, count: range.count) }
         runtime = RuntimeIDs()
