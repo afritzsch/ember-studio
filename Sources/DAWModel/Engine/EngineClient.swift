@@ -209,7 +209,8 @@ public final class EngineClient: EngineProtocol {
         facade.devices().map {
             AudioDeviceInfo(id: $0.deviceID, name: String($0.name), inputChannels: $0.inputChannels,
                             outputChannels: $0.outputChannels, nominalSampleRate: $0.nominalSampleRate,
-                            isDefaultOutput: $0.isDefaultOutput)
+                            isDefaultOutput: $0.isDefaultOutput, isBuiltIn: $0.isBuiltIn,  // T-090
+                            outputIsHeadphones: $0.outputIsHeadphones, isDefaultInput: $0.isDefaultInput)
         }
     }
 

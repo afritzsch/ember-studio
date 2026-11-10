@@ -366,6 +366,15 @@ struct ArrangePerfTests {
     /// UI-010's acceptance (1,000 clips at 60 fps on an M1) needs Instruments on the running app. This
     /// is the part a unit test can measure: the per-frame model work of a scroll/zoom (interval
     /// query, waveform mesh, per-clip controls) over 1,000 clips stays well under a 16.7 ms frame.
+    ///
+    /// DW-223 (T-090): the 16 ms bound holds on an idle machine but not under load (parallel
+    /// workers, other apps: 50–100 ms seen), so it is asserted only with `DAW_PERF_TESTS=1` (the
+    /// perf job). The default run keeps a loose bound that still catches a regression by an order
+    /// of magnitude (an index rebuilt per frame, a query that scans every clip).
+    static let strictBudgets = ProcessInfo.processInfo.environment["DAW_PERF_TESTS"] == "1"
+    static let frameBudget: Duration = strictBudgets ? .milliseconds(16) : .milliseconds(250)
+    static let buildBudget: Duration = strictBudgets ? .milliseconds(50) : .milliseconds(500)
+
     @Test("UI-010: 1,000 clips: index build and per-frame visible-clip query + waveform mesh stay far under a frame")
     func thousandClips() throws {
         let (model, _, asset) = try makeArrange()
@@ -407,7 +416,7 @@ struct ArrangePerfTests {
         let perFrame = scroll / frames
         print("UI-010 perf smoke: index build \(build), per frame \(perFrame) (avg \(visible / frames) visible clips, \(bars / frames) waveform bars)")
         #expect(visible / frames > 10, "the viewport shows clips")
-        #expect(build < .milliseconds(50))
-        #expect(perFrame < .milliseconds(16), "debug build; release is several times faster")
+        #expect(build < Self.buildBudget)
+        #expect(perFrame < Self.frameBudget, "debug build; release is several times faster (DAW_PERF_TESTS=1: 16 ms)")
     }
 }

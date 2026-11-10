@@ -47,7 +47,9 @@ final class ExportModel {
     /// IO-012: keep rendering past the range end until the output is quiet, at most `tailMaxSeconds`.
     private(set) var tail = true
     private(set) var tailMaxSeconds: Double = 10
-    /// DW-177: the project's click is left out unless this is on.
+    /// DW-177: the project's click is left out unless this is on. It starts in the metronome's
+    /// state each time the panel opens (on when the click is on; DECISIONS.md "User review", T-026
+    /// change, T-090); `ExportSpec`'s flag itself stays explicit.
     private(set) var includeMetronome = false
     /// Where the file goes. Set when the panel opens; "Choose…" changes it.
     private(set) var destination: URL?
@@ -177,10 +179,11 @@ final class ExportModel {
         return spec
     }
 
-    /// What opening the panel sets up: a range that exists, and a fresh destination unless one was
-    /// chosen.
+    /// What opening the panel sets up: a range that exists, a fresh destination unless one was
+    /// chosen, and "Include Metronome" as the click is now (T-090).
     private func prepare() {
         if !isAvailable(range) { range = .project }
+        includeMetronome = window?.project.metronome.enabled ?? false
         if !destinationChosen || destination == nil { destination = defaultDestination() }
     }
 

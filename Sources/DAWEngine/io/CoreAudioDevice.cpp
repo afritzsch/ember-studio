@@ -90,6 +90,17 @@ uint32_t CoreAudioDevice::clockDomain() const {
     return getScalar<UInt32>(id_, address(kAudioDevicePropertyClockDomain), "ClockDomain").valueOr(0u);
 }
 
+bool CoreAudioDevice::isBuiltIn() const {
+    const auto type = getScalar<UInt32>(id_, address(kAudioDevicePropertyTransportType), "TransportType");
+    return type && *type == kAudioDeviceTransportTypeBuiltIn;
+}
+
+uint32_t CoreAudioDevice::dataSource(DeviceDirection direction) const {
+    const auto addr = address(kAudioDevicePropertyDataSource, scopeOf(direction));
+    if (!AudioObjectHasProperty(id_, &addr)) return 0;
+    return getScalar<UInt32>(id_, addr, "DataSource").valueOr(0u);
+}
+
 uint32_t CoreAudioDevice::channels(DeviceDirection direction) const {
     const auto addr = address(kAudioDevicePropertyStreamConfiguration, scopeOf(direction));
     UInt32 size = 0;

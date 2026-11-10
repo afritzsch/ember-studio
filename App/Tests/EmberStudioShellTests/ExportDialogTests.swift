@@ -149,16 +149,22 @@ struct ExportDialogTests {
         #expect(toast.message.contains("16-bit AIFF") && toast.message.contains("normalized"))
     }
 
-    @Test("DW-177: the export leaves the project's click out (on slot held at 0 for the render) unless Include Metronome is on")
+    @Test("DW-177, T-090: Include Metronome starts in the metronome's state; off, the click is left out (on slot held at 0 for the render)")
     func metronomeLeftOut() async throws {
         let (window, engine, _) = try makeExportWindow()
+        let export = window.exportDialog
+        export.isOpen = true
+        #expect(!export.includeMetronome, "the click is off: the checkbox starts off")
+        #expect(try window.control("export.metronome").isOn == false)
+        export.isOpen = false
         window.perform(SetMetronome(enabled: true))
         window.store.engineSync?.flush()
-        let export = window.exportDialog
 
-        func renderCalls() async throws -> [FakeEngine.Call] {
+        func renderCalls(toggle: Bool = false) async throws -> [FakeEngine.Call] {
             engine.clearCalls()
             export.isOpen = true
+            #expect(export.includeMetronome, "the click is on: the checkbox starts on (T-090)")
+            if toggle { try perform(window, "export.metronome") }
             try perform(window, "export.start")
             await waitForExport(export)
             return engine.calls
@@ -167,19 +173,17 @@ struct ExportDialogTests {
             calls.compactMap { if case .setParam(let id, let v) = $0, v == 0 { id } else { nil } }
         }
 
-        let calls = try await renderCalls()
+        let calls = try await renderCalls(toggle: true)
         let renderIndex = try #require(calls.firstIndex { if case .renderOffline = $0 { true } else { false } })
         let before = zeroWrites(Array(calls[..<renderIndex]))
-        #expect(before.count == 1, "the metronome's on slot goes to 0 before the render")
+        #expect(before.count == 1, "unchecked: the metronome's on slot goes to 0 before the render")
         let slot = try #require(before.first)
         let after = calls[(renderIndex + 1)...].contains { if case .setParam(let id, let v) = $0 { id == slot && v == 1 } else { false } }
         #expect(after, "and follows the project (on) again afterwards")
         #expect(window.store.engineSync?.isMetronomeSuppressed == false)
 
-        export.isOpen = true
-        try perform(window, "export.metronome")
         let included = try await renderCalls()
-        #expect(!zeroWrites(included).contains(slot), "Include Metronome: the click stays on")
+        #expect(!zeroWrites(included).contains(slot), "Include Metronome (the default now): the click stays on")
     }
 
     @Test("UI-042, UI-004: a failed export posts an error toast, keeps the panel open and reports the error")

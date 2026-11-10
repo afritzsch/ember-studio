@@ -132,6 +132,8 @@ final class ProjectWindowModel: Identifiable {
     let mixer = MixerModel()
     /// UI-042 (T-082): the export dialog (File > Export…, `export`).
     let exportDialog = ExportModel()
+    /// DW-230 (T-090): warns when a track monitors the built-in mic through the built-in speakers.
+    let feedbackGuard = FeedbackGuard()
 
     init(id: Int, store: ProjectStore, toasts: ToastCenter = ToastCenter()) {
         self.id = id
@@ -142,6 +144,7 @@ final class ProjectWindowModel: Identifiable {
         audioPrefs.window = self
         mixer.window = self
         exportDialog.window = self
+        feedbackGuard.window = self
         audioPrefs.refreshDevices()
         // UI-004: device toasts name devices (also ones that are gone) and offer the audio settings.
         toasts.deviceName = { [weak self] id in self?.audioPrefs.name(of: id) }
@@ -173,6 +176,34 @@ final class ProjectWindowModel: Identifiable {
         scrollY = 0
         audioPrefs.engineReplaced()
         exportDialog.documentReplaced()  // T-082
+        feedbackGuard.devicesChanged()  // T-090
+    }
+
+    /// DW-156 (T-090): the app is about to take this window's engine away (the live engine goes to
+    /// the window in front). Notes auditioned on it get their note-offs first (UI-021).
+    func engineWillChange() {
+        pianoRoll.stopAudition()
+        mixer.documentReplaced()  // a fader drag ends; meters start over on the next engine
+    }
+
+    /// DW-156 (T-090): the project is the same but its engine changed (live ↔ offline). Transport,
+    /// telemetry and device state are the new engine's from the next poll on; peaks of assets the
+    /// new engine hasn't loaded yet come with its `assetLoaded` events (UI-011).
+    func engineDidChange() {
+        transport = TransportState()
+        telemetry = EngineTelemetry()
+        requestedPlaying = nil
+        requestedRecording = nil
+        audioPrefs.engineReplaced()
+        feedbackGuard.devicesChanged()
+        pollTransport()
+    }
+
+    /// Whether this window's engine is the app's live one (it opens the audio device). `AppModel`
+    /// keeps that true for the window in front only (DW-156); the others are offline.
+    var hasLiveEngine: Bool {
+        guard let engine, case .realtime = engine.mode else { return false }
+        return true
     }
 
     // MARK: Derived
@@ -430,6 +461,7 @@ final class ProjectWindowModel: Identifiable {
 
     /// UI-004 toasts and UI-011 waveforms (newly loaded audio) from the engine's events.
     func engineEventsArrived(_ events: [EngineEvent]) {
+        if events.contains(where: { $0.kind == .deviceChanged }) { feedbackGuard.devicesChanged() }  // DW-230
         audioPrefs.engineEventsArrived(events)
         toasts.handle(events)
         arrange.engineEventsArrived(events)
@@ -450,5 +482,6 @@ final class ProjectWindowModel: Identifiable {
                 requestedRecording = nil
             }
         }
+        feedbackGuard.check()  // DW-230 (T-090)
     }
 }

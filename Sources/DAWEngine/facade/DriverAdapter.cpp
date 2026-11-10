@@ -58,6 +58,8 @@ public:
     std::vector<DeviceInfoPOD> devices() const override {
         AudioDeviceRef defaultOutput = 0;
         if (auto device = CoreAudioDevice::defaultDevice(DeviceDirection::output)) defaultOutput = device->id();
+        AudioDeviceRef defaultInput = 0;  // T-090
+        if (auto device = CoreAudioDevice::defaultDevice(DeviceDirection::input)) defaultInput = device->id();
         std::vector<DeviceInfoPOD> out;
         for (const CoreAudioDevice& device : CoreAudioDevice::allDevices()) {
             DeviceInfoPOD info;
@@ -67,12 +69,19 @@ public:
             info.outputChannels = device.channels(DeviceDirection::output);
             info.nominalSampleRate = device.nominalRate().valueOr(0.0);
             info.isDefaultOutput = device.id() == defaultOutput;
+            // T-090 (DW-230): the feedback guard's facts. 'hdpn' = kIOAudioOutputPortSubTypeHeadphones.
+            info.isBuiltIn = device.isBuiltIn();
+            info.outputIsHeadphones =
+                info.outputChannels > 0 && device.dataSource(DeviceDirection::output) == kHeadphonesDataSource;
+            info.isDefaultInput = device.id() == defaultInput;
             out.push_back(std::move(info));
         }
         return out;
     }
 
 private:
+    static constexpr uint32_t kHeadphonesDataSource = 0x6864706E;  // 'hdpn'
+
     void countRetired() {
         if (!driver_) return;
         retiredOverloads_ += driver_->overloads();
@@ -156,6 +165,9 @@ std::vector<DeviceInfoPOD> FakeDeviceDriverAdapter::devices() const {
         info.outputChannels = state.outputChannels;
         info.nominalSampleRate = state.nominalRate;
         info.isDefaultOutput = state.id == defaultOutput;
+        // T-090: input 0 records from the running (default) output device's inputs. The fake devices
+        // are never built-in, so they never trip the feedback guard.
+        info.isDefaultInput = state.id == defaultOutput && state.inputChannels > 0;
         out.push_back(std::move(info));
     }
     return out;

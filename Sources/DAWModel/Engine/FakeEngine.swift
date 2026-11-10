@@ -54,6 +54,7 @@ public final class FakeEngine: EngineProtocol {
         var failingAssetPaths: Set<String> = []
         var pluginStates: [NodeIDValue: Data] = [:]
         var telemetry = EngineTelemetry()
+        var devices: [AudioDeviceInfo] = []  // T-090
         var loadedAssets: Set<ModelID> = []
         var refusedSessionRates: Set<Double> = []  // T-056
         var armed: Set<NodeIDValue> = []  // T-052
@@ -346,7 +347,19 @@ public final class FakeEngine: EngineProtocol {
 
     // MARK: Device
 
-    public func devices() -> [AudioDeviceInfo] { [] }
+    public func devices() -> [AudioDeviceInfo] { state.withLock { $0.devices } }
+
+    /// T-090: what `devices()` lists (none by default), so the app's device logic (the monitoring
+    /// feedback guard, DW-230) can be tested with made-up hardware.
+    public func setDevices(_ devices: [AudioDeviceInfo]) { state.withLock { $0.devices = devices } }
+
+    /// T-090: what `telemetry().outputDeviceID` / `deviceRunning` say, as if `id` ran (0: none).
+    public func setRunningDevice(_ id: UInt32) {
+        state.withLock { s in
+            s.telemetry.outputDeviceID = id
+            s.telemetry.deviceRunning = id != 0
+        }
+    }
 
     public func setDevice(_ config: DriverConfig) throws(DAWError) {
         state.withLock { $0.calls.append(.setDevice(config)) }

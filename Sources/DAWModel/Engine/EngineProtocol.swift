@@ -480,15 +480,45 @@ public struct AudioDeviceInfo: Hashable, Sendable, Codable {
     public var outputChannels: UInt32
     public var nominalSampleRate: Double
     public var isDefaultOutput: Bool
+    /// T-090 (DW-230), additive (08 "Contract delta (T-090)"): the Mac's own hardware (transport
+    /// type built-in: speakers, microphone, headphone jack).
+    public var isBuiltIn: Bool = false
+    /// T-090: the output plays to headphones now (data source 'hdpn'), not the speakers.
+    public var outputIsHeadphones: Bool = false
+    /// T-090: the system default input, what `DriverConfig.inputDevice` 0 records from.
+    public var isDefaultInput: Bool = false
 
     public init(id: UInt32, name: String, inputChannels: UInt32, outputChannels: UInt32,
-                nominalSampleRate: Double, isDefaultOutput: Bool) {
+                nominalSampleRate: Double, isDefaultOutput: Bool, isBuiltIn: Bool = false,
+                outputIsHeadphones: Bool = false, isDefaultInput: Bool = false) {
         self.id = id
         self.name = name
         self.inputChannels = inputChannels
         self.outputChannels = outputChannels
         self.nominalSampleRate = nominalSampleRate
         self.isDefaultOutput = isDefaultOutput
+        self.isBuiltIn = isBuiltIn
+        self.outputIsHeadphones = outputIsHeadphones
+        self.isDefaultInput = isDefaultInput
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, inputChannels, outputChannels, nominalSampleRate, isDefaultOutput, isBuiltIn,
+             outputIsHeadphones, isDefaultInput
+    }
+
+    /// The T-090 fields are optional on the wire (a `device.list` from an older engine).
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UInt32.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        inputChannels = try c.decode(UInt32.self, forKey: .inputChannels)
+        outputChannels = try c.decode(UInt32.self, forKey: .outputChannels)
+        nominalSampleRate = try c.decode(Double.self, forKey: .nominalSampleRate)
+        isDefaultOutput = try c.decode(Bool.self, forKey: .isDefaultOutput)
+        isBuiltIn = try c.decodeIfPresent(Bool.self, forKey: .isBuiltIn) ?? false
+        outputIsHeadphones = try c.decodeIfPresent(Bool.self, forKey: .outputIsHeadphones) ?? false
+        isDefaultInput = try c.decodeIfPresent(Bool.self, forKey: .isDefaultInput) ?? false
     }
 }
 
