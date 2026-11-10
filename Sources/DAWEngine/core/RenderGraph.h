@@ -46,6 +46,7 @@
 #include <span>
 #include <vector>
 
+#include "automation/AutomationSet.h"
 #include "core/AudioBufferPool.h"
 #include "core/AudioBufferView.h"
 #include "core/InputMonitoring.h"
@@ -231,6 +232,9 @@ struct RenderGraphDesc {
     // nodes with a nonzero latencySamples() (for Telemetry::publishNodeLatencies).
     uint32_t latency = 0;
     std::vector<NodeLatency> nodeLatencies;
+    // AUTO-001 (T-074): the description's enabled lanes, compiled (null: none). Engine::render
+    // applies them before the nodes run (AutomationSet.h).
+    std::unique_ptr<AutomationSet> automation;
 };
 
 class RenderGraph {
@@ -278,6 +282,10 @@ public:
     void process(ProcessContext& ctx, ProcessContext& timeline, const MonitorInput& monitor = {}) const DAW_RT;
     // Same, with no latency compensation (every step gets `ctx`).
     void process(ProcessContext& ctx) const DAW_RT { process(ctx, ctx); }
+
+    // AUTO-001 (T-074): the graph's automation players, null without lanes. The set keeps
+    // audio-thread state (cursors), so it is handed out mutable; only the render thread uses it.
+    AutomationSet* automation() const DAW_RT { return automation_.get(); }
 
     // REC-020 (T-054), tests and diagnostics: how many steps are monitored, and whether the
     // monitored step `i` (in step order) had monitoring active in the block just processed.
@@ -352,6 +360,7 @@ private:
     std::unique_ptr<uint32_t[]> midiSizes_;
     std::unique_ptr<MidiEventSpan[]> mergeSpans_;
     std::unique_ptr<uint32_t[]> mergeCursors_;
+    std::unique_ptr<AutomationSet> automation_;  // AUTO-001 (T-074)
     // REC-020/021 (T-054): monitored steps in step order, and each one's state (audio thread
     // only): the crossfade position (0: clip player, 1: input; < 0: not set yet, so the first
     // block snaps) and whether monitoring was active.

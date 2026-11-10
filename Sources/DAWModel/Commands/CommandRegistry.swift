@@ -62,6 +62,13 @@ public enum CommandRegistry {
         SetMonitoring.self,
         // T-064: host-side device bypass (MODEL-005, PLUG-018; DW-149 in part)
         SetDeviceBypass.self,
+        // T-074: automation lanes (MODEL-005 automation subset, 11)
+        AddAutomationPoint.self,
+        AddAutomationPoints.self,
+        RemoveAutomationPoints.self,
+        MoveAutomationPoints.self,
+        SetAutomationMode.self,
+        SetAutomationLane.self,
     ]
 
     private static let table = Mutex<[String: any Command.Type]>(

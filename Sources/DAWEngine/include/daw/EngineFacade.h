@@ -446,6 +446,15 @@ public:
         desc_.tempo.timeSigs.push_back(TimeSigDesc{tick, num, den});
     }
     void setMaster(NodeID master) { desc_.master = master; }
+    // AUTO-001 (T-074): a lane, then its points in tick order (addAutomationPoint appends to the
+    // lane added last; it does nothing before the first addAutomation).
+    void addAutomation(uint64_t laneID, ParamID target, bool enabled) {
+        desc_.automation.push_back(AutomationDesc{laneID, target, {}, enabled});
+    }
+    void addAutomationPoint(Tick tick, float value, uint8_t curve, float shape) {
+        if (!desc_.automation.empty())
+            desc_.automation.back().points.push_back(AutomationPointDesc{tick, value, curve, shape});
+    }
     // REC-020..022 (T-054): an audio track's input monitoring (MonitorDesc).
     void addMonitor(NodeID player, ParamID modeSlot, uint32_t inputPair, bool armed) {
         desc_.monitors.push_back(MonitorDesc{player, modeSlot, inputPair, armed});

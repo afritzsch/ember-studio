@@ -112,10 +112,10 @@ DSP effects (T-070..073) depend only on the Node API and can be **pulled forward
 | T-071 | D | Compressor (+ sidechain) | DSP-031, 040, 041 | T-005, T-023 | done |
 | T-072 | D | Delay (tempo sync) | DSP-032, 040, 041 | T-008 | done |
 | T-073 | D | Reverb (FDN, deterministic) | DSP-033, 040, 041 | T-004, T-005 | done |
-| T-074 | E+M | Automation lanes model + AutomationPlayer + plugin param path | AUTO-001..005, 008..010 | T-030, T-061/T-062 (for AUTO-009) | wip(t-074-automation) |
-| T-075 | U+M | Automation recording (touch/latch/write) + lane UI | AUTO-006, 007, UI-015 | T-074, T-033 | todo |
+| T-074 | E+M | Automation lanes model + AutomationPlayer + plugin param path | AUTO-001..005, 008..010 | T-030, T-061/T-062 (for AUTO-009) | done |
+| T-075 | U+M | Automation recording (touch/latch/write) + lane UI | AUTO-006, 007, UI-015 | T-074, T-033 | ready |
 | T-076 | U | Mixer view + meters + routing pickers | UI-030, 031, 033 | T-022, T-032 | done |
-| T-077 | D | M7 goldens | TEST (M7 set) | T-071, T-073, T-074 | todo |
+| T-077 | D | M7 goldens | TEST (M7 set) | T-071, T-073, T-074 | ready |
 
 ### M8 — Comping, export, hardening
 | Task | Lane | Title | Requirements | Depends on | Status |
@@ -428,3 +428,10 @@ Recorded by the lead from worker reports.
 | DW-229 | T-054 | `monitoringLatency` includes the device input latency only once input runs (armed track or `on` monitoring); an unarmed `auto` track shows output + graph only. Query the input device's latency with input off (IO-005) | E (io) | todo |
 | DW-230 | T-054 | No feedback protection: monitoring through a loopback or speaker → mic howls; recording goldens through the fake loopback must set monitoring off (`record_loopback_alignment` does). Maybe a toast/doc note | U/docs | todo |
 | DW-231 | T-054, T-074 | Load-sensitive tests besides UI-010: CTL-031 progress steps (`ProgressTests`) and REC-005 punch (`RecordingChecks.cpp:248`) each failed once under full parallel load and pass alone (DW-172) | testing | todo |
+| DW-232 | T-074 | AUTO-003 jump for the other built-ins (EQ, compressor, delay, reverb, sampler, metronome): they ramp across a loop wrap and pick up the loop start's value next block; each could adopt `automation/WrapJump.h` like ChannelStrip/GainNode | D | todo |
+| DW-233 | T-074 | AUTO-003 for hosted plugins: VST3 could add a second `IParameterChanges` point at the wrap frame, AU a second render-thread event, both reading `ParamSlotTable::afterWrap` | P | todo |
+| DW-234 | T-074 | Lanes whose target is removed (RemoveSend/RemoveDevice) stay in the document, valid but left out of the graph (undo brings them back); decide whether remove commands should cascade | M | todo |
+| DW-235 | T-074 | `Bus` and `MasterChannel` use synthesized Codable, so they require the `automation` key (every file written so far has it); only Track decodes a missing key as no lanes | M | todo |
+| DW-236 | T-074 | The model doesn't know built-in `automatable` flags (ParamCatalog parses only defaults), so a lane on a non-automatable built-in param is accepted by the model and dropped by the engine; T-075's lane UI should offer only automatable params, or ParamCatalog parses the flag | M/U (T-075) | todo |
+| DW-237 | T-074 | While stopped, `AutomationSet` writes lane values once per position or graph change: a `SetParam` while stopped holds until play/locate, and any rebuild while stopped rewrites the lane value at the playhead. T-075 (AUTO-007) should confirm | E/U (T-075) | todo |
+| DW-238 | T-074 (T-064) | Swift warning in `Tests/DAWModelTests/HostBypassModelTests.swift:192` ('open' mutated after capture by sendable closure) | M (tests) | todo |

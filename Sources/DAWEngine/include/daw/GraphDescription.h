@@ -48,6 +48,14 @@ struct TempoPointDesc { Tick tick; double bpm; };              // mirrors daw::T
 struct TimeSigDesc    { Tick tick; int32_t num; int32_t den; }; // mirrors daw::TimeSigEvent (03)
 struct TempoMapDesc   { std::vector<TempoPointDesc> tempos; std::vector<TimeSigDesc> timeSigs; };
 
+// 11-automation Interfaces (AUTO-001, T-074): one lane, additive to 05. Points are sorted by
+// tick (strictly increasing); `value` is normalized 0…1 and GraphBuilder maps it through the
+// target's range (ParamInfo, or the hosted plugin's parameter). `curve` shapes the segment that
+// starts at the point (AutomationCurve, automation/AutomationCurve.h): 0 linear, 1 hold (step),
+// 2 exponential with `shape`. A disabled lane (mode `off`, AUTO-005) is ignored.
+struct AutomationPointDesc { Tick tick; float value; uint8_t curve; float shape; };
+struct AutomationDesc { uint64_t laneID; ParamID target; std::vector<AutomationPointDesc> points; bool enabled; };
+
 // REC-020..022 (T-054, 09 "Contract delta (T-054)"): an audio track's input monitoring. `player`
 // is the track's audioClipPlayer. While monitoring is active (REC-020, evaluated per block from
 // the value in `modeSlot`, a MonitoringMode, and the transport), device input channels
@@ -58,7 +66,8 @@ struct MonitorDesc { NodeID player; ParamID modeSlot; uint32_t inputPair; bool a
 struct GraphDescription { uint64_t version; std::vector<NodeDesc> nodes; std::vector<EdgeDesc> edges;
                           std::vector<ClipDesc> audioClips; std::vector<NoteDesc> notes;
                           TempoMapDesc tempo; NodeID master;
+                          std::vector<AutomationDesc> automation{};  // AUTO-001 (T-074), additive
                           std::vector<MonitorDesc> monitors = {};  // T-054, additive
-                        };
+};
 
 } // namespace daw

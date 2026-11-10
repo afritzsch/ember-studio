@@ -7,6 +7,7 @@
 #include <utility>
 #include <vector>
 
+#include "automation/AutomationCompiler.h"
 #include "core/AudioBufferPool.h"
 #include "graph/BufferPlan.h"
 #include "graph/BypassNode.h"
@@ -155,6 +156,9 @@ Result<std::unique_ptr<RenderGraph>> GraphBuilder::build(const GraphDescription&
     // TIME-003. The model has validated the map already; this is the defensive check.
     auto tempo = makeTempoMap(desc.tempo, sampleRate_);
     if (!tempo) return invalid("tempo map: " + tempo.error().message);
+
+    // AUTO-001 (T-074): lanes are well formed before anything is touched.
+    if (auto r = validateAutomation(desc, params); !r) return r.error();
 
     // MARK: Node instances (ENG-013, DW-036)
 
@@ -329,6 +333,8 @@ Result<std::unique_ptr<RenderGraph>> GraphBuilder::build(const GraphDescription&
     graph.master = master == kNoNode ? kNoBuffer : plan.steps[stepOf[master]].output;
     graph.tempo = std::move(tempo).value();
     graph.version = desc.version;
+    // AUTO-001/008 (T-074): lanes become players, mapped through the prepared nodes' ranges.
+    graph.automation = compileAutomation(desc, kinds, nodes);
     auto result = RenderGraph::create(std::move(graph));
     if (!result) return result.error();
     // MIX-022: lines this graph doesn't use are dropped here; graphs still rendering them hold

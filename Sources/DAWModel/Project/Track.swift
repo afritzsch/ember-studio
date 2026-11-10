@@ -81,6 +81,7 @@ extension Track {
         armed = try c.decode(Bool.self, forKey: .armed)
         inputPair = try c.decodeIfPresent(UInt32.self, forKey: .inputPair) ?? 0
         monitoring = try c.decode(Monitoring.self, forKey: .monitoring)
-        automation = try c.decode([AutomationLane].self, forKey: .automation)
+        // T-074: lanes decode with a default of none (DECISIONS.md "T-074 contract").
+        automation = try c.decodeIfPresent([AutomationLane].self, forKey: .automation) ?? []
     }
 }

@@ -333,6 +333,11 @@ public final class EngineClient: EngineProtocol {
             builder.setTimeSignature(s.tick.raw, Int32(clamping: s.numerator), Int32(clamping: s.denominator))
         }
         builder.setMaster(graph.master)
+        // AUTO-001 (T-074)
+        for lane in graph.automation {
+            builder.addAutomation(lane.laneID, lane.target, lane.enabled)
+            for p in lane.points { builder.addAutomationPoint(p.tick.raw, p.value, p.curve, p.shape) }
+        }
         for m in graph.monitors {  // T-054 (REC-020..022)
             builder.addMonitor(m.player, m.modeSlot, m.inputPair, m.armed)
         }
@@ -368,6 +373,11 @@ public final class EngineClient: EngineProtocol {
         for t in d.tempo.tempos { g.tempoEvents.append(TempoEvent(tick: Tick(t.tick), bpm: t.bpm)) }
         for s in d.tempo.timeSigs {
             g.timeSignatures.append(TimeSignatureEvent(tick: Tick(s.tick), numerator: Int(s.num), denominator: Int(s.den)))
+        }
+        for a in d.automation {  // AUTO-001 (T-074)
+            g.automation.append(.init(laneID: a.laneID, target: a.target, points: a.points.map {
+                .init(tick: Tick($0.tick), value: $0.value, curve: $0.curve, shape: $0.shape)
+            }, enabled: a.enabled))
         }
         return g
     }

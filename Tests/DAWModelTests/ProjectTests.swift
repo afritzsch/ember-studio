@@ -39,7 +39,11 @@ struct ProjectTests {
                 takeFolders: [TakeFolder(id: project.ids.allocate())], inserts: [comp, au],
                 sends: [Send(id: project.ids.allocate(), target: bus.id, level: 0.7, tap: .preFader)],
                 output: .bus(bus.id), armed: true, monitoring: .on,
-                automation: [AutomationLane(id: project.ids.allocate())]),
+                automation: [AutomationLane(
+                    id: project.ids.allocate(), target: .device(slot: comp.id, index: 0),
+                    points: [AutomationPoint(tick: 0, value: 0.5), AutomationPoint(tick: 960, value: 1, curve: .exp(2)),
+                             AutomationPoint(tick: 1920, value: 0, curve: .hold)],
+                    mode: .latch)]),
             Track(
                 id: project.ids.allocate(), name: "Keys", kind: .midi,
                 clips: [.midi(MidiClip(id: project.ids.allocate(), start: 0, length: 3840,

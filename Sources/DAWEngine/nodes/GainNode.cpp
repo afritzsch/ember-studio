@@ -1,5 +1,6 @@
 #include "nodes/GainNode.h"
 
+#include "automation/WrapJump.h"
 #include "core/ProcessContext.h"
 #include "graph/PassThrough.h"
 
@@ -23,10 +24,17 @@ void GainNode::process(ProcessContext& ctx, NodeIO& io) DAW_RT {
         mute_.reset(open);
         primed_ = true;
     }
+    // AUTO-003 (T-074): an automated level or mute may jump at a loop wrap inside the block.
+    WrapJump lj = wrapJump(ctx, firstParam_ + kLevel);
+    lj.value = lj.value >= 0.0f ? (lj.value <= kMaxLevel ? lj.value : kMaxLevel) : 0.0f;
+    WrapJump mj = hasMute_ ? wrapJump(ctx, firstParam_ + kMute) : WrapJump{};
+    mj.value = mj.value >= 0.5f ? 0.0f : 1.0f;
+
     // ENG-022: level and mute combined into one linear ramp.
-    const ParamRamp l = level_.next(level, n);
-    const ParamRamp m = mute_.next(open, n);
-    const ParamRamp ramp{l.start * m.start, l.target * m.target, n};
+    const ParamRamp l = level_.next(level, n, lj);
+    const ParamRamp m = mute_.next(open, n, mj);
+    const uint32_t jumpAt = l.jumps() ? l.jumpAt : (m.jumps() ? m.jumpAt : ParamRamp::kNoJump);
+    const ParamRamp ramp{l.start * m.start, l.target * m.target, n, jumpAt, l.end() * m.end()};
     for (uint32_t c = 0; c < out.numChannels; ++c) ramp.multiply(out.channels[c]);
 }
 
