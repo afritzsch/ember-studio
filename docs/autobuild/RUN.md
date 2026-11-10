@@ -9,6 +9,7 @@ Unattended phases started by `/autobuild` (see `.claude/skills/autobuild/SKILL.m
 | 3 | T-045, T-071, T-026, T-034 | all 4 (T-045, T-071, T-026, T-034) | 23 → 33 | MIDI edges audible (A5 at 880 Hz), compressor + `sidechain_compressor` golden, project metronome (export excludes the click; not undoable), toolbar/shortcuts; one 5-hour pause (~4 h, only T-034's follow-up waited); load flakes logged (DW-172) |
 | 4 | T-044, T-073, T-056, T-043 | all 4 (T-044, T-073, T-056, T-043) | 34 → 49 | M4 complete (M4 goldens, piano roll + previewNote); reverb + `reverb_determinism`; session-rate change with asset re-conversion; one 5-hour pause (~4 h); T-052/053/061/062 found `ready` |
 | 5 | T-052, T-061, T-055, T-072 | all 4 (T-055 part 1, T-072, T-052, T-072 follow-up, T-055 follow-up, T-061) | 50 → 75 | User-authorized final phase (week ≥ 50%). Recording (REC-001..005), AU hosting, audio prefs + arm/monitor, delay; DW-148/DW-172 autosave flakes fixed at the root (MODEL-041 blocked the main actor); two 5-hour pauses and a Mac sleep |
+| 6 | T-053, T-062, T-070, T-076 | all 4 (T-076, T-062, T-070, T-053) + DW-214 AU crash fix | 1 → 20 | New run (week reset). M5 needs only T-054; VST3 + EQ + mixer done; `NodeRegistry::paramInfo` and `nanBlocks` telemetry; a production AU teardown crash found and fixed; one 5-hour pause (~4 h, T-076 merged during it) |
 
 ## Phase notes
 
@@ -90,6 +91,8 @@ Unattended phases started by `/autobuild` (see `.claude/skills/autobuild/SKILL.m
 - T-053 merged after its worker merged main twice (T-062's chained `registerNodes`, T-070's telemetry fields; kept both): test.sh 12/12, swift test 2× green. Worker closed. M5 now needs only T-054.
 
 - DW-214 merged (T-070's follow-up): destroying a V2 AU right after parameter events crashed in Apple's `AUAudioUnitV2Bridge` listener (production-reachable: removing a device, rate change, engine teardown), and concurrent V2 init/uninit aborted. Fixed with a deferred release and a lifecycle lock; mutation-checked (5/5 crashes before, 8/8 × 1500 teardowns clean after). test.sh 12/12, swift test 2× green. Worker closed.
+
+- End: 4/4 merged plus the DW-214 fix, main green (test.sh 12/12, swift test 2× after the last merge), week 20%, five-hour window 61%, no worker session left open. Next: phase 7.
 
 ## Summary for the user
 
