@@ -263,6 +263,71 @@ struct InsertChainCommandTests {
     }
 }
 
+extension InsertChainCommandTests {
+    @Test("MODEL-031, DW-234: fuzz — random insert, removal and automation commands, valid or not, never break an invariant; undo-all and redo-all are exact")
+    func fuzz() throws {
+        var rng = SplitMix64(seed: 0x7_0088)
+        var performed = 0
+        var rejected = 0
+        let (start, keys, _) = try withKeys()
+        for _ in 0..<120 {
+            var project = start
+            var stack = UndoStack()
+            for _ in 0..<40 {
+                let command = randomInsertCommand(for: project, keys: keys, using: &rng)
+                let before = project
+                do {
+                    try stack.perform(command, on: &project)
+                    performed += 1
+                } catch {
+                    rejected += 1
+                    #expect(project == before)
+                }
+                try project.validate()
+            }
+            let final = project
+            while try stack.undo(&project) != nil { try project.validate() }
+            #expect(project == start)
+            while try stack.redo(&project) != nil { try project.validate() }
+            #expect(project == final)
+        }
+        #expect(performed > 1500 && rejected > 500, "performed \(performed), rejected \(rejected)")
+    }
+
+    /// Half of these name real channels, slots and sends; the rest pick from all IDs or a missing one.
+    func randomInsertCommand(for project: Project, keys: NodeIDValue, using rng: inout SplitMix64) -> any Command {
+        let channels = project.tracks.map(\.id) + project.buses.map(\.id) + [project.master.id]
+        var slots: [NodeIDValue] = []
+        project.forEachDeviceSlot { slot, _ in slots.append(slot.id) }
+        let sends = (project.tracks.flatMap(\.sends) + project.buses.flatMap(\.sends)).map(\.id)
+        let anything = channels + slots + sends + [999]
+        func pick(_ ids: [ModelID]) -> ModelID {
+            (Bool.random(using: &rng) ? ids.randomElement(using: &rng) : nil) ?? anything.randomElement(using: &rng)!
+        }
+        let kinds: [DeviceSlot.Kind] = [.builtin(.eq), .builtin(.compressor), .builtin(.sampler), .builtin(.gain), auDelay, vstAgain]
+        func index() -> Int { Int.random(in: -1...3, using: &rng) }
+        func target() -> ParamTarget {
+            Bool.random(using: &rng) ? .device(slot: pick(slots), index: Int.random(in: 0...2, using: &rng)) : .sendLevel(send: pick(sends))
+        }
+        switch Int.random(in: 0..<11, using: &rng) {
+        case 0, 1:
+            let sidechain = Int.random(in: 0..<4, using: &rng) == 0 ? SidechainRef(source: pick(channels)) : nil
+            return InsertDevice(channel: pick(channels), index: Bool.random(using: &rng) ? nil : index(),
+                                device: kinds.randomElement(using: &rng)!, sidechainSource: sidechain)
+        case 2: return RemoveDevice(slotID: pick(slots))
+        case 3: return MoveDevice(slotID: pick(slots), index: index())
+        case 4: return RemoveSend(sendID: pick(sends))
+        case 5: return AddSend(channelID: pick(channels), busID: pick(project.buses.map(\.id)))
+        case 6: return Bool.random(using: &rng) ? RemoveInstrument(trackID: keys) : SetInstrument(trackID: keys, device: .builtin(.sampler))
+        case 7: return RemoveBus(busID: pick(project.buses.map(\.id)))
+        case 8: return SetAutomationMode(target: target(), mode: .latch)
+        default:
+            return AddAutomationPoint(target: target(), point: AutomationPoint(tick: Tick(Int64.random(in: 0...3, using: &rng) * 480),
+                                                                                value: Float.random(in: 0...1, using: &rng)))
+        }
+    }
+}
+
 // MARK: - DW-234: lanes leave with their target
 
 @Suite("Lanes leave with their send or device (DW-234)")
@@ -443,5 +508,64 @@ struct VelocityRepairTests {
         } catch {
             guard case .invalidProject = error else { Issue.record("got \(error)"); return }
         }
+    }
+}
+
+// MARK: - The real engine
+
+// DW-149: the engine renders whatever inserts the graph lists. A master insert built through
+// InsertDevice is compiled and sits in the signal path before the master strip: a gain device at
+// level 0 there silences the master meter, and removing it brings the signal back.
+@Suite("Insert chains and the engine (DW-149)")
+@MainActor
+struct InsertChainEngineTests {
+    init() { TestCommands.register() }
+
+    @Test("MODEL-005, MODEL-020: the real engine compiles track and master inserts placed by InsertDevice; a master insert is in the master's path; 0 RT violations")
+    func realEngineMasterInsert() async throws {
+        let temp = try TempFolder("inserts")
+        defer { temp.remove() }
+        let wav = temp.url.appending(path: "sine.wav")
+        try writeTestSineWAV(wav, frames: 48_000)
+
+        let engine = try EngineClient(.offline(sampleRate: 48_000))
+        let store = ProjectStore(project: Project(name: "inserts"))
+        store.autosavePolicy = nil
+        let sync = try store.attachEngine(engine)
+        let id = store.project.ids.next
+        let loaded = try #require(await engine.waitForJob(engine.loadAsset(id, path: wav.path)).asset)
+        try store.perform(ImportAsset(asset: AssetRef(id: id, path: wav.path, channels: Int(loaded.channels),
+                                                      originalSampleRate: loaded.fileSampleRate, frames: loaded.fileFrames)))
+        try store.perform(AddTrack(name: "Src", kind: .audio))
+        let track = store.project.tracks[0].id
+        try store.perform(AddClip(trackID: track, start: 0, assetID: id))
+        try store.perform(InsertDevice(channel: track, device: .builtin(.eq)))
+        try store.perform(InsertDevice(channel: track, index: 0, device: .builtin(.compressor)))
+        let master = store.project.master.id
+        try store.perform(InsertDevice(channel: master, device: .builtin(.gain), params: [ParamValue(index: 0, value: 0)]))
+        let gain = store.project.master.inserts[0].id
+
+        func render() async throws -> (track: Float, master: Float) {
+            _ = sync.pollEvents()
+            await sync.settle()
+            let status = await engine.graphApplied(engine.graphStatus().submittedVersion)
+            #expect(status.lastError == nil, "the engine compiled the graph: \(String(describing: status.lastError))")
+            let spec = ExportSpec(path: "", blockSize: 512, tailEnabled: false)
+            let result = try #require(await engine.waitForJob(engine.renderOffline(from: 0, to: 960, spec: spec)).render)
+            #expect(result.rtViolations == 0)
+            return (try #require(engine.meter(track)).peak, try #require(engine.meter(master)).peak)
+        }
+        var peaks = try await render()
+        #expect(peaks.track > 0.01 && peaks.master == 0, "the master gain insert at level 0 sits before the master strip")
+
+        try store.perform(MoveDevice(slotID: store.project.tracks[0].inserts[1].id, index: 0))
+        try store.perform(RemoveDevice(slotID: gain))
+        peaks = try await render()
+        #expect(peaks.track > 0.01 && peaks.master > 0.01, "without the insert the master hears the track: \(peaks)")
+
+        store.undo()  // the gain insert is back, with its ID and level
+        #expect(store.project.master.inserts.map(\.id) == [gain])
+        peaks = try await render()
+        #expect(peaks.master == 0)
     }
 }
