@@ -46,6 +46,13 @@
 | `automation_ramp` | M7 | AUTO-002 |
 | `sidechain_compressor` | M7 | DSP-031, MIX-008 |
 | `reverb_determinism` | M7 | DSP-033, IO-011 |
+| `automation_loop_wrap` | M7 | AUTO-003 (strip/send jump at the wrap frame; the other built-ins are DW-232) |
+| `delay_tempo_sync` | M7 | DSP-032 |
+| `eq_response` | M7 | DSP-030 (impulse response vs analytic RBJ ≤ 0.01 dB: bell boost/cut, shelves, HP/LP slopes), DSP-040 (exact 0 tail) |
+| `effects_silence_nan_guard` | M7 | DSP-040 (EQ, comp, delay, reverb: tails end in exact 0; NaN in → silence, `nanBlocks` counted, DW-142) |
+| `builtin_bypass_null` | M7 | PLUG-018 for the built-ins (bypassed EQ/comp/delay/reverb null against the dry signal) |
+| `effect_param_steps` | M7 | ENG-022, AUTO-002 on effect params (EQ gain, comp makeup, delay mix, reverb mix ramp over one block) |
+| `m7_scene` | M7 | DSP-030..033, MIX-007, AUTO-002, IO-011 (EQ → comp → send → reverb bus, delay insert, two lanes; bit-identical on fresh engines) |
 
 ## Agent verification recipe
 When an agent finishes an audio-affecting task it must:

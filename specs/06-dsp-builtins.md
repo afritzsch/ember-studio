@@ -93,6 +93,11 @@ All processors are `daw::Node` subclasses, stereo in/out, with parameters throug
 - **NaN guard (DSP-040).** A block whose input holds NaN/±Inf, or whose output went non-finite, outputs silence and clears the filter state; it counts in `nanBlocks()` and the `nanBlocks` telemetry counter. The compressor, reverb, delay and sampler guards count there too (DW-142).
 - `reset()` (locate) keeps the filter state, like other effects (TIME-008). `process()` never allocates; the same input and params give the same bits for any block sizes (ENG-004).
 
+#### T-077 notes (M7 goldens)
+- Goldens per requirement (`Tests/GoldenTests`, checked by `M7GoldenTests` against numbers from this spec, not just their references): DSP-030 `eq_response` (impulse response vs the analytic RBJ magnitude, worst 0.0002 dB); DSP-031 `sidechain_compressor`; DSP-032 `delay_tempo_sync`; DSP-033 `reverb_determinism`; DSP-040 `effects_silence_nan_guard` (each effect's tail ends in exact 0; NaN-fed EQ, compressor, delay and reverb output silence and count every block in `nanBlocks`) and the exact-0 tail of `eq_response`; bypass of every built-in effect `builtin_bypass_null`; per-block param ramps (ENG-022) on every effect `effect_param_steps`; all of them together, bit-identical on two fresh engines, `m7_scene`.
+- DSP-041 is the ParamInfo registry; its unit tests stay the per-effect DSP-041 tests. The goldens exercise the tables end to end: fixture params and automation lanes go through `paramInfoJSON` ranges and ParamInfo mapping (AUTO-008).
+- No DSP bug turned up: `Sources/DAWEngine/dsp` and `nodes` are unchanged.
+
 ### General
 | ID | Requirement |
 |---|---|
