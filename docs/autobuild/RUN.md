@@ -98,6 +98,9 @@ Unattended phases started by `/autobuild` (see `.claude/skills/autobuild/SKILL.m
 - Wave: T-054 input monitoring (E, M5: last M5 task), T-064 host bypass / NaN guard / crash marker (P, M6), T-074 automation (E+M, M7; owns the new `automation/` modules), T-082 export dialog (U, M8). T-063 waits (P+U overlaps T-064 and T-082); T-080 waits (E+M overlaps T-054 and T-074).
 - Start: week 20%, five-hour window 63% (reset at 1794297600).
 - Pre-decisions in DECISIONS.md: T-054 contract and `auto` evaluation; T-064 bypass command, crash marker and NaN event; T-074 contract; T-082 normalize and selection.
+- 5-hour window hit 87% at 1794284253 (epoch), ~13 min after the workers started (week 23%). All four paused until the reset at 1794297600 + 120 s.
+- The conductor relayed that phase 7 is the user's final phase of this run (stop after it).
+- Resumed all four workers at 1794297774 (five-hour window 0%, week 25%). T-074 allowed small additive core/nodes edits for the AUTO-003 wrap jump (DECISIONS "T-074 wrap jump").
 
 ## Summary for the user
 
