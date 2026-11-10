@@ -3,6 +3,10 @@
 /// ("inverses keep IDs", 07). Checked like any input (MODEL-031): the slot ID must be unused (the
 /// slot it replaces doesn't count), the slot valid, its sidechain source a track or bus and its
 /// route acyclic (MODEL-030).
+///
+/// DW-234 (T-088): a replaced slot with another ID takes its automation lanes with it, and lanes
+/// that already drove the restored slot are kept by the inverse; so the inverse is a composite
+/// when lanes are involved, and `RestoreInstrument` alone otherwise.
 public struct RestoreInstrument: Command {
     public static let type = "RestoreInstrument"
 
@@ -20,13 +24,28 @@ public struct RestoreInstrument: Command {
         guard let track = project.track(trackID) else { throw .notFound(kind: "track", id: trackID) }
         guard track.kind == .midi else { throw .invalidArgument("track \(trackID) is not a MIDI track") }
         let replaced = track.instrument
-        // The slot being replaced gives up its ID first, so a slot can be restored over itself.
-        try project.updateTrack(trackID) { $0.instrument = nil }
-        if let instrument {
-            try project.claimIDs(instrument.forEachID)
-            _ = try project.placeInstrument(instrument, on: trackID)
+        let restored = instrument?.id
+        // DW-234: lanes of the slot coming back (a slot restored over itself keeps its lanes).
+        var kept: [any Command] = []
+        project.forEachAutomationLane { lane, channel in
+            if let restored, restored != replaced?.id, lane.target.drivenSlot == restored {
+                kept.append(SetAutomationLane(channel: channel, target: lane.target, lane: lane))
+            }
         }
-        return RestoreInstrument(trackID: trackID, instrument: replaced)
+        var working = project
+        // The slot being replaced gives up its ID first, so a slot can be restored over itself.
+        try working.updateTrack(trackID) { $0.instrument = nil }
+        if let instrument {
+            try working.claimIDs(instrument.forEachID)
+            _ = try working.placeInstrument(instrument, on: trackID)
+        }
+        var inverse: [any Command] = [RestoreInstrument(trackID: trackID, instrument: replaced)]
+        if let gone = replaced?.id, gone != restored {
+            inverse += try working.removeAutomationLanes { $0.drivenSlot == gone }  // DW-234
+        }
+        inverse += kept
+        project = working
+        return inverse.count == 1 ? inverse[0] : CompositeCommand(label, inverse)
     }
 }
 

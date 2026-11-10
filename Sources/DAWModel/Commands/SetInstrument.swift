@@ -2,7 +2,8 @@
 /// there. A built-in instrument is the sampler (D-19), which may come with its zones (DW-140);
 /// hosted plugins (AU, VST3) are placed as they are. Once a track has an active instrument,
 /// GraphDescriptionBuilder emits its clip player, the instrument and the MIDI edge between them.
-/// The inverse is `RestoreInstrument` with what was there before.
+/// The inverse is `RestoreInstrument` with what was there before. DW-234 (T-088): the lanes of a
+/// replaced instrument go in the same step, and the inverse puts them back.
 public struct SetInstrument: Command {
     public static let type = "SetInstrument"
 
@@ -21,7 +22,13 @@ public struct SetInstrument: Command {
 
     public func apply(to project: inout Project) throws(DAWError) -> any Command {
         let slot = DeviceSlot(id: project.ids.allocate(), kind: device, zones: zones ?? [])
-        let previous = try project.placeInstrument(slot, on: trackID)
-        return RestoreInstrument(trackID: trackID, instrument: previous)
+        var working = project
+        let previous = try working.placeInstrument(slot, on: trackID)
+        var restore: [any Command] = [RestoreInstrument(trackID: trackID, instrument: previous)]
+        if let previous {
+            restore += try working.removeAutomationLanes { $0.drivenSlot == previous.id }  // DW-234
+        }
+        project = working
+        return restore.count == 1 ? restore[0] : CompositeCommand(label, restore)
     }
 }
