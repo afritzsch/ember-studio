@@ -68,6 +68,19 @@ private:
     std::vector<float> ring_;  // 2 × capacity_
 };
 
+// T-064 (PLUG-018): silence, while reporting `latency` frames as latencySamples(): a latent device
+// whose own output is easy to tell from its (bypassed) input.
+class LatentMuteNode final : public Node {
+public:
+    explicit LatentMuteNode(uint32_t latency) : latency_(latency) {}
+    void prepare(const PrepareInfo&) override {}
+    void process(ProcessContext& ctx, NodeIO& io) DAW_RT override;
+    uint32_t latencySamples() const override { return latency_; }
+
+private:
+    uint32_t latency_;
+};
+
 // Silence, and one malloc + free per non-empty block: the RT trap (ENG-030..032) must count two
 // violations per block. Only for tests about the trap.
 class AllocatingNode final : public Node {

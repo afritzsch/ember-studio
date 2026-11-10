@@ -4,6 +4,7 @@
 #include <optional>
 #include <string>
 
+#include "graph/BypassNode.h"
 #include "plugins/AUPluginNode.h"
 
 namespace daw {
@@ -21,6 +22,8 @@ std::optional<ParamMapping> mappingFor(const NodeDesc& node, const NodeKindInfo*
     case NodeKind::auPlugin: {
         // PLUG-015: the slot holds the AU parameter's own value; a node whose AU didn't load
         // (inert) has no parameters and gets the identity.
+        // PLUG-018 (T-064): a node with a bypass slot is wrapped for the graph; look inside.
+        if (auto* bypass = dynamic_cast<BypassNode*>(instance)) instance = bypass->inner().get();
         auto* au = dynamic_cast<AUPluginNode*>(instance);
         if (au != nullptr && au->instance() && index < au->instance()->params().size()) {
             const AUParamInfo& p = au->instance()->params()[index];

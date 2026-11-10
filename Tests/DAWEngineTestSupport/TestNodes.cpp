@@ -96,6 +96,8 @@ void AllocatingNode::process(ProcessContext&, NodeIO& io) DAW_RT {
     fillAll(io.audioOut, 0.0f);
 }
 
+void LatentMuteNode::process(ProcessContext&, NodeIO& io) DAW_RT { fillAll(io.audioOut, 0.0f); }
+
 void NaNNode::process(ProcessContext&, NodeIO& io) DAW_RT {
     fillAll(io.audioOut, std::numeric_limits<float>::quiet_NaN());
 }
@@ -128,6 +130,7 @@ std::unique_ptr<Node> makeTestNode(const TestNodeSpec& spec) {
     case TestNodeType::allocating: return std::make_unique<AllocatingNode>();
     case TestNodeType::nan: return std::make_unique<NaNNode>();
     case TestNodeType::sidechainMix: return std::make_unique<SidechainMixNode>(spec.level);
+    case TestNodeType::latentMute: return std::make_unique<LatentMuteNode>(spec.samples);
     }
     return nullptr;
 }

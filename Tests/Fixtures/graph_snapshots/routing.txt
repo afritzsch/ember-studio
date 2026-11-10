@@ -1,21 +1,22 @@
 master output:1
 nodes:
   source:2 audioClipPlayer v0
-  7 eq v0 params 24+3
-  8 compressor v0 params 27+4
+  7 eq v0 params 24+3 bypass 49
+  8 compressor v0 params 27+4 bypass 50
   2 channelStrip v0 params 4+4
   source:3 audioClipPlayer v0
   3 channelStrip v0 params 8+4
   input:4 bus v0
+  9 compressor v0 params 31+4 bypass 51
   4 channelStrip v0 params 12+4
   input:5 bus v0
-  10 eq v0 params 35+3
+  10 eq v0 params 35+3 bypass 52
   5 channelStrip v0 params 16+4
   input:6 bus v0
-  11 reverb v0 params 38+1
+  11 reverb v0 params 38+1 bypass 53
   6 channelStrip v0 params 20+4
   input:1 bus v0
-  12 delay v0 params 39+2
+  12 delay v0 params 39+2 bypass 54
   1 channelStrip v0 params 0+4
   output:1 master v0 params 45+1
   metronome:1 metronome v0 params 46+3
@@ -26,7 +27,8 @@ edges:
   7 -> 8 audio port 0 id 3c7ca5db7cec164
   8 -> 2 audio port 0 id f1252aa61a140317
   source:3 -> 3 audio port 0 id 1c50d9f28257a4fe
-  input:4 -> 4 audio port 0 id b308720efafa53d2
+  input:4 -> 9 audio port 0 id 209c7afd2f220f44
+  9 -> 4 audio port 0 id a27beaf7ee295d10
   input:5 -> 10 audio port 0 id d9d839728d6fb57b
   10 -> 5 audio port 0 id 85a0ff60b9957a06
   input:6 -> 11 audio port 0 id 7806ed84e12f8530

@@ -136,6 +136,34 @@ struct GoldenReferenceTests {
         if run.failures.isEmpty { try? FileManager.default.removeItem(at: run.workDirectory) }
     }
 
+    /// PLUG-018 (T-064), exact to the sample: L (a bypassed 1000-frame latent device against a plain
+    /// phase-inverted copy) is 0 everywhere; R is only the reference tone (0.5 × the centre pan's
+    /// 0.7071) from frame 0, so the running latent device next to it really was silent.
+    @Test("PLUG-018: plugin_bypass_null nulls the bypassed latent path; the running one is silent")
+    func pluginBypassNullSamples() throws {
+        let audio = try AudioData(contentsOf: GoldenHarness.reference("plugin_bypass_null"))
+        #expect(audio.channels.count == 2 && audio.frameCount == 36000)
+        guard audio.channels.count == 2, audio.frameCount == 36000 else { return }
+        #expect(audio.channels[0].allSatisfy { $0 == 0 })
+        var worst = 0.0
+        for i in 0..<36000 {
+            let expected = i < 12000 ? 0.5 * 0.5.squareRoot() * sin(2 * Double.pi * 1000 * Double(i) / 48000) : 0
+            worst = max(worst, abs(Double(audio.channels[1][i]) - expected))
+        }
+        #expect(worst < 1e-6)
+    }
+
+    /// The null above means something only because PDC planned with the bypassed device's latency.
+    @Test("PLUG-018: plugin_bypass_null renders with a graph latency of 1000 frames (bypass keeps PDC)")
+    @MainActor func pluginBypassGraphLatency() async throws {
+        let fixture = try GoldenFixture(name: "plugin_bypass_null", contentsOf:
+            GoldenHarness.fixturesDirectory.appending(path: "plugin_bypass_null.jsonl"))
+        let run = await GoldenHarness.run(fixture, reference: nil)
+        #expect(run.failures == [])
+        #expect(run.telemetry?["graphLatency"]?.int64Value == 1000)
+        if run.failures.isEmpty { try? FileManager.default.removeItem(at: run.workDirectory) }
+    }
+
     /// The reference is `[(left, right)]` gains × the 1 kHz tone at 0.5 (`assets/tone_1k_48k.wav`),
     /// one 12000-frame segment per factor pair, with the tone restarting in each segment.
     private func expectToneSegments(_ name: String, _ factors: [(Double, Double)],

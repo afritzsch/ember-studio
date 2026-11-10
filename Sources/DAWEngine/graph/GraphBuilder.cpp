@@ -9,6 +9,7 @@
 #include "automation/AutomationCompiler.h"
 #include "core/AudioBufferPool.h"
 #include "graph/BufferPlan.h"
+#include "graph/BypassNode.h"
 #include "graph/TopoSort.h"
 #include "time/TempoMap.h"
 
@@ -43,6 +44,15 @@ Result<void> checkParams(const NodeDesc& node, const ParamSlotTable& params) {
     for (ParamID id = node.firstParam; id < end; ++id)
         if (!params.isAllocated(id))
             return invalid(nodeName(node.id) + ": param " + std::to_string(id) + " is not allocated");
+    return {};
+}
+
+// PLUG-018 (T-064): the bypass slot, when there is one, is checked the same way.
+Result<void> checkBypassParam(const NodeDesc& node, const ParamSlotTable& params) {
+    if (node.bypassParam == kNoBypassParam) return {};
+    if (node.bypassParam >= params.capacity() || !params.isAllocated(node.bypassParam))
+        return invalid(nodeName(node.id) + ": bypass param " + std::to_string(node.bypassParam) +
+                       " is not allocated");
     return {};
 }
 
@@ -82,6 +92,7 @@ Result<std::unique_ptr<RenderGraph>> GraphBuilder::build(const GraphDescription&
                              nodeName(node.id) + ": no factory for NodeKind " +
                                  std::to_string(static_cast<unsigned>(node.kind)));
         if (auto r = checkParams(node, params); !r) return r.error();
+        if (auto r = checkBypassParam(node, params); !r) return r.error();
         if (node.kind == NodeKind::master) {
             if (node.id != desc.master) return invalid(nodeName(node.id) + " is a master but not the graph's master");
             master = i;
@@ -167,6 +178,28 @@ Result<std::unique_ptr<RenderGraph>> GraphBuilder::build(const GraphDescription&
         if (!put) return put.error();
         nodes[i] = std::move(put).value();
         instances_[d.id] = Instance{d.kind, d.configVersion, d.firstParam, d.numParams, nodes[i]};
+    }
+
+    // PLUG-018 (T-064): a node with a bypass slot renders through a BypassNode made for this graph
+    // around the pooled instance, delaying its bypassed input by the latency read here (the one
+    // PDC plans with below). Its BypassState (delay line, toggle) is kept per NodeID while its line
+    // is long enough, so a rebuild doesn't glitch a bypassed node.
+    std::unordered_map<NodeID, std::shared_ptr<BypassState>> bypassStates;
+    for (uint32_t i = 0; i < numNodes; ++i) {
+        const NodeDesc& d = desc.nodes[i];
+        if (d.bypassParam == kNoBypassParam) continue;
+        const uint32_t latency = nodes[i]->latencySamples();
+        if (latency > kMaxGraphLatency)
+            return invalid(nodeName(d.id) + ": latency " + std::to_string(latency) + " exceeds " +
+                           std::to_string(kMaxGraphLatency) + " samples");
+        std::shared_ptr<BypassState> state;
+        if (auto old = bypassStates_.find(d.id);
+            old != bypassStates_.end() && old->second->maxDelay() >= latency && old->second->maxBlock() == maxBlock_)
+            state = old->second;
+        else
+            state = std::make_shared<BypassState>(latency, maxBlock_);
+        bypassStates[d.id] = state;
+        nodes[i] = std::make_shared<BypassNode>(std::move(nodes[i]), d.bypassParam, latency, std::move(state));
     }
 
     // MARK: PDC (MIX-020, MIX-021)
@@ -289,6 +322,7 @@ Result<std::unique_ptr<RenderGraph>> GraphBuilder::build(const GraphDescription&
     // their own references.
     delayLines_ = std::move(lines);
     midiDelayLines_ = std::move(midiLines);
+    bypassStates_ = std::move(bypassStates);  // PLUG-018
 
     // Forget nodes the description dropped. Graphs that still render them hold their own
     // references, so they're released on daw.reclaim once those graphs are gone (ENG-013).

@@ -78,6 +78,7 @@ struct CommandRegistryTests {
         ArmTrack(trackID: 3, armed: true, inputPair: 2),
         ArmTrack(trackID: 3, armed: false),
         SetMonitoring(trackID: 3, mode: .auto),
+        SetDeviceBypass(slotID: 4, bypass: true),  // T-064
         // T-074 (11, MODEL-005 automation)
         AddAutomationPoint(target: .strip(channel: 2, param: .gain), point: AutomationPoint(tick: 0, value: 0.5)),
         AddAutomationPoints(target: .device(slot: 4, index: 1),
@@ -105,6 +106,7 @@ struct CommandRegistryTests {
             "SetMetronome",
             "SetSessionSampleRate", "RestoreSessionSampleRate",
             "ArmTrack", "SetMonitoring",
+            "SetDeviceBypass",
             "AddAutomationPoint", "AddAutomationPoints", "RemoveAutomationPoints", "MoveAutomationPoints",
             "SetAutomationMode", "SetAutomationLane",
         ])

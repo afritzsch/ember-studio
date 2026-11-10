@@ -11,9 +11,11 @@
 namespace daw {
 
 AUPluginNode::AUPluginNode(NodeID id, std::shared_ptr<AUInstance> instance, bool instrument, ParamID firstParam,
-                           uint32_t numParams, LatencyReporter reporter, std::weak_ptr<AUPluginHost> host)
+                           uint32_t numParams, LatencyReporter reporter, std::weak_ptr<AUPluginHost> host,
+                           std::shared_ptr<PluginHealth> health, Telemetry* telemetry)
     : id_(id), instance_(std::move(instance)), instrument_(instrument), firstParam_(firstParam),
-      numParams_(numParams), reporter_(std::move(reporter)), host_(std::move(host)) {}
+      numParams_(numParams), reporter_(std::move(reporter)), host_(std::move(host)), health_(std::move(health)),
+      telemetry_(telemetry) {}
 
 void AUPluginNode::prepare(const PrepareInfo& info) {
     active_ = false;
@@ -91,8 +93,12 @@ void AUPluginNode::process(ProcessContext& ctx, NodeIO& io) DAW_RT {
     pushParams(ctx);
     for (const MidiEvent& event : io.midiIn) instance_->scheduleMIDI(event, n);
     instance_->setTransport(ctx.transport);
-    if (!instance_->render(io, n))
+    if (!instance_->render(io, n)) {
         for (uint32_t c = 0; c < io.audioOut.numChannels; ++c) std::memset(io.audioOut.channels[c], 0, bytes);
+        return;
+    }
+    // PLUG-022
+    if (guardPluginOutput(io.audioOut, n, telemetry_, health_.get())) nanBlocks_.fetch_add(1, std::memory_order_relaxed);
 }
 
 } // namespace daw

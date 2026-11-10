@@ -343,12 +343,15 @@ CheckResult automationAUParam() {
     rig.addAsset(makeAsset(1, 1, 1'000'000, [](uint32_t, int64_t) { return 0.0f; }));
     // AUDelay (aufx:dely:appl): 0 dry/wet mix %, 1 delay time s, 2 feedback %, 3 lowpass Hz.
     auto first = rig.engine().params().allocate(4, std::numeric_limits<float>::quiet_NaN());
+    auto bypass = rig.engine().params().allocate(1, 0.0f);  // PLUG-018: wrapped in a BypassNode
+    DAW_CHECK(bypass.ok());
     DAW_CHECK(first.ok());
     if (!first.ok()) return checks;
     const ParamID p = first.value();
     GraphDescription d = baseDescription();
     d.nodes.push_back(NodeDesc{10, NodeKind::audioClipPlayer, 1, 0, 0, {}});
-    d.nodes.push_back(NodeDesc{20, NodeKind::auPlugin, 1, p, 4, AUPluginConfig::makeJSON("aufx:dely:appl", {})});
+    d.nodes.push_back(NodeDesc{20, NodeKind::auPlugin, 1, p, 4, AUPluginConfig::makeJSON("aufx:dely:appl", {}),
+                               bypass.ok() ? bypass.value() : kNoBypassParam});
     d.edges.push_back(EdgeDesc{1, 10, 20, EdgeKind::audio, 0});
     d.edges.push_back(EdgeDesc{2, 20, 1, EdgeKind::audio, 0});
     d.audioClips.push_back(clip(10, 1, 0, 30'000, 1));

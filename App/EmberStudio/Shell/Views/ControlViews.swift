@@ -30,15 +30,25 @@ struct ControlToggle: View {
     let control: UIControl
     /// Short text on the button face (M, S); the full label is the tooltip and accessibility label.
     var face: String?
+    /// A checkbox instead of a button (settings in a dialog, T-082, where on and off must read apart).
+    var checkbox = false
 
     var body: some View {
-        Toggle(isOn: Binding(get: { control.isOn ?? false }, set: { _ in control.action() })) {
+        styled(Toggle(isOn: Binding(get: { control.isOn ?? false }, set: { _ in control.action() })) {
             Text(face ?? control.label)
-        }
-        .toggleStyle(.button)
+        })
         .disabled(!control.isEnabled)
         .accessibilityIdentifier(control.id)
         .accessibilityLabel(control.label)
         .help(control.label)
+    }
+
+    @ViewBuilder
+    private func styled(_ toggle: some View) -> some View {
+        if checkbox {
+            toggle.toggleStyle(.checkbox)
+        } else {
+            toggle.toggleStyle(.button)
+        }
     }
 }

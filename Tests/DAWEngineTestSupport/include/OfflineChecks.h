@@ -57,6 +57,12 @@ CheckResult offlineTailQuietRunResets();
 // disabled tail stops at the range end.
 CheckResult offlineTailMaxLength();
 
+// T-082 (UI-042): ExportSpec::normalize scales the whole export by one gain so its sample peak is
+// −0.1 dBFS (up or down), before dither and quantization: float32 sink and file are the plain
+// render times the gain, int16 dithered doesn't clip and is bit-identical across runs, silence
+// keeps gain 1, and the default leaves the render unchanged (gain 1, peak reported).
+CheckResult offlineNormalize();
+
 // IO-013: offline, nodes run inside the RT trap's scope (Debug), and a clean graph counts 0.
 CheckResult offlineRunsInRtScope();
 

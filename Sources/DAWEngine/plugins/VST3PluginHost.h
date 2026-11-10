@@ -21,6 +21,7 @@
 #include "core/Result.h"
 #include "graph/NodeRegistry.h"
 #include "plugins/VST3Instance.h"
+#include "plugins/PluginNanGuard.h"
 
 namespace daw {
 
@@ -51,6 +52,14 @@ public:
     };
     std::vector<Failure> takeFailures();
 
+    // PLUG-022 (T-064): the slots whose current node output NaN/inf since its creation, each
+    // reported once (the facade turns them into pluginMisbehaved events). A new node instance of
+    // the slot (a rebuild that re-creates it) can be reported again.
+    std::vector<NodeID> takeMisbehaved();
+    // PLUG-022: where nodes count their silenced blocks (Telemetry::countNanBlock). Set before the
+    // first build; the telemetry must outlive every node.
+    void setTelemetry(Telemetry* telemetry);
+
     // For VST3PluginNode (non-RT).
     void reportFailure(NodeID slot, Error error);
     Result<std::shared_ptr<VST3Instance>> reinstantiate(NodeID slot, const std::shared_ptr<VST3Instance>& old);
@@ -66,11 +75,14 @@ private:
         std::vector<uint8_t> configState;          // the configJSON state the instance was made with
         std::optional<std::vector<uint8_t>> pending;  // setState before an instance existed
         std::optional<Error> error;                // the latest failure
+        std::shared_ptr<PluginHealth> health;      // PLUG-022: the latest node's
+        bool healthReported = false;
     };
 
     mutable std::mutex mutex_;
     std::map<NodeID, Slot> slots_;
     std::vector<Failure> failures_;
+    Telemetry* telemetry_ = nullptr;  // PLUG-022
 };
 
 } // namespace daw

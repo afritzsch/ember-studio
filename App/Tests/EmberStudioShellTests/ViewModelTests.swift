@@ -93,6 +93,7 @@ struct ViewModelTests {
         let (model, _) = try makeWindow(tracks: ["A", "B"])
         model.toasts.post(.info, .info, title: "hi")
         model.audioPrefs.isOpen = true  // UI-040 (T-055): its controls too
+        model.exportDialog.isOpen = true  // UI-042 (T-082): its controls too
         // UI-030 (T-076): the mixer's controls, with a bus and a send so they are all listed.
         model.perform(AddBus(name: "Verb"))
         let bus = model.project.buses[0].id
@@ -101,7 +102,7 @@ struct ViewModelTests {
         let ids = model.controls.map(\.id)
         #expect(Set(ids).count == ids.count)
         for id in ids {
-            #expect(id.wholeMatch(of: /(transport|edit|zoom|pane|track|toast|snap|clip|pianoRoll|prefs|mixer)(\.[A-Za-z0-9]+)+/) != nil, "\(id)")
+            #expect(id.wholeMatch(of: /(transport|edit|zoom|pane|track|toast|snap|clip|pianoRoll|prefs|mixer|export)(\.[A-Za-z0-9]+)+/) != nil, "\(id)")
         }
         #expect(ids.contains("mixer.bus.\(bus).mute") && ids.contains("mixer.master.fader.reset"))
         let track = model.project.tracks[1].id

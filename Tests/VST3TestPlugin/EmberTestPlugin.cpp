@@ -12,6 +12,7 @@
 #include <atomic>
 #include <cmath>
 #include <cstring>
+#include <limits>
 #include <mutex>
 #include <vector>
 
@@ -37,6 +38,8 @@ enum ParamIDs : ParamID { kGain = 0, kSidechainMix = 1, kMeter = 2 };
 
 std::atomic<int> gLiveProcessors{0};
 std::atomic<uint32> gLatency{0};
+// T-064 (PLUG-022): while set, the effect writes a NaN into the first frame of each block.
+std::atomic<bool> gEmitNaN{false};
 std::atomic<bool> gRestartFromProcess{false};
 std::atomic<int64> gNoteOns{0}, gNoteOffs{0};
 std::atomic<double> gTempo{0}, gPPQ{0}, gBar{0};
@@ -217,6 +220,7 @@ public:
             }
         }
         writePos_ = (writePos_ + static_cast<uint32>(data.numSamples)) & (kRingSize - 1);
+        if (gEmitNaN.load() && out.numChannels > 0) out.channelBuffers32[0][0] = std::numeric_limits<float>::quiet_NaN();
         return kResultOk;
     }
 
@@ -297,6 +301,8 @@ __attribute__((visibility("default"))) void ember_test_controller_stats(int32_t*
 __attribute__((visibility("default"))) void ember_test_set_controller_value(float value) { gControllerValue.store(value); }
 
 __attribute__((visibility("default"))) int32_t ember_test_live_processors() { return gLiveProcessors.load(); }
+
+__attribute__((visibility("default"))) void ember_test_set_emit_nan(int32_t on) { gEmitNaN.store(on != 0); }  // T-064
 
 } // extern "C"
 

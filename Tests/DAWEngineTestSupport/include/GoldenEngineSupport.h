@@ -27,6 +27,7 @@ enum class TestNodeType : uint8_t {
     allocating,  // silence, allocating and freeing once per block (the RT trap must count it)
     nan,         // quiet NaN on every channel
     sidechainMix, // input + level · sidechain (MIX-008, T-023); register it under an insert kind (compressor)
+    latentMute,  // silence, reporting latencySamples() = samples (T-064, PLUG-018 bypass goldens)
 };
 
 // One test node registered under a real kind. Under audioClipPlayer it stands in only for

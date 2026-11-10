@@ -10,7 +10,8 @@
 //   - any other kind: its ParamInfo row (06, DSP-041); a row that isn't `automatable` (AUTO-008)
 //     leaves the lane out. A kind without a row for the index maps 0…1 as is.
 // Lanes that are disabled (mode `off`, AUTO-005), have no points, or whose slot no node in this
-// graph owns (a bypassed device, a removed send) are left out: there is nothing to drive.
+// graph owns (a removed send or device) are left out: there is nothing to drive. A bypassed device
+// stays in the graph inside a BypassNode (PLUG-018, T-064); its lanes keep driving its slots.
 
 #include <memory>
 #include <span>

@@ -40,7 +40,7 @@ The Interfaces above are implemented as written. The additions below are additiv
   - built-ins use their ParamInfo row: `linear` is min + v·(max − min), `log` is min·(max/min)^v, and `db` is dB-linear. A db range that reaches 0 (strip gain, send level) maps v = 0 to silence and otherwise runs dB-linear from −60 dB to 20·log10(max). For the 0…+12 dB fader, v = 5/6 is unity.
   - AU params map linearly over the AU parameter's min…max.
   - VST3 params pass through unchanged (they are already normalized).
-  - A lane is left out when it is disabled (`off`), has no points, targets a slot that no node in the graph owns (a bypassed device, a removed send), or targets a row that isn't `automatable`.
+  - A lane is left out when it is disabled (`off`), has no points, targets a slot that no node in the graph owns (a removed send or device; since T-064 a bypassed device stays in the graph, inside a BypassNode, and its lanes keep driving its slots), or targets a row that isn't `automatable`.
   - GraphBuilder rejects (`invalidArgument`) unsorted or repeated ticks, non-finite values or shapes, unknown curves and targets outside the table.
 - **Engine (AUTO-001/002/003).** `automation/`: `AutomationPlayer` (sorted points, cursor cached between blocks, binary search on a jump), `AutomationSet` (the RenderGraph's players, `RenderGraph::automation()`) and `AutomationCompiler`. `Engine::render` applies the set after `Transport::advance` and before the pre-roll and the nodes.
   - While playing, each lane is evaluated at `seg[0].startTick` and written to its slot. A slot is written only when its value changes, so slot generations, and with them plugin pushes, move only on real changes.

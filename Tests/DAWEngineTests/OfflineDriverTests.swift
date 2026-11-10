@@ -25,6 +25,9 @@ struct OfflineDriverTests {
     @Test("IO-010: invalid arguments fail before rendering; an empty range writes an empty file")
     func errors() { expectPasses(daw.testing.offlineErrors()) }
 
+    @Test("UI-042 (T-082): normalize scales the export to a −0.1 dBFS peak before dither; off by default; silence unchanged")
+    func normalize() { expectPasses(daw.testing.offlineNormalize()) }
+
     @Test("IO-010: a simple 60 s project renders in < 10 s")
     func performance() {
         let perf = daw.testing.offlinePerformance60s()

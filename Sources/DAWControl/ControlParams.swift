@@ -67,11 +67,16 @@ public struct ProjectOpenParams: Codable, Hashable, Sendable {
     public var recover: Bool?
     /// Default: offline.
     public var engine: EngineParams?
+    /// PLUG-021 (T-064): open with every AU/VST3 slot host-bypassed for this session (slots,
+    /// params and state kept; the document isn't changed). Default false.
+    public var safeMode: Bool?
 }
 
 public struct ProjectOpenResult: Codable, Hashable, Sendable {
     /// DW-107: DAWModel's report (offline assets, migration, recovery, repairs).
     public var loadReport: ProjectLoadReport
+    /// PLUG-021 (T-064): whether the project runs in safe mode.
+    public var safeMode: Bool? = nil
 }
 
 public struct ProjectSaveParams: Codable, Hashable, Sendable {
@@ -224,6 +229,9 @@ public struct RenderOfflineParams: Codable, Hashable, Sendable {
     /// T-026 (docs/autobuild/DECISIONS.md Q1): include the project metronome's click when it is
     /// on. Default false: exports leave the click out.
     public var includeMetronome: Bool?
+    /// T-082 (UI-042): scale the export so its sample peak is −0.1 dBFS, before dither and
+    /// quantization. Default false.
+    public var normalize: Bool?
 }
 
 public struct RenderOfflineResult: Codable, Hashable, Sendable {
@@ -236,6 +244,8 @@ public struct RenderOfflineResult: Codable, Hashable, Sendable {
     /// IO-013: the render thread's own RT trap count. Must be 0.
     public var rtViolations: UInt64
     public var clippedSamples: UInt64
+    /// T-082: with `normalize`, the gain applied (linear; 1 for silence). Absent otherwise.
+    public var normalizeGain: Double?
 }
 
 // MARK: audio.*

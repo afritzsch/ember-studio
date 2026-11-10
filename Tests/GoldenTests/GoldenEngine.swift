@@ -101,6 +101,8 @@ final class GoldenEngine: EngineProtocol {
             render.rtViolations = r.rtViolations
             render.clippedSamples = r.clippedSamples
             render.renderSeconds = r.renderSeconds
+            render.peak = r.peak  // T-082
+            render.normalizeGain = r.normalizeGain
             status.render = render
         }
         return status
@@ -161,6 +163,7 @@ final class GoldenEngine: EngineProtocol {
         out.tailQuietSeconds = spec.tailQuietSeconds
         out.tailMaxSeconds = spec.tailMaxSeconds
         out.followLoop = spec.followLoop  // T-036: render.offline {loop: true}
+        out.normalize = spec.normalize  // T-082: render.offline {normalize: true}
         return facade.renderOffline(from.raw, to.raw, out)
     }
 
@@ -246,6 +249,7 @@ final class GoldenEngine: EngineProtocol {
             case .assetLoadFailed: .assetLoadFailed
             case .graphRejected: .graphRejected
             case .jobFinished: .jobFinished
+            case .pluginMisbehaved: .pluginMisbehaved  // T-064
             default: .deviceChanged
             }
             var device: DeviceChange?
@@ -307,6 +311,7 @@ extension GoldenFixture.TestNode {
         case .impulse: .impulse
         case .fakeLatency: .fakeLatency
         case .nan: .nan
+        case .latentMute: .latentMute
         }
         spec.frequency = frequency ?? 0
         spec.level = level ?? 1

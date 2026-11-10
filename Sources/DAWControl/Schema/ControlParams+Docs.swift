@@ -7,7 +7,8 @@ extension ProjectNewParams: JSONSchemaDocumented {
 
 extension ProjectOpenParams: JSONSchemaDocumented {
     public static var jsonSchemaDocs: [String: String] {
-        ["path": "The Name.dawproject folder", "recover": "Open the autosave instead if it is newer (MODEL-045). Default false"]
+        ["path": "The Name.dawproject folder", "recover": "Open the autosave instead if it is newer (MODEL-045). Default false",
+         "safeMode": "PLUG-021: host-bypass every AU/VST3 slot for this session; the document is unchanged. Default false"]
     }
 }
 
