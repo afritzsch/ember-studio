@@ -23,7 +23,7 @@ Result<void> registerBuiltinNodes(NodeRegistry& registry, AssetLookup lookup, Te
     };
     if (auto r = registry.set(NodeKind::audioClipPlayer, {std::move(clipPlayer)}); !r) return r;
     if (auto r = registry.set(NodeKind::midiClipPlayer, MidiClipPlayer::kindInfo()); !r) return r;  // DSP-003
-    if (auto r = registry.set(NodeKind::sampler, Sampler::kindInfo(std::move(lookup))); !r) return r;  // DSP-020..023
+    if (auto r = registry.set(NodeKind::sampler, Sampler::kindInfo(std::move(lookup), telemetry)); !r) return r;  // DSP-020..023
     if (auto r = registry.set(NodeKind::metronome, Metronome::kindInfo()); !r) return r;  // TIME-010, DSP-011
 
     auto strip = [telemetry](const NodeCreateInfo& info) -> Result<std::unique_ptr<Node>> {
@@ -41,13 +41,9 @@ Result<void> registerBuiltinNodes(NodeRegistry& registry, AssetLookup lookup, Te
     if (auto r = registry.set(NodeKind::channelStrip, std::move(stripInfo)); !r) return r;
 
     if (auto r = registry.set(NodeKind::compressor, Compressor::kindInfo(telemetry)); !r) return r;  // DSP-031
-    if (auto r = registry.set(NodeKind::reverb, Reverb::kindInfo()); !r) return r;  // DSP-033
-    if (auto r = registry.set(NodeKind::delay, Delay::kindInfo()); !r) return r;  // DSP-032
-    // DSP-040 (DW-142): the NaN-guarded effects count into the engine's telemetry. Registered again
-    // because this file is add-only during T-070's wave; a later task can fold these lines into
-    // the two above.
-    if (auto r = registry.set(NodeKind::reverb, Reverb::kindInfo(telemetry)); !r) return r;
-    if (auto r = registry.set(NodeKind::delay, Delay::kindInfo(telemetry)); !r) return r;
+    // DSP-040 (DW-142): the NaN-guarded processors count into the engine's telemetry.
+    if (auto r = registry.set(NodeKind::reverb, Reverb::kindInfo(telemetry)); !r) return r;  // DSP-033
+    if (auto r = registry.set(NodeKind::delay, Delay::kindInfo(telemetry)); !r) return r;  // DSP-032
     if (auto r = registry.set(NodeKind::eq, Eq::kindInfo(telemetry)); !r) return r;  // DSP-030
 
     auto gain = [](const NodeCreateInfo& info) -> Result<std::unique_ptr<Node>> {
@@ -57,8 +53,9 @@ Result<void> registerBuiltinNodes(NodeRegistry& registry, AssetLookup lookup, Te
                                  std::to_string(GainNode::kMinNumParams) + " param");
         return std::unique_ptr<Node>(std::make_unique<GainNode>(info.desc.firstParam, info.desc.numParams));
     };
-    registry.setParamInfo(NodeKind::gain, GainNode::kParamInfo);  // DSP-041, DW-160
-    return registry.set(NodeKind::gain, {std::move(gain)});
+    NodeKindInfo gainInfo{std::move(gain)};
+    gainInfo.paramInfo = GainNode::kParamInfo;  // DSP-041, DW-160
+    return registry.set(NodeKind::gain, std::move(gainInfo));
 }
 
 } // namespace daw

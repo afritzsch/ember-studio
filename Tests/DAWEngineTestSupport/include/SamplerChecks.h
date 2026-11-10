@@ -43,4 +43,8 @@ CheckResult samplerPedalBendAllNotesOff();
 // bad config is rejected at build time.
 CheckResult samplerThroughGraphBuilder();
 
+// DSP-040, DW-142 (T-070): a NaN in a zone's asset silences that block, stops the voice and counts
+// in the sampler's nanBlocks() and the engine's Telemetry; a clean asset never trips it.
+CheckResult samplerNanGuard();
+
 } // namespace daw::testing

@@ -29,4 +29,7 @@ struct SamplerTests {
 
     @Test("DW-096: sampler registered; the midi_tempo shape builds and renders through GraphBuilder + Engine")
     func throughGraphBuilder() { expectPasses(daw.testing.samplerThroughGraphBuilder()) }
+
+    @Test("DSP-040, DW-142: a NaN in an asset silences the block, stops the voice and counts in nanBlocks telemetry; RT trap 0")
+    func nanGuard() { expectPasses(daw.testing.samplerNanGuard()) }
 }
