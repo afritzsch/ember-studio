@@ -51,6 +51,10 @@ public:
     // parks it for `slot` (replacing an earlier parked one).
     Result<void> instantiate(NodeID slot, std::string_view identifier);
 
+    // True when `slot` has been configured as an AU (T-062: the facade routes plugin calls by
+    // this, so a held-state-only slot isn't known).
+    bool knows(NodeID slot) const;
+
     // PLUG-016. state: empty when the slot has neither an AU nor a configured state.
     Result<std::vector<uint8_t>> state(NodeID slot) const;
     Result<void> setState(NodeID slot, const std::vector<uint8_t>& state);

@@ -41,6 +41,7 @@ module DAWEngineTestSupport {
   header "EqChecks.h"
   header "SessionRateChecks.h"
   header "AUPluginChecks.h"
+  header "VST3PluginChecks.h"
   header "RecordingChecks.h"
   requires cplusplus
   export *

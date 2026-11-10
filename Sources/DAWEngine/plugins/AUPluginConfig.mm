@@ -7,11 +7,11 @@ namespace daw {
 
 namespace {
 
-Error invalid(const std::string& message) { return makeError(ErrorCode::invalidArgument, "AU config: " + message); }
+Error invalid(const std::string& message) { return makeError(ErrorCode::invalidArgument, message); }
 
 } // namespace
 
-Result<AUPluginConfig> AUPluginConfig::parse(std::string_view configJSON) {
+Result<PluginConfigFields> parsePluginConfigFields(std::string_view configJSON) {
     @autoreleasepool {
         NSData* data = [NSData dataWithBytes:configJSON.data() length:configJSON.size()];
         NSError* error = nil;
@@ -21,12 +21,9 @@ Result<AUPluginConfig> AUPluginConfig::parse(std::string_view configJSON) {
 
         id identifier = dict[@"identifier"];
         if (![identifier isKindOfClass:[NSString class]]) return invalid("needs a string \"identifier\"");
-        auto component = parseAUIdentifier([(NSString*)identifier UTF8String]);
-        if (!component) return invalid(component.error().message);
 
-        AUPluginConfig config;
-        config.component = component.value();
-        config.identifier = formatAUIdentifier(config.component);
+        PluginConfigFields fields;
+        fields.identifier = [(NSString*)identifier UTF8String];
 
         id state = dict[@"state"];
         if (state != nil && state != [NSNull null]) {
@@ -35,11 +32,28 @@ Result<AUPluginConfig> AUPluginConfig::parse(std::string_view configJSON) {
                 NSData* bytes = [[NSData alloc] initWithBase64EncodedString:state options:0];
                 if (bytes == nil) return invalid("\"state\" is not base64");
                 const auto* p = static_cast<const uint8_t*>(bytes.bytes);
-                config.state.assign(p, p + bytes.length);
+                fields.state.assign(p, p + bytes.length);
             }
         }
-        return config;
+        return fields;
     }
+}
+
+Result<AUPluginConfig> AUPluginConfig::parse(std::string_view configJSON) {
+    auto fields = parsePluginConfigFields(configJSON);
+    if (!fields) {
+        Error e = fields.error();
+        e.message = "AU config: " + e.message;
+        return e;
+    }
+    auto component = parseAUIdentifier(fields->identifier);
+    if (!component) return makeError(ErrorCode::invalidArgument, "AU config: " + component.error().message);
+
+    AUPluginConfig config;
+    config.component = component.value();
+    config.identifier = formatAUIdentifier(config.component);
+    config.state = std::move(fields->state);
+    return config;
 }
 
 std::string AUPluginConfig::makeJSON(std::string_view identifier, const std::vector<uint8_t>& state) {

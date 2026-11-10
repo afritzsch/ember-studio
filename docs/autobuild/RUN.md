@@ -77,6 +77,16 @@ Unattended phases started by `/autobuild` (see `.claude/skills/autobuild/SKILL.m
 - Start: week 1%, five-hour window 4%.
 - Pre-decisions in DECISIONS.md: T-053 contract, routing and placement; T-062 contract and test plugin; T-070 registry; T-076 inserts and faders.
 
+- 5-hour window hit 85% at 1794264908 (epoch), ~44 min into the phase (week 11%). T-053, T-062, T-070 paused until the reset at 1794279600 + 120 s; T-076 had reported and waits for review.
+
+- T-076 merged during the pause on a quiet machine: test.sh 11/11, swift test 2× green. Worker closed. M7's mixer view done; DW-202 closed.
+
+- Resumed T-053, T-062, T-070 at 1794279732 (five-hour window 0%, week 12%).
+
+- T-062 merged: test.sh 12/12 (new `test-plugins` stage), swift test 2× green. Worker closed. T-063 (plugin editors) now ready.
+
+- T-070 merged (EQ, `NodeRegistry::paramInfo`, `nanBlocks` telemetry, sampler NaN guard, `routing` fixture through EngineClient). test.sh failed only on the AUDelay param flake (DW-214, also seen by T-053 without T-070); plain swift test 2× green. T-070's worker takes DW-214 as a follow-up.
+
 ## Summary for the user
 
 The run had five phases (2026-11-02 → 2026-11-04). The week went 0% → 75%; phase 5 ran past WEEK_STOP because you authorized it.
