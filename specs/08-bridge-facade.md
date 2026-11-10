@@ -242,6 +242,12 @@ Swift (`EngineProtocol.swift`, in its own block at the end): `RecordedMidiNote`,
 
 Affected: T-053 only. T-054 (monitoring) is untouched: play-through ignores the monitoring mode by decision. T-080 (loop takes) builds on the record buffer's pass numbers. Tests: `MidiInputTests` (DAWEngineTests; REC-010 with synthetic timestamps, block boundaries, loop wrap, disarm while held, overflow, a real CoreMIDI virtual source, RT trap 0), `MidiRecordingModelTests`, `MidiRecordingControlTests`.
 
+### Contract delta (T-074), accepted (autobuild, see docs/autobuild/DECISIONS.md "T-074 contract")
+Additive; the automation contract itself is 11 Interfaces and 11 "Contract delta (T-074)".
+- **`GraphDescription.automation`** (`include/daw/GraphDescription.h`): `std::vector<AutomationDesc> automation{}`, a defaulted last member, with 11's `AutomationPointDesc`/`AutomationDesc` declared next to it. Existing aggregate initializations keep compiling and mean "no lanes".
+- **`GraphDescriptionBuilder`** gains `addAutomation(laneID, target, enabled)` and `addAutomationPoint(tick, value, curve, shape)`. A point goes to the lane added last.
+- **Swift:** `EngineGraph.automation: [EngineGraph.Automation]` (`laneID`, `target`, `points: [Point{tick, value, curve, shape}]`, `enabled`), default `[]`. `EngineClient` converts it both ways, and `FakeEngine` records it with the rest of the graph. A lane edit is structural (MODEL-021): the graph changes and is re-applied. Param values still travel only through `setParam`.
+
 ## Status
 | ID | status | test |
 |---|---|---|

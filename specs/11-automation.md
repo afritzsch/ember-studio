@@ -33,6 +33,38 @@ struct AutomationDesc { uint64_t laneID; ParamID target; std::vector<AutomationP
 // GraphDescription gains: std::vector<AutomationDesc> automation;   (additive to 05)
 ```
 
+### Contract delta (T-074), accepted (autobuild, see docs/autobuild/DECISIONS.md "T-074 contract", "T-074 wrap jump")
+The Interfaces above are implemented as written. The additions below are additive POD/facade plumbing (facade side: 08 "Contract delta (T-074)").
+- **Wire values.** `AutomationPointDesc.curve`: 0 linear, 1 hold, 2 exponential. `shape` is used by exponential only: `w(f) = (e^(s·f) − 1)/(e^s − 1)`, with |s| < 1e-4 treated as linear and s clamped to ±50 (`automation/AutomationCurve.h`). A point's curve shapes the segment that starts at it. Before the first point a lane holds the first value, and after the last point it holds the last.
+- **Mapping (AUTO-008).** Values are normalized 0…1. GraphBuilder maps them through the range of the node whose param range holds `target`:
+  - built-ins use their ParamInfo row: `linear` is min + v·(max − min), `log` is min·(max/min)^v, and `db` is dB-linear. A db range that reaches 0 (strip gain, send level) maps v = 0 to silence and otherwise runs dB-linear from −60 dB to 20·log10(max). For the 0…+12 dB fader, v = 5/6 is unity.
+  - AU params map linearly over the AU parameter's min…max.
+  - VST3 params pass through unchanged (they are already normalized).
+  - A lane is left out when it is disabled (`off`), has no points, targets a slot that no node in the graph owns (a bypassed device, a removed send), or targets a row that isn't `automatable`.
+  - GraphBuilder rejects (`invalidArgument`) unsorted or repeated ticks, non-finite values or shapes, unknown curves and targets outside the table.
+- **Engine (AUTO-001/002/003).** `automation/`: `AutomationPlayer` (sorted points, cursor cached between blocks, binary search on a jump), `AutomationSet` (the RenderGraph's players, `RenderGraph::automation()`) and `AutomationCompiler`. `Engine::render` applies the set after `Transport::advance` and before the pre-roll and the nodes.
+  - While playing, each lane is evaluated at `seg[0].startTick` and written to its slot. A slot is written only when its value changes, so slot generations, and with them plugin pushes, move only on real changes.
+  - With two segments, each lane is also evaluated at `seg[1].startTick`, and that value is registered as the slot's value after the wrap (`ParamSlotTable::beginBlock/setAfterWrap/afterWrap`, stamped per block). `ParamRamp` gains `jumpAt`/`after`, and `ParamSmoother::next(target, n, WrapJump)` ramps to the first value over segment 1 and jumps at the wrap frame (`automation/WrapJump.h` reads it for a node).
+  - `ChannelStrip` (gain, pan, mute, phase) and `GainNode` (send level and mute) honor the jump. Other built-ins and hosted plugins still ramp across a wrap and pick up the loop start's value in the next block. This is a known gap, listed in T-074 Discovered work.
+- **AUTO-005.**
+  - `read`: during playback the lane is re-applied every block, so a `SetParam` (a slot write between blocks) is overridden from the next block.
+  - `off`: the lane goes to the engine with `enabled = false` and is ignored.
+  - `touch`/`latch`/`write` play like `read` until T-075 adds recording.
+  - **While stopped**, each lane writes its value at the playhead once whenever the stopped position or the graph changes (after a stop, a locate while stopped, or a lane edit). A `SetParam` made while stopped holds until playback starts or the playhead moves. That is the engine half of AUTO-007; what the controls show stays T-075's.
+- **AUTO-009.** A lane writes the slot, and the existing slot → plugin path delivers it: AU render-thread parameter events (ramped over the block where the parameter can ramp), and a VST3 `IParameterChanges` point at offset 0. A plugin param with a lane gets a param slot even without a stored value (`paramRequirements`).
+- **AUTO-010.** Automation follows the transport's own block, not the MIX-023 look-ahead block that timeline nodes get. A param behind L samples of latency therefore changes L samples early (MIX-025).
+- **Model.**
+  - `AutomationLane {id, target: ParamTarget, points, mode}` and `AutomationPoint {tick, value, curve: linear | hold | exp(shape)}`. In JSON, `curve` defaults to linear and `shape` is present only with `"exp"`.
+  - Lanes live in `automation` on the channel that owns their target (a strip's channel, a send's or a device's channel), sorted by lane ID, with one lane per target in the project. A lane outlives its target (a removed send or device), stays valid, and is left out of the graph, so undoing the removal brings the automation back.
+  - `validate()` checks point order and range (ticks 0…`Tick.timelineEnd`, values 0…1, |shape| ≤ 50), lane ID order, one lane per target, and automatable targets: strip gain, pan and mute, send level, and device params. Solo and phase are not automatable. Built-in `automatable` flags are applied by the engine. A Track without an `automation` key decodes with no lanes.
+  - A strip mute lane drives the strip's mute slot and every send's mute slot (MIX-007). It is disabled while solo mutes the channel (MIX-006), so solo never leaks through an automated mute.
+- **Commands** (MODEL-005, all undoable):
+  - `AddAutomationPoint {target, point}` and `AddAutomationPoints {target, points}` create the lane (mode `read`) if the target has none.
+  - `RemoveAutomationPoints {target, ticks}`.
+  - `MoveAutomationPoints {target, ticks, deltaTicks, deltaValue}`. Nothing is clamped: a move that leaves the timeline or 0…1, or collides with another point, is rejected.
+  - `SetAutomationMode {target, mode}` creates an empty lane if needed.
+  - Every inverse is `SetAutomationLane {channel, target, lane?}`, which sets the lane to exactly that lane with its ID, or removes it. It is registered like any command.
+
 ## Status
 | ID | status | test |
 |---|---|---|
