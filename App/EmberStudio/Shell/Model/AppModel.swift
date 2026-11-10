@@ -177,24 +177,14 @@ final class AppModel {
         presenter?.setTitle(window)
     }
 
-    /// File > Export…: the whole project (to the end of its last clip, at least one bar) as a
-    /// 32-bit float WAV with its tail. The export dialog with range and format is UI-042 (T-082).
+    /// The whole project (to the end of its last clip, at least one bar) as a 32-bit float WAV with
+    /// its tail, without the click (DW-177). File > Export… opens the export dialog instead
+    /// (UI-042, `ExportModel`), which renders through the same `ExportModel.render`.
     func export(_ window: ProjectWindowModel, to url: URL) async throws(DAWError) -> OfflineRenderResult {
         guard let engine = window.engine else { throw .invalidArgument("the project has no engine") }
-        window.store.engineSync?.flush()
-        let version = engine.graphStatus().submittedVersion
-        if version > 0 {
-            let status = await engine.graphApplied(version, timeout: .seconds(30))
-            if let error = status.lastError { throw error }
-        }
-        let end = window.project.tracks.flatMap(\.clips).map { $0.start.raw + $0.length.raw }.max() ?? 0
-        let job = engine.renderOffline(from: Tick(0), to: Tick(max(end, 3840)), spec: ExportSpec(path: url.path))
-        guard job != 0 else { throw .engine(code: .internal, detail: "the engine refused the export") }
-        let status = await engine.waitForJob(job, timeout: .seconds(600))
-        guard status.state == .succeeded else {
-            throw status.error ?? .engine(code: .internal, detail: "export didn't finish")
-        }
-        return status.render ?? OfflineRenderResult()
+        let span = window.exportDialog.span(.project) ?? (Tick(0), Tick(3840))
+        return try await ExportModel.render(window: window, engine: engine, from: span.from, to: span.to,
+                                            spec: ExportSpec(path: url.path), includeMetronome: false)
     }
 
     /// The app's engine for `store`; offline when that fails (no device), with the reason.
