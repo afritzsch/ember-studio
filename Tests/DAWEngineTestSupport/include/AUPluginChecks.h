@@ -56,4 +56,25 @@ CheckResult auStateRoundTrip();
 // build adopts; a state set before the slot had an AU is applied to its first one.
 CheckResult auFailureAndAdoption();
 
+// DW-214 probes. How long a render-thread parameter event takes to show in AUDelay's parameter
+// tree (the V2 bridge updates the tree from its own event-listener queue): returns the worst
+// observed lag in microseconds over `trials`, or a negative value if a value never arrived.
+double auParamTreeLagMicros(uint32_t trials);
+// Instantiates, renders with a parameter event in every block and destroys AUDelay / AUSampler
+// `iterations` times, right after the last render (what a removed device does). Before the fix a
+// crash in Apple's parameter-tree listener killed the process within ~100 iterations under load;
+// returns the iterations run.
+uint32_t auTeardownStress(uint32_t iterations, uint32_t blocksPerInstance);
+
+// DW-214 regression check: auTeardownStress(`iterations`), then every deferred bridge release
+// happens (AUInstance::pendingV2Releases() reaches 0 within the grace period plus 5 s): no crash,
+// no leak.
+CheckResult auTeardownRegression(uint32_t iterations);
+
+// DW-214: two threads each instantiate, prepare (AudioUnitInitialize), render with parameter events
+// and destroy (AudioUnitUninitialize) V2 AUs `iterations` times, so initializes and uninitializes
+// of different instances overlap, as daw.compile and daw.reclaim can. No crash, every bridge
+// released, 0 render errors.
+CheckResult auConcurrentLifecycle(uint32_t iterations);
+
 } // namespace daw::testing

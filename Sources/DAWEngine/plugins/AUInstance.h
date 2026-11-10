@@ -23,6 +23,18 @@
 //
 // PLUG-014: if the AU has an aux input bus (bus 1), it is enabled with the main bus's channel
 // count and fed from NodeIO::sidechain (silence when nothing is routed there).
+//
+// DW-214, V2 Audio Units (AUDelay, AUSampler, most third-party AUs) run behind Apple's
+// AUAudioUnitV2Bridge, whose parameter tree follows the AU asynchronously from a private listener
+// queue. Two consequences:
+//   - params(true) reads that tree, so a value changed by a render-thread event shows up a little
+//     later (~1 ms, a few ms under load), not when render() returns;
+//   - Apple's listener crashes the process if the bridge is deallocated while it still has
+//     messages. Destroying an AUInstance therefore stops rendering at once but releases a bridged
+//     unit only after a grace period, on a utility queue (see AUInstance.mm). pendingV2Releases()
+//     counts those not released yet;
+//   - CoreAudio aborts if one V2 AU initializes while another uninitializes on another thread, so
+//     prepare and destruction take one process-wide lifecycle lock (non-RT; render never takes it).
 
 #include <atomic>
 #include <cstdint>
@@ -106,6 +118,9 @@ public:
     // io.sidechain. Returns false (output untouched) if the AU reported an error.
     bool render(const NodeIO& io, uint32_t numFrames) DAW_RT;
     uint64_t renderErrors() const { return renderErrors_.load(std::memory_order_relaxed); }
+
+    // DW-214: bridged units whose deferred release hasn't happened yet (process-wide, any thread).
+    static uint32_t pendingV2Releases();
 
     // Shared with the KVO observer and its dispatched reports, which may outlive the instance.
     struct LatencyState;
