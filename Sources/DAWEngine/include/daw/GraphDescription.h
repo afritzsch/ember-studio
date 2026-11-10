@@ -40,8 +40,17 @@ struct TempoPointDesc { Tick tick; double bpm; };              // mirrors daw::T
 struct TimeSigDesc    { Tick tick; int32_t num; int32_t den; }; // mirrors daw::TimeSigEvent (03)
 struct TempoMapDesc   { std::vector<TempoPointDesc> tempos; std::vector<TimeSigDesc> timeSigs; };
 
+// REC-020..022 (T-054, 09 "Contract delta (T-054)"): an audio track's input monitoring. `player`
+// is the track's audioClipPlayer. While monitoring is active (REC-020, evaluated per block from
+// the value in `modeSlot`, a MonitoringMode, and the transport), device input channels
+// 2·inputPair and 2·inputPair + 1 replace the player's output into the track's chain (REC-021).
+// `armed` and `inputPair` are structural (changing them rebuilds); the mode is a slot (no rebuild).
+struct MonitorDesc { NodeID player; ParamID modeSlot; uint32_t inputPair; bool armed; };
+
 struct GraphDescription { uint64_t version; std::vector<NodeDesc> nodes; std::vector<EdgeDesc> edges;
                           std::vector<ClipDesc> audioClips; std::vector<NoteDesc> notes;
-                          TempoMapDesc tempo; NodeID master; };
+                          TempoMapDesc tempo; NodeID master;
+                          std::vector<MonitorDesc> monitors = {};  // T-054, additive
+                        };
 
 } // namespace daw

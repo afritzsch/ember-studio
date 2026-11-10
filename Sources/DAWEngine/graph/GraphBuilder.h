@@ -81,6 +81,10 @@ public:
     static constexpr uint32_t kMidiCapacity = 1024;
     static constexpr uint32_t kMidiDelayCapacity = 4096;
 
+    // REC-020 (T-054): MonitorDesc::inputPair is below this (Recorder::kMaxInputPairs, channels
+    // 0…31).
+    static constexpr uint32_t kMaxMonitorInputPairs = 16;
+
     double sampleRate() const { return sampleRate_; }
     uint32_t maxBlock() const { return maxBlock_; }
 

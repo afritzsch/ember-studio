@@ -283,7 +283,15 @@ Result<std::unique_ptr<RenderGraph>> RenderGraph::create(RenderGraphDesc desc) {
                                      firstMidiInput, static_cast<uint32_t>(s.midiInputs.size()),
                                      nullptr, 0});
         graph->owned_.push_back(std::move(s.node));
+        // REC-021 (T-054): a monitored step needs an output to swap the input into.
+        if (s.monitor) {
+            if (s.output == kNoBuffer)
+                return makeError(ErrorCode::invalidArgument, "monitored step without an output in step " + std::to_string(i));
+            graph->monitors_.push_back(Monitor{static_cast<uint32_t>(i), s.monitor->modeSlot, s.monitor->inputPair,
+                                               s.monitor->armed});
+        }
     }
+    graph->monitorState_.reset(new MonitorState[std::max<std::size_t>(graph->monitors_.size(), 1)]());
 
     // T-045: lay out every step's MIDI output and merge storage in one allocation. A merge holds
     // everything its inputs can deliver in one block: an upstream writer's capacity, or a delay
@@ -398,9 +406,66 @@ MidiEventSpan RenderGraph::midiOutput(uint32_t step) const DAW_RT {
     return MidiEventSpan(s.midiOut, s.midiOut ? midiSizes_[step] : 0);
 }
 
-void RenderGraph::process(ProcessContext& ctx, ProcessContext& timeline) const DAW_RT {
+void RenderGraph::applyMonitor(uint32_t m, const ProcessContext& ctx, const MonitorInput& in,
+                               const AudioBufferView& out, uint32_t numFrames) const DAW_RT {
+    const Monitor& monitor = monitors_[m];
+    MonitorState& state = monitorState_[m];
+    if (!in.enabled) {
+        // No device input (an offline render): nothing is monitored, the clips play, and the next
+        // block with input starts without a fade.
+        state = MonitorState{};
+        return;
+    }
+    // REC-020: the mode from its slot, the transport's own state (not the MIX-023 look-ahead's).
+    const MonitoringMode mode = monitoringModeFromSlot(ctx.params.get(monitor.modeSlot));
+    const bool active = monitoringActive(mode, monitor.armed, ctx.transport.playing, ctx.transport.recording);
+    if (in.input == nullptr) {
+        // MIX-023 pre-roll: no input to give and no state to advance; an active step is silent so
+        // no clip audio reaches the chain's delay lines.
+        if (active)
+            for (uint32_t c = 0; c < out.numChannels; ++c)
+                std::memset(out.channels[c], 0, std::size_t{numFrames} * sizeof(float));
+        return;
+    }
+    state.active = active;
+    const float target = active ? 1.0f : 0.0f;
+    if (state.mix < 0.0f) state.mix = target;
+    if (state.mix == 0.0f && target == 0.0f) return;  // the clip player's output as it is
+
+    // REC-021: input channels 2·pair, 2·pair + 1 (silence for channels the device doesn't have).
+    const AudioBufferView& input = *in.input;
+    const float* src[2] = {nullptr, nullptr};
+    for (uint32_t c = 0; c < 2; ++c) {
+        const uint32_t ch = monitor.inputPair * 2 + c;
+        if (ch < input.numChannels && input.numFrames >= numFrames) src[c] = input.channels[ch];
+    }
+    const uint32_t channels = out.numChannels < 2 ? out.numChannels : 2;  // graph buffers are stereo
+    if (state.mix == 1.0f && target == 1.0f) {
+        for (uint32_t c = 0; c < channels; ++c) {
+            if (src[c] != nullptr)
+                std::memcpy(out.channels[c], src[c], std::size_t{numFrames} * sizeof(float));
+            else
+                std::memset(out.channels[c], 0, std::size_t{numFrames} * sizeof(float));
+        }
+        return;
+    }
+    // A switch: a linear crossfade over kMonitorFadeFrames (declick), then the new source.
+    constexpr float kStep = 1.0f / static_cast<float>(kMonitorFadeFrames);
+    float mix = state.mix;
+    for (uint32_t f = 0; f < numFrames; ++f) {
+        mix = target > mix ? std::min(target, mix + kStep) : std::max(target, mix - kStep);
+        for (uint32_t c = 0; c < channels; ++c) {
+            const float x = src[c] != nullptr ? src[c][f] : 0.0f;
+            out.channels[c][f] = (1.0f - mix) * out.channels[c][f] + mix * x;
+        }
+    }
+    state.mix = mix;
+}
+
+void RenderGraph::process(ProcessContext& ctx, ProcessContext& timeline, const MonitorInput& monitor) const DAW_RT {
     const uint32_t numFrames = ctx.numFrames;
     DAW_RT_ASSERT(numFrames <= maxBlock_ && timeline.numFrames == numFrames);
+    uint32_t nextMonitor = 0;  // monitors_ are in step order
     for (uint32_t i = 0; i < steps_.size(); ++i) {
         const Step& step = steps_[i];
         NodeIO io;
@@ -411,6 +476,8 @@ void RenderGraph::process(ProcessContext& ctx, ProcessContext& timeline) const D
         if (step.midiOut != nullptr) io.midiOut = MidiEventWriter(step.midiOut, step.midiCapacity);
         step.node->process(step.timeline ? timeline : ctx, io);
         if (step.midiOut != nullptr) midiSizes_[i] = io.midiOut.size();
+        if (nextMonitor < monitors_.size() && monitors_[nextMonitor].step == i)
+            applyMonitor(nextMonitor++, ctx, monitor, io.audioOut, numFrames);  // REC-021 (T-054)
         if (step.numFeeds > 0) feed(step, numFrames);
     }
 }

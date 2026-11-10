@@ -243,6 +243,12 @@ struct TelemetryPOD {
     // time) and the tracks armed for MIDI input (armMidiInput).
     uint64_t midiInputDrops = 0;
     uint32_t armedMidiTracks = 0;
+    // REC-021 (T-054): software monitoring latency in samples, what a monitored track adds from
+    // input to output: device input + device output latency + the graph latency (MIX-021 aligns
+    // every path into the master to it, so it is the PDC of the track's chain). 0 while no device
+    // runs. monitorInput: setMonitorInput's flag.
+    uint32_t monitoringLatency = 0;
+    bool monitorInput = false;
 };
 
 struct NodeLatencyPOD {
@@ -426,6 +432,10 @@ public:
         desc_.tempo.timeSigs.push_back(TimeSigDesc{tick, num, den});
     }
     void setMaster(NodeID master) { desc_.master = master; }
+    // REC-020..022 (T-054): an audio track's input monitoring (MonitorDesc).
+    void addMonitor(NodeID player, ParamID modeSlot, uint32_t inputPair, bool armed) {
+        desc_.monitors.push_back(MonitorDesc{player, modeSlot, inputPair, armed});
+    }
     void clear() { desc_ = GraphDescription{}; }
 
     // A copy: Swift can't hold a reference into the builder.
@@ -553,6 +563,18 @@ public:
     // Disabling keeps the range (or stores [in, out) for later when in < out). An enabled request
     // with in < 0 or in >= out is ignored, leaving punch as it was.
     void setPunch(bool enabled, Tick in, Tick out);
+
+    // MARK: Input monitoring (09, T-054; accepted (autobuild, see docs/autobuild/DECISIONS.md "T-054 contract"))
+    //
+    // REC-020..022: the graph's monitors (GraphDescription::monitors) say which clip players a
+    // device input pair can replace; each one's mode is a param slot, so SetMonitoring is a
+    // setParam (no rebuild), evaluated per block on the audio thread. Monitoring needs device
+    // input; offline renders (exports) never monitor and play the clips.
+
+    // DW-067 extension: the device's input also runs while `wanted` (the model sets it while an
+    // audio track's mode is `on`, which monitors without an arm). Turning input on or off restarts
+    // the driver, like arming.
+    void setMonitorInput(bool wanted);
 
     // MARK: MIDI input (09, T-053; accepted (autobuild, see docs/autobuild/DECISIONS.md))
     //
