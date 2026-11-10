@@ -84,15 +84,19 @@ public struct EngineGraph: Hashable, Sendable {
         public var firstParam: ParamID
         public var numParams: UInt32
         public var configJSON: String
+        /// PLUG-018 (T-064): the node's host-side bypass slot (`NodeDesc::bypassParam`); nil for
+        /// none. A device slot always has one, so bypassing it is a slot write, not a rebuild.
+        public var bypassParam: ParamID?
 
         public init(id: NodeIDValue, kind: NodeKind, configVersion: UInt32 = 0, firstParam: ParamID = 0,
-                    numParams: UInt32 = 0, configJSON: String = "") {
+                    numParams: UInt32 = 0, configJSON: String = "", bypassParam: ParamID? = nil) {
             self.id = id
             self.kind = kind
             self.configVersion = configVersion
             self.firstParam = firstParam
             self.numParams = numParams
             self.configJSON = configJSON
+            self.bypassParam = bypassParam
         }
     }
 

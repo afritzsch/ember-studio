@@ -299,7 +299,12 @@ public final class EngineClient: EngineProtocol {
     static func description(for graph: EngineGraph) -> daw.GraphDescription {
         var builder = daw.GraphDescriptionBuilder()
         for n in graph.nodes {
-            builder.addNode(n.id, cxx(n.kind), n.configVersion, n.firstParam, n.numParams, std.string(n.configJSON))
+            if let bypass = n.bypassParam {  // PLUG-018 (T-064)
+                builder.addBypassableNode(n.id, cxx(n.kind), n.configVersion, n.firstParam, n.numParams,
+                                          std.string(n.configJSON), bypass)
+            } else {
+                builder.addNode(n.id, cxx(n.kind), n.configVersion, n.firstParam, n.numParams, std.string(n.configJSON))
+            }
         }
         for e in graph.edges {
             let kind: daw.EdgeKind = switch e.kind {
