@@ -8,6 +8,8 @@ namespace daw {
 
 void GainNode::prepare(const PrepareInfo&) { primed_ = false; }
 
+void GainNode::reset() DAW_RT { primed_ = false; }  // DW-063
+
 void GainNode::process(ProcessContext& ctx, NodeIO& io) DAW_RT {
     passThrough(io);
     const AudioBufferView& out = io.audioOut;

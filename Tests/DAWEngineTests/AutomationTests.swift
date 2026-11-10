@@ -19,6 +19,9 @@ struct AutomationTests {
     @Test("AUTO-003: a loop wrap inside a block jumps at the wrap frame (strip and gain node), no ramp across it")
     func loopWrapJump() { expectPasses(daw.testing.automationLoopWrapJump()) }
 
+    @Test("DW-125, AUTO-003: a loop shorter than the block: automation per engine pass, the side channel holds each pass's wrap value")
+    func shortLoopPasses() { expectPasses(daw.testing.automationShortLoopPasses()) }
+
     @Test("AUTO-008, AUTO-009: AUDelay param lanes map through the AU's ranges and reach the AU as parameter events")
     func auParam() { expectPasses(daw.testing.automationAUParam()) }
 }

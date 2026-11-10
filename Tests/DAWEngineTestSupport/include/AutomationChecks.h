@@ -37,4 +37,10 @@ CheckResult automationLoopWrapJump();
 // parameters' own ranges and reach the AU as render-thread parameter events (PLUG-015).
 CheckResult automationAUParam();
 
+// DW-125 + AUTO-003 (T-089): with a loop shorter than the block, automation is evaluated per
+// engine pass; each pass's after-wrap side channel holds the lane at that pass's one wrap (the
+// loop start), and strip and gain nodes ramp, then jump there, in every pass (checked per frame
+// against an oracle of the passes and the smoother).
+CheckResult automationShortLoopPasses();
+
 } // namespace daw::testing

@@ -20,16 +20,14 @@ namespace {
 bool validSeconds(double s) { return std::isfinite(s) && s >= 0; }
 
 // T-036 (ExportSpec::followLoop): where the transport starts its next block after `numFrames`
-// of playback from `pos`, by Transport::layOut's rule (03 "Transport semantics"): it wraps only
-// when it crosses the loop end from before it, and a loop shorter than the rest of a block plays
-// once and leaves the frames after it silent (TIME-005: two segments at most).
+// of playback from `pos`, by Transport's rule (03 "Transport semantics"): it wraps only when it
+// crosses the loop end from before it, and then as often as the block's frames reach the loop
+// end again (DW-125: a loop shorter than a block wraps several times in it).
 SamplePos nextLoopedStart(SamplePos pos, uint32_t numFrames, bool looping, SamplePos loopStart,
                           SamplePos loopEnd) {
     const SamplePos end = pos + numFrames;
     if (!looping || pos >= loopEnd || end < loopEnd) return end;
-    const SamplePos rest = end - loopEnd;
-    const SamplePos next = loopStart + std::min(rest, loopEnd - loopStart);
-    return next == loopEnd ? loopStart : next;
+    return loopStart + (end - loopEnd) % (loopEnd - loopStart);
 }
 
 // T-082 (ExportSpec::normalize): the rendered export as interleaved float32 in an anonymous temp
@@ -173,6 +171,9 @@ Result<void> OfflineDriver::render(Engine& engine, Tick from, Tick to, const Exp
         if (!((spec.followLoop || transport.setLoop(false, before.loopStart, before.loopEnd)) &&
               transport.play() && transport.locate(from)))
             failure = makeError(ErrorCode::internal, "offline render: transport command queue full");
+        // DW-063 (T-089): and every node starts from a clean state, effect tails included, so
+        // renders on one engine are bit-identical whatever played before (IO-011).
+        engine.resetAllNodesBeforeNextBlock();
     }
 
     // IO-010: fixed-size blocks back to back, as fast as possible. The last block is rendered in

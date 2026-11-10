@@ -26,6 +26,8 @@ bool switchOn(float value) DAW_RT { return value >= 0.5f; }
 ChannelStrip::ChannelStrip(ParamID firstParam, MeterTarget meter)
     : firstParam_(firstParam), meter_(meter) {}
 
+void ChannelStrip::reset() DAW_RT { primed_ = false; }  // DW-063 (the meter window is telemetry only)
+
 void ChannelStrip::prepare(const PrepareInfo& info) {
     window_.prepare(info.sampleRate);
     primed_ = false;

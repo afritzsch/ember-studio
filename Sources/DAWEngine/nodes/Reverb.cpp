@@ -95,6 +95,17 @@ void Reverb::prepare(const PrepareInfo& info) {
     primed_ = false;
 }
 
+void Reverb::reset() DAW_RT {
+    // DW-063: prepare()'s state without allocating (the buffers keep their size).
+    std::fill(lines_.begin(), lines_.end(), 0.0f);
+    std::fill(pre_.begin(), pre_.end(), 0.0f);
+    lineWrite_ = 0;
+    preWrite_ = 0;
+    damp_.fill(0.0f);
+    size_ = -1.0f;
+    primed_ = false;
+}
+
 bool Reverb::isSilent() const {
     auto zero = [](float x) { return x == 0.0f; };
     return std::all_of(lines_.begin(), lines_.end(), zero) && std::all_of(pre_.begin(), pre_.end(), zero) &&

@@ -7,6 +7,14 @@
 // laid out on the timeline as at most two segments, split where the loop wraps. Timeline nodes
 // walk them with the helpers in TransportSegments.h (TIME-006).
 //
+// Loops shorter than a block (DW-125, T-089): a block may wrap more than once. The contract
+// block holds two segments, so such a block is laid out in *passes*: advance() (beginBlock() +
+// layOutPass()) lays out the first pass, which ends where the loop would wrap a second time, and
+// the caller lays out the rest of the block with further layOutPass() calls. Each pass has at
+// most one wrap inside it (plus possibly one right at its start), so every pass of the loop gets
+// its own segment and nothing is left out. Engine::render renders the graph once per pass
+// (Engine.h); passFrames() says how many frames the last pass covers.
+//
 // Threads:
 //   - Commands (play, stop, locate, setLoop, setRecording): any number of non-RT threads. They
 //     serialize on a producer-side mutex, so the SpscQueue behind them always has exactly one
@@ -15,9 +23,12 @@
 //   - playhead(): any non-RT thread (UI readout, facade).
 //   - advance() and the RT accessors: the audio thread only, one block at a time.
 //
-// Positions: samplePos is the source of truth, so the playhead stays where it is in samples when
-// a new tempo map arrives. Ticks (locate targets, loop points) are converted through the tempo
-// map of the block they are applied in, so the loop follows tempo edits (TIME-003).
+// Positions: samplePos is where the next block starts. A new tempo map (a tempo edit or a
+// session-rate change, TIME-003) keeps the playhead's musical position, not its sample (DW-061,
+// T-089): every block start re-anchors samplePos at the tick (and the same fraction of it) it had
+// under the map of the block before, stopped or playing. With an unchanged map that is exactly
+// the same sample. Ticks (locate targets, loop points) are converted through the tempo map of
+// the block they are applied in, so the loop follows tempo edits too.
 
 #include <atomic>
 #include <cstdint>
@@ -84,11 +95,28 @@ public:
     // Diagnostics: commands applied so far.
     uint64_t commandsApplied() const { return commandsApplied_.load(std::memory_order_relaxed); }
 
-    // RT, audio thread. ENG-041 "advance transport": applies queued commands, lays out the next
-    // `numFrames` frames (TIME-005), advances samplePos and publishes the playhead. `tempo` is
-    // the current graph's map (TIME-003); the returned block points at it and is valid until the
-    // next advance().
+    // RT, audio thread. ENG-041 "advance transport": beginBlock() then layOutPass(numFrames).
+    // The block covers passFrames() of the `numFrames` frames: all of them unless the loop wraps
+    // twice in them (DW-125), in which case the caller lays out the rest with layOutPass().
+    // `tempo` is the current graph's map (TIME-003); the returned block points at it and is
+    // valid until the next layout.
     const TransportBlock& advance(const TempoMap& tempo, uint32_t numFrames) DAW_RT;
+
+    // RT, audio thread: the start of a block. Re-anchors the position on `tempo` (DW-061),
+    // applies queued commands (TIME-004) and publishes the playhead (TIME-009). Call it once per
+    // block, then layOutPass() until the block's frames are laid out.
+    void beginBlock(const TempoMap& tempo) DAW_RT;
+    // RT, audio thread: lays out the next pass of the block, up to `maxFrames` frames from
+    // samplePos (TIME-005), and advances samplePos past it. A pass ends early only where the loop
+    // would wrap a second time, so it has at most two segments, and it covers at least one frame
+    // when maxFrames > 0. Stopped, it covers all maxFrames (with no segments).
+    const TransportBlock& layOutPass(const TempoMap& tempo, uint32_t maxFrames) DAW_RT;
+    // RT, audio thread: the frames the last layOutPass()/advance() covered.
+    uint32_t passFrames() const DAW_RT { return passFrames_; }
+    // RT, audio thread: shifts the last pass's frame offsets by `offset`, so that after a block
+    // of several passes block() describes the last pass in the block's own frame numbering (for
+    // readers after render, e.g. the recorder). Engine::render calls it after the last pass.
+    void offsetLastPass(uint32_t offset) DAW_RT;
 
     // RT, audio thread: about the last advance().
     const TransportBlock& block() const DAW_RT { return block_; }
@@ -108,7 +136,8 @@ public:
 private:
     bool push(const TransportCmd& cmd);
     void apply(const TransportCmd& cmd, const TempoMap& tempo) DAW_RT;
-    void layOut(const TempoMap& tempo, uint32_t numFrames) DAW_RT;
+    void reanchor(const TempoMap& tempo) DAW_RT;
+    void anchor(const TempoMap& tempo) DAW_RT;
     void publishPlayhead(const TempoMap& tempo) DAW_RT;
 
     // Producers.
@@ -129,6 +158,15 @@ private:
     Tick wrapTick_ = 0;  // loop start tick of the last wrap
     bool locatedWhilePlaying_ = false;
     TransportBlock block_{};
+    uint32_t passFrames_ = 0;
+
+    // DW-061: the position as a tick, the samples past that tick's sample, and the samples per
+    // tick there, as of the last layout (so under the map of the block before). The next block
+    // start puts samplePos back on that tick under its own map. No anchor before the first block.
+    bool anchored_ = false;
+    Tick anchorTick_ = 0;
+    SamplePos anchorOffset_ = 0;
+    double anchorSamplesPerTick_ = 0;
 
     // TIME-009 latency compensation: the current stretch of uninterrupted playback started at
     // runStart_, either by play/locate or by a loop wrap from runLoopEnd_ back to runStart_.

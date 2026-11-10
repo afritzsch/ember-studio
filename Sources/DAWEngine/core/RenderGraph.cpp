@@ -79,6 +79,11 @@ void DelayLine::process(const AudioBufferView& in, const AudioBufferView& out, u
     write_ += numFrames;
 }
 
+void DelayLine::clear() DAW_RT {
+    std::memset(samples_.get(), 0, std::size_t{numChannels_} * (mask_ + 1) * sizeof(float));
+    write_ = 0;
+}
+
 // MARK: MidiDelayLine (T-045, MIX-021 for MIDI)
 
 namespace {
@@ -173,6 +178,15 @@ void MidiDelayLine::drain(uint32_t numFrames) DAW_RT {
         head_ = (head_ + 1) & mask_;
         --count_;
     }
+}
+
+void MidiDelayLine::clear() DAW_RT {
+    head_ = count_ = numOut_ = 0;
+    now_ = lastDue_ = 0;
+    lastOutFrame_ = 0;
+    numHeld_ = numPedals_ = 0;
+    std::memset(held_.get(), 0, std::size_t{16} * 128 * sizeof(uint16_t));
+    for (bool& down : pedal_) down = false;
 }
 
 MidiEventSpan MidiDelayLine::process(MidiEventSpan in, uint32_t delay, uint32_t numFrames) DAW_RT {
@@ -486,6 +500,13 @@ void RenderGraph::process(ProcessContext& ctx, ProcessContext& timeline, const M
 void RenderGraph::resetTimelineNodes() const DAW_RT {
     for (const Step& step : steps_)
         if (step.resetOnLocate) step.node->reset();
+}
+
+void RenderGraph::resetAllNodes() const DAW_RT {
+    for (const Step& step : steps_) step.node->reset();
+    for (const auto& line : lines_) line->clear();
+    for (const auto& line : midiLines_) line->clear();
+    for (std::size_t i = 0; i < monitors_.size(); ++i) monitorState_[i] = MonitorState{};
 }
 
 AudioBufferView RenderGraph::master(uint32_t numFrames) const DAW_RT {

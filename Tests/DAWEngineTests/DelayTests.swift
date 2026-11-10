@@ -17,7 +17,7 @@ struct DelayTests {
     @Test("DSP-032: echoes at k·T with feedback decay; ping-pong; ms and synced times; lowpass in the loop; mix; time change crossfades without click or pitch bend")
     func response() { expectPasses(daw.testing.delayResponse()) }
 
-    @Test("DSP-040, ENG-004: block-size fuzz bit-exact, silence → exact 0 after the tail (no denormals), NaN/Inf guard, echoes without input / across reset, RT trap 0")
+    @Test("DSP-040, ENG-004: block-size fuzz bit-exact, silence → exact 0 after the tail (no denormals), NaN/Inf guard, echoes without input, cleared by reset (DW-063), RT trap 0")
     func robustness() { expectPasses(daw.testing.delayRobustness()) }
 
     @Test("DSP-032, TIME-008, DW-162: registered NodeKind::delay through the Engine matches the node; a locate keeps the echoes; a tempo change crossfades the synced time")

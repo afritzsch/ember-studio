@@ -17,7 +17,7 @@ struct ReverbTests {
     @Test("DSP-033: first arrival = pre-delay + shortest line; LF RT60 = decay; damping; L/R decorrelated; mix; mono input")
     func response() { expectPasses(daw.testing.reverbResponse()) }
 
-    @Test("DSP-040, ENG-004: block-size fuzz bit-exact, silence → exact 0 after the tail (no denormals), NaN/Inf guard, tail without input / across reset, RT trap 0")
+    @Test("DSP-040, ENG-004: block-size fuzz bit-exact, silence → exact 0 after the tail (no denormals), NaN/Inf guard, tail without input, cleared by reset (DW-063), RT trap 0")
     func robustness() { expectPasses(daw.testing.reverbRobustness()) }
 
     @Test("DSP-033, IO-011, TIME-008: registered NodeKind::reverb through the Engine matches the node; two engines bit-identical; locate keeps the tail")

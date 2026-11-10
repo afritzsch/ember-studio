@@ -31,6 +31,12 @@ struct TransportSegmentTests {
 
     @Test("TIME-005: past the loop end, loop toggled mid-play, loop shorter than a block, sub-sample ticks")
     func edgeCases() { expectPasses(daw.testing.transportLoopEdgeCases()) }
+
+    @Test("DW-125: loops shorter than a block are laid out in passes of at most two segments, no gap")
+    func shortLoopPasses() { expectPasses(daw.testing.transportShortLoopPasses()) }
+
+    @Test("DW-125: through the Engine, every event of a short loop plays on every pass")
+    func shortLoopThroughEngine() { expectPasses(daw.testing.engineShortLoopTimelineNode()) }
 }
 
 @Suite("Timeline nodes (TIME-006)")
@@ -49,6 +55,9 @@ struct TransportTempoTests {
 
     @Test("TIME-003: each block uses the tempo map it is given; loop and locate resolve through it")
     func mapPerBlock() { expectPasses(daw.testing.tempoMapPerBlock()) }
+
+    @Test("DW-061: a tempo edit keeps the playhead's tick, stopped and playing; the loop follows its ticks")
+    func tempoEditKeepsTick() { expectPasses(daw.testing.tempoEditKeepsTick()) }
 
     @Test("TIME-003, ENG-041: Engine::render hands nodes the block, pointing at the current graph's tempo map")
     func engineBlock() { expectPasses(daw.testing.engineHandsNodesTheTransportBlock()) }

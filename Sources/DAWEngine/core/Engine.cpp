@@ -88,6 +88,15 @@ TransportBlock layOut(const TransportBlock& like, const TempoMap& tempo, Ahead f
     return block;
 }
 
+// DW-125: how many frames from `from` a pass can cover with at most one wrap inside it: to the
+// loop end, then one whole loop. Unlimited when it doesn't wrap.
+uint32_t framesToSecondWrap(Ahead from, const Loop& loop) DAW_RT {
+    constexpr uint32_t kUnlimited = 0xFFFF'FFFFu;
+    if (!loop.on || from.pos >= loop.end) return kUnlimited;
+    const SamplePos frames = (loop.end - from.pos) + (loop.end - loop.start);
+    return frames < SamplePos{kUnlimited} ? static_cast<uint32_t>(frames) : kUnlimited;
+}
+
 } // namespace
 
 Engine::Engine() {
@@ -133,51 +142,7 @@ void Engine::render(RenderTarget& target, uint32_t numFrames) DAW_RT {
         silence(out, n);  // ENG-015
         if (liveMidi_ != nullptr) liveMidi_->idleBlock(n, cycleHostTicks);  // inputs keep draining
     } else {
-        // ENG-041 "advance transport": queued commands apply from this block's first frame
-        // (TIME-004), then the block is laid out on the timeline (TIME-005) with the map this
-        // graph was built with (TIME-003), so a tempo edit takes effect with its snapshot.
-        const TransportBlock& block = transport_.advance(graph->tempoMap(), n);
-        // TIME-008: a locate while playing resets the timeline nodes (clip and MIDI players), so
-        // they drop voices and tails from the old position; effects keep their tails. Loop wraps
-        // don't reset: they can fall mid-block, and nodes handle them per segment (TIME-006).
-        if (transport_.locatedWhilePlaying()) graph->resetTimelineNodes();
-
-        // AUTO-002/003/005 (T-074): automation writes this block's values into the param slots
-        // before anything renders, the pre-roll included. It follows the transport's own block,
-        // not the MIX-023 look-ahead: automation isn't latency compensated (AUTO-010, MIX-025).
-        params_.beginBlock();
-        if (AutomationSet* automation = graph->automation()) automation->apply(block, params_);
-
-        // MIX-023: timeline nodes run graph->latency() samples ahead, and a new run of playback
-        // is pre-rolled first (Engine.h).
-        const uint32_t latency = graph->latency();
-        // REC-021 (T-054): monitored tracks hear the device input, when the block has any.
-        const bool monitorEnabled = !target.input.empty();
-        if (!block.playing || transport_.locatedWhilePlaying()) runPrerolled_ = false;
-        if (block.numSegments > 0 && !runPrerolled_) {
-            if (latency > 0) preRoll(*graph, block, monitorEnabled);
-            runPrerolled_ = true;
-        }
-        TransportBlock ahead = block;
-        if (latency > 0 && block.numSegments > 0) {
-            const Loop loop = loopOf(transport_, graph->tempoMap());
-            ahead = layOut(block, graph->tempoMap(), advance(blockStartSample(block), latency, loop), n, loop);
-        }
-        ProcessContext ctx{n, graph->sampleRate(), block, params_};
-        ProcessContext timeline{n, graph->sampleRate(), ahead, params_};
-        // REC-011: after the pre-roll, whose chunks are rendered and thrown away.
-        if (liveMidi_ != nullptr) liveMidi_->beginBlock(transport_, n, graph->sampleRate(), cycleHostTicks);
-        graph->process(ctx, timeline, MonitorInput{monitorEnabled, &target.input});
-        if (liveMidi_ != nullptr) liveMidi_->endBlock();
-
-        // ENG-041: write master to the target.
-        const AudioBufferView master = graph->master(n);
-        for (uint32_t c = 0; c < out.numChannels; ++c) {
-            if (c < master.numChannels)
-                std::memcpy(out.channels[c], master.channels[c], std::size_t{n} * sizeof(float));
-            else
-                std::memset(out.channels[c], 0, std::size_t{n} * sizeof(float));
-        }
+        renderGraph(*graph, target, n, cycleHostTicks);
     }
 
     // ENG-050, MIX-020/023: per-node latencies and the graph latency of the graph being heard,
@@ -210,9 +175,100 @@ void Engine::render(RenderTarget& target, uint32_t numFrames) DAW_RT {
     renderEpoch_.store(epoch + 2, std::memory_order_seq_cst);
 }
 
+void Engine::renderGraph(const RenderGraph& graph, RenderTarget& target, uint32_t n,
+                         uint64_t cycleHostTicks) DAW_RT {
+    const AudioBufferView& out = target.output;
+    const TempoMap& tempo = graph.tempoMap();
+    // ENG-041 "advance transport": the position follows this graph's map (DW-061), queued
+    // commands apply from this block's first frame (TIME-004), with the map this graph was built
+    // with (TIME-003), so a tempo edit takes effect with its snapshot.
+    transport_.beginBlock(tempo);
+    // TIME-008: a locate while playing resets the timeline nodes (clip and MIDI players), so
+    // they drop voices and tails from the old position; effects keep their tails. Loop wraps
+    // don't reset: they can fall mid-block, and nodes handle them per segment (TIME-006).
+    // DW-063 (T-089): an offline render resets every node (and the graph's PDC lines) before
+    // its first block instead, so renders on one engine don't depend on what played before.
+    // Each node is reset once either way.
+    const bool located = transport_.locatedWhilePlaying();
+    if (resetAllPending_.exchange(false, std::memory_order_acq_rel)) graph.resetAllNodes();
+    else if (located) graph.resetTimelineNodes();
+
+    // MIX-023: timeline nodes run graph.latency() samples ahead, and a new run of playback is
+    // pre-rolled first (Engine.h).
+    const uint32_t latency = graph.latency();
+    const Loop loop = loopOf(transport_, tempo);
+    // REC-021 (T-054): monitored tracks hear the device input, when the block has any.
+    const bool monitorEnabled = !target.input.empty();
+
+    // DW-125: the block in passes of at most one loop wrap each (Engine.h), so every node sees
+    // at most two segments however short the loop is. Almost always one pass covering the whole
+    // block. CONV-RT-04: each pass covers at least one frame, so there are at most n passes.
+    float* inPass[kMaxPassChannels];
+    uint32_t done = 0, lastOffset = 0;
+    do {
+        uint32_t limit = n - done;
+        // MIX-023: the look-ahead block for the pass must fit two segments as well.
+        if (latency > 0 && transport_.playing()) {
+            const uint32_t ahead = framesToSecondWrap(advance(transport_.samplePos(), latency, loop), loop);
+            if (ahead < limit) limit = ahead;
+        }
+        const TransportBlock& block = transport_.layOutPass(tempo, limit);
+        const uint32_t frames = transport_.passFrames();
+
+        // AUTO-002/003/005 (T-074): automation writes this pass's values into the param slots
+        // before anything renders, the pre-roll included. It follows the transport's own block,
+        // not the MIX-023 look-ahead: automation isn't latency compensated (AUTO-010, MIX-025).
+        // A pass has at most one wrap, so the after-wrap side channel holds that wrap's value.
+        params_.beginBlock();
+        if (AutomationSet* automation = graph.automation()) automation->apply(block, params_);
+
+        if (done == 0) {
+            if (!block.playing || located) runPrerolled_ = false;
+            if (block.numSegments > 0 && !runPrerolled_) {
+                if (latency > 0) preRoll(graph, block, monitorEnabled);
+                runPrerolled_ = true;
+            }
+        }
+        TransportBlock ahead = block;
+        if (latency > 0 && block.numSegments > 0)
+            ahead = layOut(block, tempo, advance(blockStartSample(block), latency, loop), frames, loop);
+        ProcessContext ctx{frames, graph.sampleRate(), block, params_};
+        ProcessContext timeline{frames, graph.sampleRate(), ahead, params_};
+
+        // REC-021: the pass's frames of the device input.
+        AudioBufferView input = target.input;
+        if (done > 0 || frames != n) {
+            const uint32_t channels = input.numChannels < kMaxPassChannels ? input.numChannels : kMaxPassChannels;
+            for (uint32_t c = 0; c < channels; ++c) inPass[c] = input.channels[c] + done;
+            input = AudioBufferView{inPass, channels, input.empty() ? 0 : frames};
+            if (channels == 0) input = AudioBufferView{};
+        }
+        // REC-011: after the pre-roll, whose chunks are rendered and thrown away. A pass is a
+        // block to live MIDI input; only the first one starts the device cycle.
+        if (liveMidi_ != nullptr)
+            liveMidi_->beginBlock(transport_, frames, graph.sampleRate(), done == 0 ? cycleHostTicks : 0);
+        graph.process(ctx, timeline, MonitorInput{monitorEnabled, &input});
+        if (liveMidi_ != nullptr) liveMidi_->endBlock();
+
+        // ENG-041: write master to the target.
+        const AudioBufferView master = graph.master(frames);
+        for (uint32_t c = 0; c < out.numChannels; ++c) {
+            if (c < master.numChannels)
+                std::memcpy(out.channels[c] + done, master.channels[c], std::size_t{frames} * sizeof(float));
+            else
+                std::memset(out.channels[c] + done, 0, std::size_t{frames} * sizeof(float));
+        }
+        lastOffset = done;
+        done += frames;
+    } while (done < n);
+    // After several passes, block() reads as the last one in the block's own frames (Recorder).
+    if (lastOffset > 0) transport_.offsetLastPass(lastOffset);
+}
+
 void Engine::preRoll(const RenderGraph& graph, const TransportBlock& block, bool monitorEnabled) DAW_RT {
-    // MIX-023: L frames before the block, chunked to the graph's maxBlock (CONV-RT-04: bounded
-    // by latency / maxBlock). Timeline nodes play [p, p + L) on the transport's loop; the others
+    // MIX-023: L frames before the block, chunked to the graph's maxBlock and, for a loop shorter
+    // than that, to at most one wrap per chunk (CONV-RT-04: bounded by latency, each chunk ≥ 1
+    // frame). Timeline nodes play [p, p + L) on the transport's loop; the others
     // see a straight run of the L frames before p. The master output is dropped.
     const TempoMap& tempo = graph.tempoMap();
     const Loop loop = loopOf(transport_, tempo);
@@ -221,10 +277,14 @@ void Engine::preRoll(const RenderGraph& graph, const TransportBlock& block, bool
     const SamplePos start = blockStartSample(block);
     for (uint32_t done = 0; done < latency;) {
         const uint32_t remaining = latency - done;
-        const uint32_t n = remaining < graph.maxBlock() ? remaining : graph.maxBlock();
+        uint32_t n = remaining < graph.maxBlock() ? remaining : graph.maxBlock();
+        // DW-125: a chunk's look-ahead block must fit two segments too (a loop shorter than it).
+        const Ahead from = advance(start, done, loop);
+        const uint32_t wrapLimit = framesToSecondWrap(from, loop);
+        if (wrapLimit < n) n = wrapLimit;
         const TransportBlock before =
             layOut(block, tempo, {start - static_cast<SamplePos>(latency - done), false}, n, straight);
-        const TransportBlock ahead = layOut(block, tempo, advance(start, done, loop), n, loop);
+        const TransportBlock ahead = layOut(block, tempo, from, n, loop);
         ProcessContext ctx{n, graph.sampleRate(), before, params_};
         ProcessContext timeline{n, graph.sampleRate(), ahead, params_};
         // REC-021 (T-054): monitored tracks pre-roll silence (no input to give, no clip to leak).

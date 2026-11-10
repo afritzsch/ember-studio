@@ -25,7 +25,7 @@ CheckResult delayResponse();
 
 // DSP-040, ENG-004, TIME-008: block-size fuzz (random sizes 0 … 4096 match one fixed size bit for
 // bit), silence in → exactly 0 out after the tail (no denormals), NaN/Inf guard, echoes ring on
-// without an input and across reset(), channels beyond stereo silent.
+// without an input, cleared by reset() (DW-063), channels beyond stereo silent.
 CheckResult delayRobustness();
 
 // DSP-032, TIME-008, DW-162: NodeKind::delay through registerBuiltinNodes, GraphBuilder and the

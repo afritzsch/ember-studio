@@ -57,8 +57,8 @@
 // Delay memory is allocated in prepare() for the longest lines (size 1) and pre-delay (200 ms) at
 // the session rate; process() never allocates. Latency 0: the pre-delay is part of the effect.
 //
-// reset() keeps the tail: an effect keeps running across a locate (TIME-008), like the
-// compressor.
+// The engine never resets an effect on a locate, so the tail keeps running across one (TIME-008).
+// reset() clears it; only offline renders call it, before their first block (DW-063).
 
 #include <array>
 #include <atomic>
@@ -121,6 +121,10 @@ public:
         : firstParam_(firstParam), numParams_(numParams), telemetry_(telemetry) {}
 
     void prepare(const PrepareInfo& info) override;
+    // DW-063 (T-089): back to the state prepare() leaves (no tail, first block jumps to the
+    // slot values). Only offline renders reset every node; a live locate never resets an effect
+    // (TIME-008), so tails survive it.
+    void reset() DAW_RT override;
     void process(ProcessContext& ctx, NodeIO& io) DAW_RT override;
 
     // Blocks silenced by the NaN guard since construction. Any thread.

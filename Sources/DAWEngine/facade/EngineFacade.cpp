@@ -306,6 +306,9 @@ struct EngineFacade::Impl {
     uint64_t lastXruns = 0;
 
     bool exportRunning = false;  // an OfflineDriver render is using the engine
+    // IO-033 (T-089 change of T-056): a play() that came while assets re-convert. The transport
+    // starts when the pass finishes (finishAssetReload); stop() and a device stop cancel it.
+    bool playPending = false;
     bool exportActive = false;   // daw.export has taken a request and not finished it
     struct ExportRequest {
         JobID job;
@@ -649,6 +652,7 @@ void EngineFacade::Impl::pushStartFailed(const Error& error) {
 }
 
 void EngineFacade::Impl::stopForDeviceChange() {
+    playPending = false;  // IO-021 (1): stop means a queued play too (IO-033, T-089)
     (void)engine.transport().stop();
     if (engine.transport().playhead().recording) (void)engine.transport().setRecording(false);  // 09
     finalizeRecording();  // IO-021 (2), DW-119
@@ -822,6 +826,13 @@ void EngineFacade::Impl::finishAssetReload() {
     }
     pushReload(AssetsReloadPhase::finished, 0, std::move(error));
     reloadDone.notify_all();
+    // IO-033 (T-089): a play() queued during the pass starts now, on the new assets.
+    if (playPending) {
+        playPending = false;
+        prepareRecording();  // REC-001: armed tracks have their FIFOs before the first block
+        (void)engine.transport().play();
+        applyTransportCommands();
+    }
 }
 
 GraphCompiler::Status EngineFacade::Impl::compilerStatus() const {
@@ -1216,7 +1227,12 @@ float EngineFacade::getParam(ParamID id) const {
 
 void EngineFacade::play() {
     std::lock_guard lock(impl_->mutex);
-    if (impl_->reloader.active()) return;  // IO-033 (T-056): refused while assets re-convert
+    // IO-033 (T-089, a change of T-056): while assets re-convert, play is queued, not refused.
+    // The transport starts when the pass finishes (finishAssetReload); stop() cancels it.
+    if (impl_->reloader.active()) {
+        impl_->playPending = true;
+        return;
+    }
     impl_->prepareRecording();  // REC-001: armed tracks have their FIFOs before the first block
     (void)impl_->engine.transport().play();
     impl_->applyTransportCommands();
@@ -1225,6 +1241,7 @@ void EngineFacade::play() {
 void EngineFacade::stop() {
     std::lock_guard lock(impl_->mutex);
     impl_->previewInbox.releaseAll();  // UI-021: no preview note outlives a stop
+    impl_->playPending = false;  // IO-033 (T-089): a stop cancels a queued play
     (void)impl_->engine.transport().stop();
     impl_->applyTransportCommands();
     impl_->finalizeRecording();  // REC-004
@@ -1310,6 +1327,7 @@ TransportPOD EngineFacade::transport() const {
     out.punchEnabled = punch.enabled;
     out.punchIn = punch.in;
     out.punchOut = punch.out;
+    out.playPending = impl_->playPending;  // IO-033 (T-089)
     return out;
 }
 

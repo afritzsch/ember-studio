@@ -28,6 +28,24 @@
 //     players' wrap crossfade softens it.
 //   - Automation and param changes aren't compensated (MIX-025): they apply when the block
 //     renders, so a param on a node behind L samples of latency is heard L samples early.
+//
+// Loops shorter than a block (DW-125, T-089). A block may wrap the loop several times, but a
+// TransportBlock holds two segments (03 Interfaces). So render() runs the graph once per
+// *pass*: a stretch of the block with at most one wrap inside it, for the transport's block and
+// for the MIX-023 look-ahead block alike (Transport::layOutPass). Every node then sees at most
+// two segments, and each pass of the loop gets its own segment. Almost every block is a single
+// pass; only a loop shorter than the block splits it, at most into one pass per frame. Per pass:
+// automation is evaluated (so its after-wrap side channel, AUTO-003, holds the value after that
+// pass's one wrap), the graph runs on the pass's frames of the output and input, and live MIDI
+// input sees a block of its own. Per block: commands, the TIME-008 locate reset, the MIX-023
+// pre-roll, telemetry and the epoch. After the block, Transport::block() describes its last pass
+// in the block's frame numbering (the recorder reads it after render).
+//
+// Offline renders reset everything first (DW-063, T-089): resetAllNodesBeforeNextBlock() makes
+// the next block call reset() on every node of the graph and clear its PDC lines
+// (RenderGraph::resetAllNodes), so two renders on one engine are bit-identical whatever played
+// before. Live playback keeps TIME-008: a locate resets timeline nodes only and effects keep
+// their tails.
 
 #include <atomic>
 #include <cstdint>
@@ -76,6 +94,13 @@ public:
     Transport& transport() { return transport_; }
     const Transport& transport() const { return transport_; }
 
+    // DW-063 (T-089), any thread: the next block that renders a graph first resets every node of
+    // it (RenderGraph::resetAllNodes). OfflineDriver calls it before an export's first block.
+    void resetAllNodesBeforeNextBlock() { resetAllPending_.store(true, std::memory_order_release); }
+
+    // DW-125: channels of the device input a block split into passes can hand the graph.
+    static constexpr uint32_t kMaxPassChannels = 64;
+
     // REC-010/011 (T-053), non-RT, before anything renders: where live MIDI input comes from.
     void setLiveMidiInput(LiveMidiInput* input) { liveMidi_ = input; }
     // RT, the render thread: the host time this device IO cycle started at, for the next block's
@@ -114,6 +139,10 @@ private:
     uint64_t latencySerial_ = 0;
     bool runPrerolled_ = false;
     void preRoll(const RenderGraph& graph, const TransportBlock& block, bool monitorEnabled) DAW_RT;
+    // ENG-041 from "advance transport" to "write master", pass by pass (DW-125).
+    void renderGraph(const RenderGraph& graph, RenderTarget& target, uint32_t n, uint64_t cycleHostTicks) DAW_RT;
+    // DW-063: set by resetAllNodesBeforeNextBlock(), taken by the next block.
+    std::atomic<bool> resetAllPending_{false};
     // REC-010/011 (T-053). Set before rendering starts; the ticks are render thread only.
     LiveMidiInput* liveMidi_ = nullptr;
     uint64_t cycleHostTicks_ = 0;

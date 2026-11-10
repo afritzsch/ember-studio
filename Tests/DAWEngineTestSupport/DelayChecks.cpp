@@ -625,8 +625,10 @@ CheckResult delayRobustness() {
         violations += rig.violations + fresh.violations;
     }
 
-    // Without an input (no channels) the echoes ring on, as with silence; reset() (a locate,
-    // TIME-008) keeps them; channels beyond stereo are silent.
+    // Without an input (no channels) the echoes ring on, as with silence; channels beyond stereo
+    // are silent. DW-063 (T-089): reset() clears the echoes. Only offline renders call it, before
+    // their first block; a live locate never resets an effect, so echoes survive it (TIME-008,
+    // OfflineResetChecks).
     {
         const Signal click = impulse(512);
         const Signal zeros(512, 0.0f);
@@ -644,7 +646,13 @@ CheckResult delayRobustness() {
         }
         DAW_CHECK(!allZero(a.left, 512) && !allZero(a.right, 512));
         DAW_CHECK(a.left == b.left && a.right == b.right);
-        DAW_CHECK(a.left == c.left && a.right == c.right);
+        // c is a up to the reset (the click block and 10 more), then silent, while a still rings.
+        const size_t at = 512 * 11;
+        DAW_CHECK(c.left.size() == a.left.size() && c.right.size() == a.right.size());
+        DAW_CHECK(std::equal(c.left.begin(), c.left.begin() + at, a.left.begin()) &&
+                  std::equal(c.right.begin(), c.right.begin() + at, a.right.begin()));
+        DAW_CHECK(allZero(c.left, at) && allZero(c.right, at));
+        DAW_CHECK(!allZero(a.left, at) && !allZero(a.right, at));
         DAW_CHECK(b.extraSilent);
         violations += a.violations + b.violations + c.violations;
     }

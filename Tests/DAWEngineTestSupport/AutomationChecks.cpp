@@ -21,6 +21,7 @@
 #include "nodes/GainNode.h"
 #include "plugins/AUPluginConfig.h"
 #include "plugins/AUPluginHost.h"
+#include "time/Transport.h"
 
 using namespace daw;
 using namespace daw::testing::nodes;
@@ -332,6 +333,78 @@ CheckResult automationLoopWrapJump() {
     for (uint32_t i = 0; i < kBlock; ++i) whole = whole && nearRel(out[i], kH * (1.0 + 1.0 * (i + 1) / kBlock));
     DAW_CHECK(whole);
     DAW_CHECK(plain.rig.violations() == 0);
+    return checks;
+}
+
+CheckResult automationShortLoopPasses() {
+    CheckResult checks;
+    // DW-125 + AUTO-003: a loop shorter than the block. The engine renders the block in passes
+    // with at most one wrap each, and evaluates automation per pass: the slot gets the lane at the
+    // pass's first segment and the after-wrap side channel the lane at its wrap (the loop start),
+    // so a node ramps to the first and jumps to the second at the wrap frame, in every pass.
+    // The oracle lays out the same passes on a transport of its own and models the smoother.
+    // Loops: ticks [960, 1000) = 1000 frames and [960, 1080) = 3000 frames, 4096-frame blocks,
+    // from tick 950 (frame 23 750); the lane is 0.9 at 900, 0.2 at the loop start, 1 at its end.
+    constexpr uint32_t kBlock = 4096;
+    constexpr int kBlocks = 6;
+    for (const Tick loopEnd : {Tick{1000}, Tick{1080}}) {
+        for (const bool gainNode : {false, true}) {
+            LaneRig r(gainNode);
+            DAW_CHECK(r.ok);
+            if (!r.ok) return checks;
+            r.lane({pd(900, 0.9f), pd(960, 0.2f), pd(loopEnd, 1.0f)});
+            DAW_CHECK(r.rig.publish(r.d));
+            DAW_CHECK(r.rig.transport().setLoop(true, 960, loopEnd));
+            DAW_CHECK(r.rig.transport().locate(950) && r.rig.transport().play());
+            r.rig.renderFrames(int64_t{kBlock} * kBlocks, [] { return kBlock; });
+            AutomationPlayer oracle(7, 0, {pt(900, 0.9f), pt(960, 0.2f), pt(loopEnd, 1.0f)},
+                                    ParamMapping::from(gainNode ? GainNode::kParamInfo[GainNode::kLevel]
+                                                                : ChannelStrip::kParamInfo[ChannelStrip::kGain]));
+
+            // Expected gain per output frame; NaN where the ramp start isn't known (the first
+            // pass ramps from wherever the slot was before play).
+            const TempoMap map;
+            Transport t;
+            DAW_CHECK(t.setLoop(true, 960, loopEnd) && t.locate(950) && t.play());
+            std::vector<double> expected;
+            double prev = std::numeric_limits<double>::quiet_NaN();
+            int passes = 0, wraps = 0;
+            for (int b = 0; b < kBlocks; ++b) {
+                t.beginBlock(map);
+                uint32_t done = 0;
+                do {
+                    const TransportBlock& blk = t.layOutPass(map, kBlock - done);
+                    const uint32_t n = t.passFrames();
+                    const double v0 = oracle.valueAt(blk.seg[0].startTick);
+                    const bool wrap = blk.numSegments == 2;
+                    const uint32_t jumpAt = wrap ? blk.seg[1].frameOffset : n;
+                    const double v1 = wrap ? oracle.valueAt(blk.seg[1].startTick) : v0;
+                    for (uint32_t i = 0; i < n; ++i) {
+                        if (i >= jumpAt) expected.push_back(v1);
+                        else if (i + 1 == jumpAt) expected.push_back(v0);
+                        else expected.push_back(prev + (v0 - prev) * (i + 1) / jumpAt);
+                    }
+                    prev = v1;
+                    ++passes;
+                    wraps += wrap ? 1 : 0;
+                    done += n;
+                } while (done < kBlock);
+            }
+            DAW_CHECK(passes > kBlocks && wraps >= 6);
+            const double s = r.scale();
+            const std::vector<float>& out = r.rig.left();
+            DAW_CHECK(out.size() == expected.size());
+            size_t compared = 0, bad = 0;
+            for (size_t i = 0; i < std::min(out.size(), expected.size()); ++i) {
+                if (std::isnan(expected[i])) continue;
+                ++compared;
+                bad += nearRel(out[i], s * expected[i]) ? 0 : 1;
+            }
+            DAW_CHECK(bad == 0);
+            DAW_CHECK(compared > expected.size() - kBlock);
+            DAW_CHECK(r.rig.violations() == 0);
+        }
+    }
     return checks;
 }
 

@@ -86,6 +86,7 @@ public final class EngineClient: EngineProtocol {
         state.punchEnabled = t.punchEnabled  // REC-005 (T-052)
         state.punchIn = Tick(t.punchIn)
         state.punchOut = Tick(t.punchOut)
+        state.playPending = t.playPending  // IO-033 (T-089)
         return state
     }
 

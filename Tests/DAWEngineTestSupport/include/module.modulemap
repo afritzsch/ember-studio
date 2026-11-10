@@ -47,6 +47,7 @@ module DAWEngineTestSupport {
   header "BypassChecks.h"
   header "AutomationChecks.h"
   header "MonitoringChecks.h"
+  header "OfflineResetChecks.h"
   requires cplusplus
   export *
 }

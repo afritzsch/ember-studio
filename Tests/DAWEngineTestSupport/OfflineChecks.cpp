@@ -618,16 +618,30 @@ CheckResult offlineFollowsLoop() {
     DAW_CHECK(!after.playing && after.tick == 4 * kPPQ);
     DAW_CHECK(after.loopEnabled && after.loopStart == 3 * kPPQ && after.loopEnd == 4 * kPPQ);
 
-    // A loop of 100 frames (ticks 0..4) in 512-frame blocks: each block plays the loop end, the
-    // loop once, then a gap (TIME-005: two segments at most). The playhead check follows that.
+    // DW-125: a loop of 100 frames (ticks 0..4) in 512-frame blocks wraps five or six times in
+    // each block, and every frame plays the loop (no gap). The playhead check follows that.
     DAW_CHECK(transport.setLoop(true, 0, 4));
     applyTransportCommands(engine);
     ExportSpec shortLoop;
     shortLoop.tail.enabled = false;
     shortLoop.followLoop = true;
+    Capture looped;
+    shortLoop.sink = looped.sink();
+    const uint64_t resetsBefore = probe->resets;
     DAW_CHECK(driver.render(engine, 0, 2 * kPPQ, shortLoop, nullptr).ok());
     DAW_CHECK(driver.lastRender().framesWritten == 48000);
     DAW_CHECK(driver.lastRender().rtViolations == 0);
+    DAW_CHECK(probe->resets == resetsBefore + 1);
+    {
+        std::vector<float> expectedLoop(48000);
+        double state = 0;
+        for (int64_t i = 0; i < 48000; ++i) {
+            const SamplePos pos = i % 100;
+            state += 0.001 * (static_cast<double>(pos % 4800) / 4800.0 - state);
+            expectedLoop[static_cast<size_t>(i)] = static_cast<float>(state);
+        }
+        DAW_CHECK(looped.channels.size() == 2 && looped.channels[0] == expectedLoop);
+    }
 
     // With the loop off, followLoop changes nothing: same bits as the default render.
     DAW_CHECK(transport.setLoop(false, 0, 4));
@@ -676,18 +690,13 @@ CheckResult offlineRepeatableOnOneEngine() {
         DAW_CHECK(!a.empty() && !b.empty());
         DAW_CHECK(!first.empty() && !second.empty());
 
-        if (timeline) {
-            // IO-011: the pre-render locate reset it, so both renders are bit-identical.
-            DAW_CHECK(probe->resets == 2);
-            DAW_CHECK(a == b);
-            DAW_CHECK(sameBits(first, second));
-        } else {
-            // Control: a node the locate doesn't reset carries its state into the second render,
-            // so the check above isn't vacuous.
-            DAW_CHECK(probe->resets == 0);
-            DAW_CHECK(a != b);
-            DAW_CHECK(!sameBits(first, second));
-        }
+        // IO-011, DW-063 (T-089): every render resets every node first, timeline node or not
+        // (once each), so both renders are bit-identical whatever played in between. The
+        // playback between them didn't reset the non-timeline node (TIME-008: a live locate
+        // resets timeline nodes only), so its state really was elsewhere.
+        DAW_CHECK(probe->resets == 2);
+        DAW_CHECK(a == b);
+        DAW_CHECK(sameBits(first, second));
     }
     return checks;
 }
