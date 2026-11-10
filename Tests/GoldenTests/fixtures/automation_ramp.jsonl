@@ -1,0 +1,17 @@
+# automation_ramp (M7, AUTO-002, D-13, T-074): a strip-gain lane rising 0 -> 1 (normalized) over one
+# bar is evaluated at each block's start tick and written into the slot before the strip runs;
+# the strip ramps to it over the block (ENG-022), so the output follows the lane within one block.
+# The source is a constant 0.25 (an ImpulseNode firing every frame, TEST-004); the track's and the
+# master's centre pans leave 0.125 at unity. The strip gain maps through ParamInfo's db curve
+# (automation/ParamMapping.h): v = 0 is silence, else dB-linear from -60 dB to +12 dB.
+# One bar at 120 bpm is 3840 ticks = 96 000 frames (25 frames a tick); 512-frame blocks. Block 0
+# is silent (the lane is 0 there), the end holds +12 dB: 0.125 * 3.98107 = -6.062 dBFS.
+# AutomationGoldenTests checks every sample against the analytic lane.
+# @node {"kind": "audioClipPlayer", "type": "impulse", "samples": 1, "level": 0.25}
+# @expect {"field": "frames", "value": 120000}
+# @expect {"field": "peakDb", "value": -240, "tolerance": 0.001, "range": {"start": 0, "end": 512}}
+# @expect {"field": "peakDb", "value": -6.062, "tolerance": 0.001, "range": {"start": 96768, "end": 120000}}
+project.new {"name": "automation_ramp", "sampleRate": 48000}
+command.apply {"command": {"type": "AddTrack", "name": "DC", "kind": "audio"}}
+command.apply {"command": {"type": "AddAutomationPoints", "target": {"kind": "strip", "channel": 2, "param": "gain"}, "points": [{"tick": 0, "value": 0}, {"tick": 3840, "value": 1}]}}
+render.offline {"from": 0, "to": 4800, "path": "automation_ramp.wav", "tail": false, "blockSize": 512}

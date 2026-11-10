@@ -1,0 +1,20 @@
+# automation_loop_wrap (M7, AUTO-003, T-074): a loop wrap inside a block evaluates the lane at both
+# segment starts; the strip ramps to the first value over segment 1 and jumps to the second at the
+# wrap frame instead of ramping across the loop's discontinuity.
+# Source as automation_ramp (constant 0.25, centre pans: 0.125 at unity). The strip-gain lane is
+# 0.2 at tick 960 rising to 1 at tick 1920 (db curve: 0.2 is -45.6 dB). The loop is ticks
+# [960, 1920) = frames [24 000, 48 000), rendered with render.offline {"loop": true}: 96 000 frames
+# of playback from tick 0. 700-frame blocks: the first wrap is frame 400 of block 68 (output frame
+# 48 000), the second frame 600 of block 102 (72 000). Right after each wrap the output is the
+# loop start's value, 0.125 * 10^(-45.6/20) = -63.662 dBFS, where a ramp across the wrap would
+# still be near +12 dB.
+# AutomationGoldenTests checks every sample against the analytic lane and transport.
+# @node {"kind": "audioClipPlayer", "type": "impulse", "samples": 1, "level": 0.25}
+# @expect {"field": "frames", "value": 96000}
+# @expect {"field": "peakDb", "value": -63.662, "tolerance": 0.01, "range": {"start": 48000, "end": 48300}}
+# @expect {"field": "peakDb", "value": -63.662, "tolerance": 0.01, "range": {"start": 72000, "end": 72100}}
+project.new {"name": "automation_loop_wrap", "sampleRate": 48000}
+command.apply {"command": {"type": "AddTrack", "name": "DC", "kind": "audio"}}
+command.apply {"command": {"type": "AddAutomationPoints", "target": {"kind": "strip", "channel": 2, "param": "gain"}, "points": [{"tick": 960, "value": 0.2}, {"tick": 1920, "value": 1}]}}
+transport.setLoop {"enabled": true, "start": 960, "end": 1920}
+render.offline {"from": 0, "to": 3840, "path": "automation_loop_wrap.wav", "tail": false, "loop": true, "blockSize": 700}
