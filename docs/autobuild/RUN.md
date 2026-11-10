@@ -102,6 +102,9 @@ Unattended phases started by `/autobuild` (see `.claude/skills/autobuild/SKILL.m
 - The conductor relayed that phase 7 is the user's final phase of this run (stop after it).
 - Resumed all four workers at 1794297774 (five-hour window 0%, week 25%). T-074 allowed small additive core/nodes edits for the AUTO-003 wrap jump (DECISIONS "T-074 wrap jump").
 - 5-hour window hit 86% at 1794300937 (~53 min after the resume; week 37%). T-054, T-064, T-074 paused until 1794315600 + 120 s; T-082 had reported and its trial merge runs during the pause.
+- T-082 merged (ecad572) during the pause: test.sh 11/12 and one of two swift test runs failed only on the UI-010 perf smoke (load from other apps, load average 26–34; DW-223); UI-010 alone 3× green. Worker closed.
+- T-064 merged (9fbb025) during the pause (it had finished; only an optional UI-010 baseline was open): 08 conflict kept both contract deltas; test.sh 11/12 and swift test 2× failed only on UI-010 (alone 3× green). Worker closed. T-083 now ready.
+- Resumed T-054 and T-074 at 1794315741 (five-hour window 0%, week 37%), each told to `git merge main` first.
 
 ## Summary for the user
 
