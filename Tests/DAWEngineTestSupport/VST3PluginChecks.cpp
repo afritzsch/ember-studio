@@ -76,6 +76,7 @@ struct EmberAPI {
     void (*controllerStats)(int32_t*, double*, float*) = nullptr;
     void (*setControllerValue)(float) = nullptr;
     int32_t (*liveProcessors)() = nullptr;
+    void (*setEmitNaN)(int32_t) = nullptr;  // T-064
 };
 
 const EmberAPI& ember() {
@@ -94,6 +95,7 @@ const EmberAPI& ember() {
         a.controllerStats = reinterpret_cast<decltype(a.controllerStats)>(dlsym(image, "ember_test_controller_stats"));
         a.setControllerValue = reinterpret_cast<decltype(a.setControllerValue)>(dlsym(image, "ember_test_set_controller_value"));
         a.liveProcessors = reinterpret_cast<decltype(a.liveProcessors)>(dlsym(image, "ember_test_live_processors"));
+        a.setEmitNaN = reinterpret_cast<decltype(a.setEmitNaN)>(dlsym(image, "ember_test_set_emit_nan"));
         return a;
     }();
     return api;
@@ -102,7 +104,7 @@ const EmberAPI& ember() {
 bool emberReady() {
     const EmberAPI& a = ember();
     return a.setLatency && a.requestRestartFromProcess && a.lastContext && a.noteCounts && a.controllerStats &&
-           a.setControllerValue && a.liveProcessors;
+           a.setControllerValue && a.liveProcessors && a.setEmitNaN;
 }
 
 template <class F>
@@ -651,4 +653,157 @@ CheckResult vst3FailureAndAdoption() {
     return checks;
 }
 
+// MARK: T-064 (PLUG-022, PLUG-018)
+
+namespace {
+
+// A deterministic, non-trivial test signal (asset 7): no two neighbouring frames equal.
+float testSignal(uint32_t c, int64_t i) {
+    return 0.5f * static_cast<float>(std::sin(0.013 * static_cast<double>(i) + 0.7 * c)) + 0.01f * static_cast<float>(i % 7);
+}
+
+std::vector<NodeID> misbehaved(VST3PluginHost& host) { return host.takeMisbehaved(); }
+
+} // namespace
+
+CheckResult vst3NanGuard() {
+    CheckResult checks;
+    DAW_CHECK(RtTrap::install());
+    DAW_CHECK(emberReady());
+    if (!emberReady()) return checks;
+    ember().setLatency(0);
+    const std::string identifier = emberIdentifier(kEffectUID);
+
+    // The guard in the node: silence, nanBlocks, reported once per node instance.
+    {
+        auto host = std::make_shared<VST3PluginHost>();
+        auto rig = makeRig(host);
+        host->setTelemetry(&rig->engine().telemetry());
+        rig->addAsset(makeAsset(7, 2, 96000, [](uint32_t, int64_t) { return 0.25f; }));
+        const ParamID p = allocate(*rig, 2);  // gain (default 1) and mix stay the plugin's
+        GraphDescription d = baseDescription();
+        d.nodes.push_back(NodeDesc{10, NodeKind::audioClipPlayer, 1, 0, 0, {}});
+        d.nodes.push_back(NodeDesc{20, NodeKind::vst3Plugin, 1, p, 2, config(identifier)});
+        d.edges.push_back(EdgeDesc{1, 10, 20, EdgeKind::audio, 0});
+        d.edges.push_back(EdgeDesc{2, 20, 1, EdgeKind::audio, 0});
+        d.audioClips.push_back(nodes::clip(10, 1, 0, 3840, 7));
+        DAW_CHECK(rig->publish(d));
+        DAW_CHECK(rig->transport().locate(0) && rig->transport().play());
+
+        ember().setEmitNaN(1);
+        renderRandom(*rig, 12000, 91);
+        DAW_CHECK(allEqual(rig->left(), 0, 0.0f, 0.0f) && allEqual(rig->right(), 0, 0.0f, 0.0f));
+        auto pooled = std::static_pointer_cast<VST3PluginNode>(rig->engine().nodes().get(20));
+        const uint64_t silenced = pooled ? pooled->nanBlocks() : 0;
+        DAW_CHECK(silenced > 0);
+        DAW_CHECK(rig->engine().telemetry().snapshot().nanBlocks == silenced);
+        DAW_CHECK(misbehaved(*host) == std::vector<NodeID>{20});
+        DAW_CHECK(misbehaved(*host).empty());  // once
+
+        // A plugin that recovers plays again; no new report.
+        ember().setEmitNaN(0);
+        rig->clearOutput();
+        renderRandom(*rig, 12000, 92);
+        DAW_CHECK(allEqual(rig->left(), 0, 0.25f));
+        DAW_CHECK(misbehaved(*host).empty());
+
+        // A new node instance of the slot (configVersion bump) can be reported again.
+        d.nodes[2].configVersion = 2;
+        DAW_CHECK(rig->publish(d));
+        ember().setEmitNaN(1);
+        renderRandom(*rig, 4800, 93);
+        ember().setEmitNaN(0);
+        DAW_CHECK(misbehaved(*host) == std::vector<NodeID>{20});
+        DAW_CHECK(rig->violations() == 0);
+    }
+
+    // Through the facade: one pluginMisbehaved event, telemetry nanBlocks.
+    {
+        FacadeRef f;
+        DAW_CHECK(f.facade != nullptr);
+        if (!f.facade) return checks;
+        GraphDescriptionBuilder g;
+        g.addNode(1, NodeKind::master, 0, 0, 0, "");
+        g.addNode(20, NodeKind::vst3Plugin, 0, 0, 0, config(identifier));
+        g.addEdge(1, 20, 1, EdgeKind::audio, 0);
+        g.setTempo(0, 120.0);
+        g.setTimeSignature(0, 4, 4);
+        g.setMaster(1);
+        DAW_CHECK(published(*f.facade, f->applyGraph(g.description())));
+        TempDir dir;
+        ember().setEmitNaN(1);
+        const std::vector<float> left = exportLeft(*f.facade, dir.path() / "nan.wav", 96);
+        ember().setEmitNaN(0);
+        DAW_CHECK(left.size() == 2400 && allEqual(left, 0, 0.0f, 0.0f));
+        DAW_CHECK(f->telemetry().nanBlocks > 0);
+        std::vector<EngineEventPOD> events(64);
+        events.resize(f->pollEvents(events.data(), events.size()));
+        DAW_CHECK(std::count_if(events.begin(), events.end(), [](const EngineEventPOD& e) {
+                      return e.type == EngineEventType::pluginMisbehaved && e.subject == 20;
+                  }) == 1);
+    }
+    return checks;
+}
+
+CheckResult vst3HostBypass() {
+    CheckResult checks;
+    DAW_CHECK(RtTrap::install());
+    DAW_CHECK(emberReady());
+    if (!emberReady()) return checks;
+    // EmberTest really delays its output by the latency it reports; gain 0 silences it.
+    ember().setLatency(480);
+    auto host = std::make_shared<VST3PluginHost>();
+    auto rig = makeRig(host);
+    rig->addAsset(makeAsset(7, 2, 96000, testSignal));
+    const ParamID p = allocate(*rig, 2);
+    rig->engine().params().set(p + 0, 0.0f);
+    auto bypassSlot = rig->engine().params().allocate(1, 1.0f);
+    DAW_CHECK(bypassSlot.ok());
+    if (!bypassSlot) return checks;
+    const ParamID bypass = bypassSlot.value();
+    GraphDescription d = baseDescription();
+    d.nodes.push_back(NodeDesc{10, NodeKind::audioClipPlayer, 1, 0, 0, {}});
+    d.nodes.push_back(NodeDesc{20, NodeKind::vst3Plugin, 1, p, 2, config(emberIdentifier(kEffectUID)), bypass});
+    d.edges.push_back(EdgeDesc{1, 10, 20, EdgeKind::audio, 0});
+    d.edges.push_back(EdgeDesc{2, 20, 1, EdgeKind::audio, 0});
+    d.audioClips.push_back(nodes::clip(10, 1, 0, 3840, 7));
+    auto graph = rig->build(d);
+    DAW_CHECK(graph.ok() && graph.value()->latency() == 480);  // PDC keeps the plugin's latency
+    if (!graph) return checks;
+    rig->engine().publish(std::move(graph).value());
+    const int32_t live = ember().liveProcessors();
+    DAW_CHECK(rig->transport().locate(0) && rig->transport().play());
+
+    // Bypassed: the input delayed by exactly 480, which MIX-023's pre-roll puts back on the
+    // timeline, so the output nulls against the asset sample for sample.
+    renderRandom(*rig, 24000, 94);
+    bool nulls = true;
+    for (int64_t i = 0; i < 24000; ++i)
+        nulls = nulls && rig->left()[i] == testSignal(0, i) && rig->right()[i] == testSignal(1, i);
+    DAW_CHECK(nulls);
+
+    // Un-bypassed (a slot write): the plugin at gain 0 is silent once the crossfade block is over.
+    rig->clearOutput();
+    rig->engine().params().set(bypass, 0.0f);
+    renderRandom(*rig, 12000, 95);
+    DAW_CHECK(allEqual(rig->left(), 1500, 0.0f, 0.0f));
+    const auto state = host->state(20);  // with the gain slot pushed (it is only pushed while running)
+
+    // Bypassed again: back to the null.
+    rig->clearOutput();
+    rig->engine().params().set(bypass, 1.0f);
+    renderRandom(*rig, 12000, 96);
+    nulls = true;
+    for (int64_t i = 1500; i < 12000; ++i) nulls = nulls && rig->left()[i] == testSignal(0, 36000 + i);
+    DAW_CHECK(nulls);
+
+    // The same instance throughout, with its state.
+    DAW_CHECK(ember().liveProcessors() == live);
+    DAW_CHECK(host->state(20).ok() && state.ok() && host->state(20).value() == state.value());
+    DAW_CHECK(rig->violations() == 0);
+    ember().setLatency(0);
+    return checks;
+}
+
 } // namespace daw::testing
+

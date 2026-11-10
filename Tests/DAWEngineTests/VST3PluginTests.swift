@@ -32,4 +32,11 @@ struct VST3PluginTests {
 
     @Test("PLUG-011/012: a missing plugin renders as absent and is reported; slots keep their instance; parked instances are adopted")
     func failureAndAdoption() { expectPasses(daw.testing.vst3FailureAndAdoption()) }
+
+    // T-064 (in this serialized suite: they set EmberTest's process-wide knobs too).
+    @Test("PLUG-022: a VST3 writing NaN is silenced, counted in nanBlocks, reported once (pluginMisbehaved event); 0 RT violations")
+    func nanGuard() { expectPasses(daw.testing.vst3NanGuard()) }
+
+    @Test("PLUG-018: a latent VST3 host-bypassed nulls against its input on the timeline; slot writes toggle it; same instance and state")
+    func hostBypass() { expectPasses(daw.testing.vst3HostBypass()) }
 }

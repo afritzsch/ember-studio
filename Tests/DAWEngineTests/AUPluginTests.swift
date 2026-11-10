@@ -30,6 +30,10 @@ struct AUPluginTests {
 
     @Test("PLUG-010/012: a missing AU renders as absent and is reported; slots keep their AU; parked AUs are adopted")
     func failureAndAdoption() { expectPasses(daw.testing.auFailureAndAdoption()) }
+
+    // T-064 (in this serialized suite: the fake AU's NaN knob is process-wide).
+    @Test("PLUG-022, PLUG-018: an AU writing NaN is silenced and reported once; AU host bypass passes the input, same AU")
+    func nanGuardAndBypass() { expectPasses(daw.testing.auNanGuardAndBypass()) }
 }
 
 // DW-214: destroying AUs right after rendering parameter events. Before the fix this crashed in

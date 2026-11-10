@@ -42,4 +42,14 @@ CheckResult vst3StateRoundTrip();
 // instance the build adopts; a state set before the slot had one is applied to its first one.
 CheckResult vst3FailureAndAdoption();
 
+// T-064, PLUG-022: a plugin writing NaN is silenced block by block, counted in telemetry nanBlocks,
+// and reported once per node instance (VST3PluginHost::takeMisbehaved; a pluginMisbehaved event
+// through the facade); it plays again once it recovers. 0 RT violations.
+CheckResult vst3NanGuard();
+
+// T-064, PLUG-018: EmberTest (latency 480, gain 0) host-bypassed: the graph keeps its latency and
+// the output nulls against the input on the timeline; slot writes toggle it with no new instance
+// and the plugin's state unchanged. 0 RT violations.
+CheckResult vst3HostBypass();
+
 } // namespace daw::testing
