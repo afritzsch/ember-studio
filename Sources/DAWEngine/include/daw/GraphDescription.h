@@ -20,8 +20,16 @@ using Tick = int64_t;
 enum class NodeKind : uint16_t { audioClipPlayer, midiClipPlayer, sampler, channelStrip, gain, eq, compressor,
                                  delay, reverb, metronome, auPlugin, vst3Plugin, master, bus };
 
+// PLUG-018 (T-064, additive, see specs/10 "Contract delta (T-064)"): `bypassParam` is the param
+// slot of the node's host-side bypass, kNoBypassParam for none. A node with one stays in the graph
+// whether or not it is bypassed: while the slot is >= 0.5 GraphBuilder's BypassNode passes its
+// main input through, delayed by the node's latency, so PDC never changes, and toggling it is a
+// slot write, never a rebuild. It isn't part of [firstParam, firstParam + numParams).
+inline constexpr ParamID kNoBypassParam = 0xFFFF'FFFFu;
+
 struct NodeDesc { NodeID id; NodeKind kind; uint32_t configVersion; /* bump → re-prepare */
-                  ParamID firstParam; uint32_t numParams; std::string configJSON; /* kind-specific, non-RT */ };
+                  ParamID firstParam; uint32_t numParams; std::string configJSON; /* kind-specific, non-RT */
+                  ParamID bypassParam = kNoBypassParam; /* T-064 */ };
 
 enum class EdgeKind : uint8_t { audio, midi, sidechain };
 

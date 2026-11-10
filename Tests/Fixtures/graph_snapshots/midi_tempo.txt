@@ -1,7 +1,7 @@
 master output:1
 nodes:
   source:2 midiClipPlayer v0
-  4 sampler v0
+  4 sampler v0 bypass 16
   2 channelStrip v0 params 4+4
   3 channelStrip v0 params 8+4
   input:1 bus v0

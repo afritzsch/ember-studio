@@ -699,4 +699,70 @@ CheckResult auConcurrentLifecycle(uint32_t iterations) {
     return checks;
 }
 
+// MARK: T-064 (PLUG-022, PLUG-018)
+
+CheckResult auNanGuardAndBypass() {
+    CheckResult checks;
+    DAW_CHECK(RtTrap::install());
+    DAW_CHECK(registerFakeAudioUnit());
+    auto host = std::make_shared<AUPluginHost>();
+    auto rig = makeRig(host);
+    host->setTelemetry(&rig->engine().telemetry());
+    const auto signal = [](uint32_t c, int64_t i) {
+        return 0.5f * static_cast<float>(std::sin(0.011 * static_cast<double>(i) + c));
+    };
+    rig->addAsset(makeAsset(7, 2, 96000, signal));
+    const ParamID p = allocate(*rig, 2);  // gain (0…2, default 1), sidechain mix: the fake's own
+    auto bypassSlot = rig->engine().params().allocate(1, 0.0f);
+    DAW_CHECK(bypassSlot.ok());
+    if (!bypassSlot) return checks;
+    const ParamID bypass = bypassSlot.value();
+    GraphDescription d = baseDescription();
+    d.nodes.push_back(NodeDesc{10, NodeKind::audioClipPlayer, 1, 0, 0, {}});
+    d.nodes.push_back(NodeDesc{20, NodeKind::auPlugin, 1, p, 2, config(kFake), bypass});
+    d.edges.push_back(EdgeDesc{1, 10, 20, EdgeKind::audio, 0});
+    d.edges.push_back(EdgeDesc{2, 20, 1, EdgeKind::audio, 0});
+    d.audioClips.push_back(nodes::clip(10, 1, 0, 3840, 7));
+    DAW_CHECK(rig->publish(d));
+    DAW_CHECK(rig->transport().locate(0) && rig->transport().play());
+
+    // PLUG-022: NaN from the AU → silence, nanBlocks, one report for the slot.
+    setFakeAudioUnitEmitsNaN(true);
+    renderRandom(*rig, 12000, 101);
+    setFakeAudioUnitEmitsNaN(false);
+    bool silent = true;
+    for (size_t i = 0; i < rig->left().size(); ++i) silent = silent && rig->left()[i] == 0.0f && rig->right()[i] == 0.0f;
+    DAW_CHECK(silent);
+    auto inner = std::static_pointer_cast<AUPluginNode>(rig->engine().nodes().get(20));
+    DAW_CHECK(inner && inner->nanBlocks() > 0 && rig->engine().telemetry().snapshot().nanBlocks == inner->nanBlocks());
+    DAW_CHECK(host->takeMisbehaved() == std::vector<NodeID>{20});
+    DAW_CHECK(host->takeMisbehaved().empty());
+
+    // Recovered (gain 1, latency 0): the input on the timeline.
+    rig->clearOutput();
+    renderRandom(*rig, 12000, 102);
+    bool same = true;
+    for (size_t i = 1500; i < 12000; ++i) same = same && std::fabs(rig->left()[i] - signal(0, static_cast<int64_t>(12000 + i))) < 1e-6f;
+    DAW_CHECK(same);
+
+    // PLUG-018: gain 0 makes the AU silent; bypassed (a slot write) the input passes, untouched,
+    // and the AU instance stays the same.
+    const auto instance = host->instance(20);
+    rig->engine().params().set(p + 0, 0.0f);
+    rig->clearOutput();
+    renderRandom(*rig, 12000, 103);
+    DAW_CHECK(std::fabs(rig->left().back()) == 0.0f && std::fabs(rig->left()[6000]) == 0.0f);
+    rig->engine().params().set(bypass, 1.0f);
+    rig->clearOutput();
+    renderRandom(*rig, 12000, 104);
+    bool passes = true;
+    for (size_t i = 1500; i < 12000; ++i) passes = passes && rig->left()[i] == signal(0, static_cast<int64_t>(36000 + i));
+    DAW_CHECK(passes);
+    DAW_CHECK(host->instance(20) == instance);
+    DAW_CHECK(host->takeMisbehaved().empty());
+    DAW_CHECK(rig->violations() == 0);
+    return checks;
+}
+
 } // namespace daw::testing
+

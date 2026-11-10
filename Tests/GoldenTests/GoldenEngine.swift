@@ -249,6 +249,7 @@ final class GoldenEngine: EngineProtocol {
             case .assetLoadFailed: .assetLoadFailed
             case .graphRejected: .graphRejected
             case .jobFinished: .jobFinished
+            case .pluginMisbehaved: .pluginMisbehaved  // T-064
             default: .deviceChanged
             }
             var device: DeviceChange?
@@ -310,6 +311,7 @@ extension GoldenFixture.TestNode {
         case .impulse: .impulse
         case .fakeLatency: .fakeLatency
         case .nan: .nan
+        case .latentMute: .latentMute
         }
         spec.frequency = frequency ?? 0
         spec.level = level ?? 1

@@ -32,6 +32,16 @@ Result<std::unique_ptr<Node>> AUPluginHost::create(const NodeCreateInfo& info) {
         return e;
     }
     const AUPluginConfig config = std::move(parsed).value();
+    // PLUG-022 (T-064): every node instance gets its own health, reported at most once.
+    auto health = std::make_shared<PluginHealth>();
+    Telemetry* telemetry = nullptr;
+    {
+        std::lock_guard lock(mutex_);
+        Slot& slot = slots_[desc.id];
+        slot.health = health;
+        slot.healthReported = false;
+        telemetry = telemetry_;
+    }
 
     std::shared_ptr<AUInstance> live, parked;
     std::optional<std::vector<uint8_t>> pending;
@@ -67,7 +77,7 @@ Result<std::unique_ptr<Node>> AUPluginHost::create(const NodeCreateInfo& info) {
             // The plugin renders as absent; its state is kept for getPluginState (saving).
             return std::unique_ptr<Node>(std::make_unique<AUPluginNode>(
                 desc.id, nullptr, config.component.isInstrument(), desc.firstParam, desc.numParams,
-                info.latency, weak_from_this()));
+                info.latency, weak_from_this(), health, telemetry));
         }
         instance = std::move(made).value();
     }
@@ -95,7 +105,7 @@ Result<std::unique_ptr<Node>> AUPluginHost::create(const NodeCreateInfo& info) {
     }
     return std::unique_ptr<Node>(std::make_unique<AUPluginNode>(desc.id, instance, !instance->hasAudioInput(),
                                                                 desc.firstParam, desc.numParams, info.latency,
-                                                                weak_from_this()));
+                                                                weak_from_this(), health, telemetry));
 }
 
 Result<void> AUPluginHost::instantiate(NodeID slotID, std::string_view identifier) {
@@ -215,6 +225,24 @@ std::string AUPluginHost::infoJSON(NodeID slotID) const {
         json += "]";
     }
     return json + "}";
+}
+
+// MARK: PLUG-022 (T-064)
+
+std::vector<NodeID> AUPluginHost::takeMisbehaved() {
+    std::lock_guard lock(mutex_);
+    std::vector<NodeID> out;
+    for (auto& [id, slot] : slots_) {
+        if (!slot.health || slot.healthReported || !slot.health->raised()) continue;
+        slot.healthReported = true;
+        out.push_back(id);
+    }
+    return out;
+}
+
+void AUPluginHost::setTelemetry(Telemetry* telemetry) {
+    std::lock_guard lock(mutex_);
+    telemetry_ = telemetry;
 }
 
 } // namespace daw

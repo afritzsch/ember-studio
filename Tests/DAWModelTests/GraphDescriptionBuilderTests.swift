@@ -102,9 +102,12 @@ struct GraphDescriptionBuilderTests {
         #expect(has(GraphNodeID.source(of: kick.id), kick.sends[0].id))
         // Pre-fader sidechain from Kick into Vox's compressor.
         #expect(has(GraphNodeID.source(of: kick.id), vox.inserts[1].id, .sidechain))
-        // Group's bypassed compressor is left out; the bus input feeds the strip directly.
-        #expect(!graph.nodes.contains { $0.id == group.inserts[0].id })
-        #expect(has(GraphNodeID.input(of: group.id), group.id))
+        // PLUG-018 (T-064): Group's bypassed compressor stays in the chain with its bypass slot
+        // (host-side bypass), so toggling it is a slot write.
+        let comp = try #require(graph.nodes.first { $0.id == group.inserts[0].id })
+        #expect(comp.bypassParam != nil && comp.bypassParam == RuntimeIDs.sequential(for: p, catalog: testCatalog).paramID(GraphNodeID.bypass(of: comp.id), 0))
+        #expect(has(GraphNodeID.input(of: group.id), comp.id) && has(comp.id, group.id))
+        #expect(graph.nodes.filter { $0.kind == .channelStrip }.allSatisfy { $0.bypassParam == nil })
         // A send to a bus that doesn't exist is dropped, as is an output to one.
         var dangling = p
         dangling.tracks[1].sends[0].target = 999

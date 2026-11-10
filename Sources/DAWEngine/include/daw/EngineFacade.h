@@ -243,7 +243,7 @@ struct TelemetryPOD {
     uint32_t deviceInputLatency = 0;
     uint32_t armedTracks = 0;
     // DW-142 (T-070): blocks the built-in effects' NaN guards silenced (DSP-040), since the
-    // engine was created.
+    // engine was created. T-064 (PLUG-022): hosted plugins' silenced blocks count here too.
     uint64_t nanBlocks = 0;
     // REC-010/011 (T-053): MIDI input events dropped (a full queue or a full record buffer, all
     // time) and the tracks armed for MIDI input (armMidiInput).
@@ -275,6 +275,9 @@ enum class EngineEventType : uint8_t {
     assetLoadFailed,     // subject = assetID, error set
     graphRejected,       // subject = the rejected version, error set (cycle → code cycle)
     jobFinished,         // subject = job kind, job = the job; error set if it failed
+    // PLUG-022 (T-064, additive): subject = the device slot whose plugin output NaN/inf. Its output
+    // is silenced (telemetry nanBlocks counts the blocks); reported once per node instance.
+    pluginMisbehaved,
 };
 
 // IO-021 (7), T-051: why a deviceChanged event happened.
@@ -413,6 +416,11 @@ public:
     void addNode(NodeID id, NodeKind kind, uint32_t configVersion, ParamID firstParam,
                  uint32_t numParams, const std::string& configJSON) {
         desc_.nodes.push_back(NodeDesc{id, kind, configVersion, firstParam, numParams, configJSON});
+    }
+    // PLUG-018 (T-064): addNode with a host-side bypass slot (NodeDesc::bypassParam).
+    void addBypassableNode(NodeID id, NodeKind kind, uint32_t configVersion, ParamID firstParam,
+                           uint32_t numParams, const std::string& configJSON, ParamID bypassParam) {
+        desc_.nodes.push_back(NodeDesc{id, kind, configVersion, firstParam, numParams, configJSON, bypassParam});
     }
     void addEdge(uint64_t edgeID, NodeID from, NodeID to, EdgeKind kind, uint8_t toPort) {
         desc_.edges.push_back(EdgeDesc{edgeID, from, to, kind, toPort});

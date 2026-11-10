@@ -100,7 +100,7 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 | T-061 | P | AU hosting node (FX + instrument), params, state, latency | PLUG-010, 012..016 (AU) | T-021, T-014 | done |
 | T-062 | P | VST3 hosting node + build SDK `again` test plugin | PLUG-011..016 (VST3) | T-021, T-014 | done |
 | T-063 | P+U | Plugin editor windows (AU view controller, VST3 IPlugView) | PLUG-017 | T-061, T-062, T-032 | ready |
-| T-064 | P | Host bypass, NaN guard, crash marker + safe-mode open | PLUG-018, 020..022 | T-061 | wip(t-064-host-bypass) |
+| T-064 | P | Host bypass, NaN guard, crash marker + safe-mode open | PLUG-018, 020..022 | T-061 | done |
 | T-065 | U | Device chain view (generic UI from ParamInfo), plugin manager | UI-032, UI-041 | T-063 | todo |
 
 ### M7 — Effects & automation
@@ -123,7 +123,7 @@ DSP effects (T-070..073) depend only on the Node API and can be **pulled forward
 | T-080 | E+M | Loop recording takes, TakeFolder, comp model, flattening | REC-030..034 | T-052, T-035 | ready |
 | T-081 | U | Take folder / comp editing UI | UI-016 | T-080, T-033 | todo |
 | T-082 | U | Export dialog | UI-042 | T-009, T-032 | done |
-| T-083 | U | Crash recovery dialog | UI-043 | T-031, T-064 | todo |
+| T-083 | U | Crash recovery dialog | UI-043 | T-031, T-064 | ready |
 | T-084 | E | Sanitizer CI jobs, perf smoke, GitHub Actions | TEST-007, 008, BUILD-009 | T-077 | todo |
 
 ## Critical path
@@ -294,7 +294,7 @@ Recorded by the lead from worker reports.
 | DW-095 | T-016 | Control layer: `EngineSync.flush()` before offline render/export; `EngineSync.pollEvents()` as the single engine-event drain (so `assetLoaded` reaches DW-072 bumps); map engine NodeIDs back with `GraphNodeID.owner(of:)`; master limiter is `runtime.masterLimiterParam(master.id)` | B/M (T-017/T-018) | done (T-017; master limiter unused until a control method sets it) |
 | DW-096 | T-016 | eq, compressor, reverb, delay, sampler, midiClipPlayer have no engine factories yet, so projects using them (fixture `routing`) are rejected by the real engine. Run `routing` through EngineClient once registered | D/E (T-040, T-041, T-070..073) | done (T-070: `routing` through EngineClient, `RoutingEngineTests`) |
 | DW-097 | T-016 | Nothing in the model calls `loadAsset` for a project's assets on open/import yet | M (T-031 / ImportAsset) | done (T-031: `ProjectStore.loadAssets()` / `EngineSync.loadAssets(_:folder:)` on open) |
-| DW-098 | T-016 | Bypassed devices are left out of the graph until host bypass (PLUG-018): bypass is a rebuild and the device loses state. Optional: `ProjectChange` diff could skip entities with unchanged storage (main per-step cost on huge projects) | P (T-064), M (optional) | todo |
+| DW-098 | T-016 | Bypassed devices are left out of the graph until host bypass (PLUG-018): bypass is a rebuild and the device loses state. Optional: `ProjectChange` diff could skip entities with unchanged storage (main per-step cost on huge projects) | P (T-064), M (optional) | done (T-064: bypassed devices stay in the graph behind a bypass slot; no rebuild) |
 | DW-099 | T-040 | MIDI routing in RenderGraph/GraphBuilder: MIDI edges carry no data (player `midiOut` capacity 0, instrument `midiIn` empty). Needs per-step MIDI storage of fixed capacity that never shrinks between blocks (no-hanging-notes guarantee) and MIDI edge delay for PDC (05 "PDC semantics") | E (T-045) | done (T-045: pulled MIDI storage of fixed capacity per graph, k-way stable merge, `MidiDelayLine` PDC with carry-over; 05 "MIDI routing") |
 | DW-100 | T-040 | Sampler should handle CC 123 (All Notes Off): a re-created MidiClipPlayer (DW-051 note edit while playing) sends it on all 16 channels. DSP-023 lists only CC64 and pitch bend | D (T-041) | done (T-041) |
 | DW-101 | T-040 | DSP-003 golden (`midi_loop_wrap`) once the golden harness, MIDI routing and a sampler exist | D/E (T-019, T-041) | done (T-044: golden `midi_loop_wrap`) |
@@ -345,7 +345,7 @@ Recorded by the lead from worker reports.
 | DW-146 | T-035, T-025 | dawmcp/dawctl `test.fixture` resolves a fixture's relative `asset.import` paths against the server's cwd, not the fixture's folder, so every fixture that imports an asset (`wav_playback_resampled`, `pan_law`, `bus_send_sum`, `pdc_alignment_null`, `clip_overlap_crossfade`) fails in dawmcp unless an `assets` symlink exists | B (T-032 or later) | done (T-032: fixture-relative inputs resolve against the fixture folder) |
 | DW-147 | T-035 | A dawmcp server started by the MCP client keeps the engine it was built with; `scripts/dawmcp.sh` rebuilds only at launch, so an agent can't verify engine changes through `daw_render_offline` without a client restart. Add a `--rebuild`/restart hint to the CTL-025 tooling | B | todo |
 | DW-148 | T-035, T-025, lead | Flake: `PersistenceTests` "MODEL-044: an edit is autosaved after the debounce…" times out (30 s `eventually`, 30 ms debounce) under full-suite load; seen 3× on 2026-11-02. Likely cooperative-pool starvation or a race in `ProjectStore.scheduleDebouncedAutosave`/`serialized`, not plain slowness | M | done (T-042: race in `ProjectStore.autosave()` bookkeeping, fixed; stress tests) |
-| DW-149 | T-025, T-042 | Insert-chain commands `InsertDevice`/`RemoveDevice`/`MoveDevice`/`SetDeviceBypass` (MODEL-005) have no task, and nothing places a master insert (no `RestoreMaster`). Fixtures place inserts through `RestoreTrack`/`RestoreBus` with hand-written IDs; MIX-023's golden uses a bus as the "latent master insert". Could share helpers with T-042's `SetInstrument` | M | todo; T-061: an AU FX can only be placed via RestoreTrack (its golden uses AUSampler as instrument) |
+| DW-149 | T-025, T-042 | Insert-chain commands `InsertDevice`/`RemoveDevice`/`MoveDevice`/`SetDeviceBypass` (MODEL-005) have no task, and nothing places a master insert (no `RestoreMaster`). Fixtures place inserts through `RestoreTrack`/`RestoreBus` with hand-written IDs; MIX-023's golden uses a bus as the "latent master insert". Could share helpers with T-042's `SetInstrument` | M | partial: `SetDeviceBypass` done (T-064); todo; T-061: an AU FX can only be placed via RestoreTrack (its golden uses AUSampler as instrument) |
 | DW-150 | T-042 | `validate()` now rejects note velocity 0 (06 clamps to 1…127), so an old `project.json` with a velocity-0 note fails to open with `invalidProject`. If such files ever exist, add an open-time repair 0 → 1 (autobuild decision, see docs/autobuild/DECISIONS.md) | M | todo |
 | DW-151 | T-042 | dawmcp started at worktree setup doesn't know commands the worker adds (`unknownCommandType`); same root as DW-147. Note it in 14's *Agent verification recipe* or let dawmcp restart when its binary is stale | B / lead (14) | todo |
 | DW-152 | T-042 | 07 *Persistence*: say that autosave bookkeeping follows the queue order of file operations and that an edit made during a save still gets its debounced autosave (DW-148 fix) | lead (07) | todo |
@@ -420,3 +420,6 @@ Recorded by the lead from worker reports.
 | DW-221 | T-082 | `AppModel.export(_:to:)` is only used by the UI-001 test now that File > Export… opens the dialog; remove it with UI-001's Status text | U | todo |
 | DW-222 | T-082 | Export dialog "Choose…" (NSSavePanel) is covered only by a stubbed test; check it by hand in the app | U (manual) | todo |
 | DW-223 | T-082 | UI-010's perf smoke (`perFrame < 16 ms`) fails whenever the machine is loaded (53–104 ms under four workers or other apps, 9–12 ms alone); make it load-tolerant or move it to a perf-only job (DW-172) | U | todo |
+| DW-224 | T-064 | Safe mode still instantiates and prepares every plugin (only processing is bypassed), so a plugin that crashes in instantiation/prepare/state restore still takes the app down. Option: build plugin slots as absent in safe mode (keep stored state), load on enable | P (with T-083) | todo |
+| DW-225 | T-064 | Bypassing an instrument plugin stops its MIDI, so held notes can hang until it is enabled again; send all-notes-off (or the held note-offs) on a bypass toggle | P | todo |
+| DW-226 | T-064 | Mixer inserts can now toggle bypass with `SetDeviceBypass` (12 still says read-only until DW-149); in safe mode the UI shows the document's bypass, not the forced one; T-083 should show safe mode (e.g. `ui.state`); `ToastCenter` treats `pluginMisbehaved` like `pluginCrashed` | U (T-065/T-083) | todo |

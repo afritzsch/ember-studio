@@ -15,6 +15,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private var pumpTimer: Timer?
     private var keyMonitor: KeyMonitor?
     private var signalSources: [DispatchSourceSignal] = []
+    /// PLUG-021 (T-064): this session's `running` marker; its `crashedSessions` are what the crash
+    /// dialog (T-083) offers to reopen in safe mode.
+    private(set) var crashMarker: CrashMarkerSession?
 
     private static let log = Logger(subsystem: "dev.emberstudio", category: "app")
 
@@ -53,6 +56,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             source.setEventHandler { NSApp.terminate(nil) }
             source.resume()
             signalSources.append(source)
+        }
+
+        // PLUG-021 (T-064): the running marker. Automated launches (tests, tools) keep theirs in
+        // $TMPDIR, so a killed test app never looks like a user's crash (CONV §9).
+        crashMarker = CrashMarkerSession.start(
+            directory: options.isAutomated
+                ? FileManager.default.temporaryDirectory.appendingPathComponent("EmberStudio-Sessions", isDirectory: true)
+                : CrashMarker.defaultDirectory
+        ) { [weak self] in
+            self?.app.windows.map { CrashMarker.OpenProject(project: $0.store.project, folder: $0.store.folderURL) } ?? []
         }
 
         app.newProject()
@@ -98,6 +111,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             keyMonitor?.stop()
             await app.quit()
             server?.stop()
+            crashMarker?.end()  // PLUG-021: a clean quit leaves no marker
             readyToQuit = true
             NSApp.terminate(nil)
         }

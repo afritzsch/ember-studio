@@ -301,7 +301,12 @@ public final class EngineClient: EngineProtocol {
     static func description(for graph: EngineGraph) -> daw.GraphDescription {
         var builder = daw.GraphDescriptionBuilder()
         for n in graph.nodes {
-            builder.addNode(n.id, cxx(n.kind), n.configVersion, n.firstParam, n.numParams, std.string(n.configJSON))
+            if let bypass = n.bypassParam {  // PLUG-018 (T-064)
+                builder.addBypassableNode(n.id, cxx(n.kind), n.configVersion, n.firstParam, n.numParams,
+                                          std.string(n.configJSON), bypass)
+            } else {
+                builder.addNode(n.id, cxx(n.kind), n.configVersion, n.firstParam, n.numParams, std.string(n.configJSON))
+            }
         }
         for e in graph.edges {
             let kind: daw.EdgeKind = switch e.kind {
@@ -395,6 +400,7 @@ public final class EngineClient: EngineProtocol {
         case .assetLoadFailed: .assetLoadFailed
         case .graphRejected: .graphRejected
         case .jobFinished: .jobFinished
+        case .pluginMisbehaved: .pluginMisbehaved  // T-064
         default: .deviceChanged
         }
         // T-056 (IO-033, DW-044): the re-conversion's progress.

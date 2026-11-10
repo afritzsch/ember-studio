@@ -21,6 +21,8 @@
 // passed through; an instrument has none, so silence) and the failure is reported once through
 // VST3PluginHost as a pluginCrashed event.
 //
+// NaN guard (PLUG-022, T-064): as AUPluginNode's (plugins/PluginNanGuard.h).
+//
 // reset() (a locate) does nothing: effects keep their tails (TIME-008).
 
 #include <cstdint>
@@ -32,6 +34,7 @@
 #include "core/ParamSlotTable.h"
 #include "core/Realtime.h"
 #include "graph/LatencyReporter.h"
+#include "plugins/PluginNanGuard.h"
 #include "plugins/VST3Instance.h"
 
 namespace daw {
@@ -44,7 +47,8 @@ public:
 
     // `instance` null: the inert node of a failed instantiation.
     VST3PluginNode(NodeID id, std::shared_ptr<VST3Instance> instance, ParamID firstParam, uint32_t numParams,
-                   LatencyReporter reporter, std::weak_ptr<VST3PluginHost> host);
+                   LatencyReporter reporter, std::weak_ptr<VST3PluginHost> host,
+                   std::shared_ptr<PluginHealth> health = nullptr, Telemetry* telemetry = nullptr);
 
     void prepare(const PrepareInfo& info) override;
     void process(ProcessContext& ctx, NodeIO& io) DAW_RT override;
@@ -54,6 +58,7 @@ public:
     bool active() const { return active_; }
     const std::shared_ptr<VST3Instance>& instance() const { return instance_; }
     uint64_t paramEventsPushed() const { return paramEvents_; }
+    uint64_t nanBlocks() const { return nanBlocks_.load(std::memory_order_relaxed); }  // PLUG-022
 
 private:
     void pushParams(const ProcessContext& ctx) DAW_RT;
@@ -64,6 +69,9 @@ private:
     uint32_t numParams_;
     LatencyReporter reporter_;
     std::weak_ptr<VST3PluginHost> host_;
+    std::shared_ptr<PluginHealth> health_;  // PLUG-022
+    Telemetry* telemetry_;
+    std::atomic<uint64_t> nanBlocks_{0};
 
     bool active_ = false;
     // Audio thread only (sized in prepare).

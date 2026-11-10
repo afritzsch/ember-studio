@@ -156,6 +156,7 @@ enum GraphSnapshot {
         case .input: return "input:\(owner)"
         case .output: return "output:\(owner)"
         case .metronome: return "metronome:\(owner)"
+        case .bypass: return "bypass:\(owner)"
         case nil: return "?\(node)"
         }
     }
@@ -166,6 +167,7 @@ enum GraphSnapshot {
             var line = "  \(name(n.id)) \(n.kind.rawValue) v\(n.configVersion)"
             if n.numParams > 0 { line += " params \(n.firstParam)+\(n.numParams)" }
             if !n.configJSON.isEmpty { line += " config \(n.configJSON)" }
+            if let bypass = n.bypassParam { line += " bypass \(bypass)" }  // PLUG-018
             lines.append(line)
         }
         lines.append("edges:")

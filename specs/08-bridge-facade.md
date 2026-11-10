@@ -258,6 +258,15 @@ struct OfflineResultPOD { // after renderSeconds
 
 Affected: T-082 only. Tests: `OfflineDriverTests.normalize` (`offlineNormalize`), golden `export_normalize`, `ExportDialogTests`.
 
+### Contract delta (T-064), accepted (autobuild, see docs/autobuild/DECISIONS.md "T-064 bypass", "T-064 NaN event", "T-064 crash marker")
+Host bypass (PLUG-018), the plugin NaN guard (PLUG-022) and safe mode (PLUG-021). Everything is **additive and defaulted**; no existing signature, field or enum case changes meaning.
+- **`NodeDesc::bypassParam`** (05's `GraphDescription`, defaulted to `kNoBypassParam` = `0xFFFFFFFF`): the node's host-side bypass slot (10 "Contract delta (T-064)"). `GraphDescriptionBuilder` gains `addBypassableNode(id, kind, configVersion, firstParam, numParams, configJSON, bypassParam)`; `addNode` is unchanged and leaves it at none. Swift: `EngineGraph.Node.bypassParam: ParamID?` (nil = none), which `EngineClient` sends through `addBypassableNode`.
+- **`EngineEventType::pluginMisbehaved`** (appended last): `subject` = the device slot whose plugin wrote NaN or infinity, `error` = `internal` with a message. Its output was silenced; reported once per node instance of the slot (a rebuild that re-creates the node can report again). AU and VST3. Swift: `EngineEvent.Kind.pluginMisbehaved`; the app shows it like `pluginCrashed` (one line in `ToastCenter`, so its switch stays exhaustive).
+- **`TelemetryPOD.nanBlocks`** (T-070) also counts the blocks hosted plugins' guards silenced.
+- **Control protocol (13):** `project.open` takes `safeMode?: Bool` (default false) and answers `safeMode: true` when set.
+
+Affected: T-064. T-074 and T-054 add their own defaulted fields to `GraphDescription` in the same additive way; T-065 (device chain UI) shows bypass from the model and toggles it with `SetDeviceBypass`; T-083 (crash dialog) uses `CrashMarkerSession.crashedSessions` and `ProjectStore.open(_:recover:safeMode:)`.
+
 ## Status
 | ID | status | test |
 |---|---|---|

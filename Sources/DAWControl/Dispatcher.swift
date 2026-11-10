@@ -295,13 +295,15 @@ public final class Dispatcher {
     }
 
     private func projectOpen(_ p: ProjectOpenParams) async throws -> ProjectOpenResult {
-        let store = try await ProjectStore.open(resolveInput(p.path), recover: p.recover ?? false)
+        // PLUG-021 (T-064): safe mode is set before the engine is attached, so no plugin renders.
+        let safeMode = p.safeMode ?? false
+        let store = try await ProjectStore.open(resolveInput(p.path), recover: p.recover ?? false, safeMode: safeMode)
         try install(store, engine: p.engine)
         // DW-097, MODEL-046: relative paths resolve against the folder; a missing or unloadable
         // file leaves its asset offline and its clips render silence.
         let report = await store.loadAssets(timeout: configuration.jobTimeout)
         drainEvents()
-        return ProjectOpenResult(loadReport: report)
+        return ProjectOpenResult(loadReport: report, safeMode: safeMode ? true : nil)
     }
 
     /// Makes `store` current with a new engine at its session rate. The previous store and

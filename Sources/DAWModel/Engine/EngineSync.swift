@@ -70,6 +70,18 @@ public final class EngineSync {
         }
     }
 
+    /// PLUG-021 (T-064, docs/autobuild/DECISIONS.md "T-064 crash marker"): safe mode, a
+    /// session-only override that host-bypasses every AU and VST3 slot (PLUG-018) whatever the
+    /// document says. The slots, their params and their state stay as they are and nothing is
+    /// written to the project; clearing it gives each slot its own bypass again. Slot writes only,
+    /// never a rebuild.
+    public var arePluginsBypassed = false {
+        didSet {
+            guard arePluginsBypassed != oldValue, !isInvalidated else { return }
+            writeParams()
+        }
+    }
+
     /// T-052: asset loads of imported takes not yet waited for (`settleLoads`).
     private var pendingLoads: [JobID] = []
     /// REC-001 (T-052): the audio tracks armed in the engine, with their input pair.
@@ -90,9 +102,11 @@ public final class EngineSync {
 
     /// Allocates every param slot `project` needs, writes their values and applies its graph at
     /// once.
+    /// `pluginsBypassed` starts in safe mode (PLUG-021), so no plugin renders even for a block.
     public init(engine: any EngineProtocol, project: Project, debounce: Duration = EngineSync.defaultDebounce,
-                catalog: ParamCatalog? = nil) throws(DAWError) {
+                catalog: ParamCatalog? = nil, pluginsBypassed: Bool = false) throws(DAWError) {
         self.engine = engine
+        arePluginsBypassed = pluginsBypassed
         self.debounce = debounce
         self.catalog = catalog ?? ParamCatalog(engine: engine)
         self.project = project
@@ -400,7 +414,8 @@ public final class EngineSync {
     /// Writes the slots whose value differs from the last write, in ParamID order.
     private func writeParams() {
         let values = GraphDescriptionBuilder.paramValues(
-            project, runtime: runtime, catalog: catalog, metronomeSuppressed: isMetronomeSuppressed)
+            project, runtime: runtime, catalog: catalog, metronomeSuppressed: isMetronomeSuppressed,
+            pluginsBypassed: arePluginsBypassed)
         var changed: [(ParamID, Float)] = []
         // Bit patterns, so a NaN ("not set", PLUG-015) that was written isn't written again.
         for (id, value) in values where written[id]?.bitPattern != value.bitPattern { changed.append((id, value)) }
