@@ -25,13 +25,17 @@ import Foundation
 ///                                      audio: "assetID", "gain", "fadeIn", "fadeOut", "waveformLevel" | null;
 ///                                      midi: "notes"}],
 ///                    "selection", "marquee", "gesture", "playhead": {"tick", "x"}},
-///        "pianoRoll": {…}, "audioPreferences": {…}, "mixer": {…}, "export": {…}}]}
+///        "pianoRoll": {…}, "audioPreferences": {…}, "mixer": {…}, "export": {…},
+///        "engine": {"live", "mode"} | null, "feedbackWarning": {…} | null}],
+///      "liveWindow": id | null}
 @MainActor
 enum UIStateDumper {
     static func dump(_ app: AppModel) -> JSONValue {
         [
             "mainWindow": app.mainWindowID.map { .int(Int64($0)) } ?? .null,
             "windows": .array(app.windows.map { dump($0, isMain: $0.id == app.mainWindowID) }),
+            // DW-156 (T-090): the window holding the app's live engine (null with --engine offline).
+            "liveWindow": app.liveWindow.map { .int(Int64($0.id)) } ?? .null,
         ]
     }
 
@@ -89,6 +93,40 @@ enum UIStateDumper {
             "audioPreferences": dump(window.audioPrefs),
             "mixer": dump(window.mixer),
             "export": dump(window.exportDialog),  // T-082
+            "engine": engine(window),  // T-090 (DW-156)
+            "feedbackWarning": dump(window.feedbackGuard),  // T-090 (DW-230)
+        ]
+    }
+
+    /// DW-156 (T-090): which engine the window's project has: the app's live one (front window
+    /// only) or an offline one.
+    ///
+    ///     {"live": true, "mode": "realtime" | "offline"} | null (no engine)
+    static func engine(_ window: ProjectWindowModel) -> JSONValue {
+        guard let engine = window.engine else { return .null }
+        let mode: String = if case .realtime = engine.mode { "realtime" } else { "offline" }
+        return ["live": .bool(window.hasLiveEngine), "mode": .string(mode)]
+    }
+
+    /// DW-230 (T-090): the monitoring feedback warning while it lasts.
+    ///
+    ///     {"tracks": [{id, name, monitoring, armed}], "input": {id, name}, "output": {id, name},
+    ///      "toast": id | null} | null
+    static func dump(_ feedback: FeedbackGuard) -> JSONValue {
+        guard let risk = feedback.risk, let window = feedback.window else { return .null }
+        let shown = feedback.toastID.flatMap { id in window.toasts.toasts.contains { $0.id == id } ? id : nil }
+        return [
+            "tracks": .array(risk.tracks.compactMap { id in
+                window.project.track(id).map { track in
+                    [
+                        "id": .int(Int64(bitPattern: track.id)), "name": .string(track.name),
+                        "monitoring": .string(track.monitoring.rawValue), "armed": .bool(track.armed),
+                    ]
+                }
+            }),
+            "input": ["id": .int(Int64(risk.input.id)), "name": .string(risk.input.name)],
+            "output": ["id": .int(Int64(risk.output.id)), "name": .string(risk.output.name)],
+            "toast": shown.map { .int(Int64($0)) } ?? .null,
         ]
     }
 
@@ -213,7 +251,8 @@ enum UIStateDumper {
     /// UI-040, DW-183 (T-055): the audio settings and where a session-rate re-conversion is.
     ///
     ///     {"open", "driver": "fake" | "coreAudio" | null, "devices": [{id, name, inputChannels,
-    ///      outputChannels, nominalSampleRate, isDefaultOutput}], "outputDevice", "inputDevice"
+    ///      outputChannels, nominalSampleRate, isDefaultOutput, isDefaultInput, isBuiltIn,
+    ///      outputIsHeadphones}], "outputDevice", "inputDevice"
     ///      (0: system default), "runningDeviceID", "deviceRunning", "sampleRate" (the project's),
     ///      "engineSampleRate", "bufferFrames", "inputChannels", "inputChannelChoices",
     ///      "latency": {deviceSamples, graphSamples, totalSamples, totalMs},
@@ -231,6 +270,9 @@ enum UIStateDumper {
                     "id": .int(Int64(device.id)), "name": .string(device.name),
                     "inputChannels": .int(Int64(device.inputChannels)), "outputChannels": .int(Int64(device.outputChannels)),
                     "nominalSampleRate": .double(device.nominalSampleRate), "isDefaultOutput": .bool(device.isDefaultOutput),
+                    // T-090 (DW-230)
+                    "isDefaultInput": .bool(device.isDefaultInput), "isBuiltIn": .bool(device.isBuiltIn),
+                    "outputIsHeadphones": .bool(device.outputIsHeadphones),
                 ]
             }),
             "outputDevice": config.map { .int(Int64($0.outputDevice)) } ?? .null,
