@@ -57,7 +57,7 @@ IDs are `UInt64`, allocated by `IDAllocator` stored in the project (never reused
 - *Param slots*: strips get 4 (gain 0, pan 1, mute 2, phase 3), sends get 2 (level 0, mute 1; MIX-007), and the master node gets 1 (limiter). Device slots get their kind's ParamInfo count, or as many as their stored values need. A slot is freed after the graph without its node is applied.
 - *Solo (MIX-006)*: soloing a track or a bus counts. A channel stays audible if it is soloed, upstream of a soloed channel or downstream of one, following outputs and sends but not sidechains. A channel's own mute always wins, and solo never mutes the master. A channel's resolved mute (manual or solo) is written into its strip's mute slot and into the mute slot of every send it owns, so a pre-fader send can't leak a muted channel (MIX-007, user decision); send levels keep their value.
 - *Clip players (DW-072)*: a player gets the next `configVersion` when its clips or notes differ from the applied graph, or when an `assetLoaded` event names an asset its clips use.
-- *Left out of the graph*: bypassed devices (until host bypass, PLUG-018), outputs and sends to a missing bus, and a MIDI track's player when it has no active instrument.
+- *Left out of the graph*: outputs and sends to a missing bus, and a MIDI track's player when it has no instrument. Bypassed devices stay in the graph since T-064 (host bypass, PLUG-018): each device slot has a bypass param slot (`GraphNodeID.bypass(of: slot)`), so bypass is a param value, never structure.
 
 ### Validation
 | ID | Requirement | Acceptance |
@@ -140,6 +140,12 @@ public protocol Command: Codable, Sendable { static var type: String { get }; va
 public enum CommandRegistry { public static func decode(_ json: Data) throws(DAWError) -> any Command }
 ```
 In headless tools, `ProjectStore` runs on `@MainActor` too (the CLI has a main run loop), so there is one isolation story.
+
+### Contract delta (T-064), accepted (autobuild, see docs/autobuild/DECISIONS.md "T-064 bypass", "T-064 crash marker")
+Additive; nothing in the Interfaces above changes.
+- **`SetDeviceBypass {slotID, bypass}`** (MODEL-005, PLUG-018): sets a device slot's `bypass` (an instrument or an insert of a track, bus or the master); `notFound` for an unknown slot; inverts to the old value. It is a normal undoable command ("Bypass Device" / "Enable Device"), and a param-only change (MODEL-021): bypassed devices stay in the graph with a bypass slot (see *Left out of the graph*). MODEL-030 already counted bypassed devices, so it can't close a cycle.
+- **Safe mode** (PLUG-021): `ProjectStore.isSafeMode` (session-only, never persisted, not an edit) and `static func open(_: URL, recover: Bool, safeMode: Bool)`; `open(_:recover:)` is `safeMode: false`. `EngineSync.arePluginsBypassed` (and an `init` parameter of the same meaning) writes 1 into every AU/VST3 slot's bypass slot while it is set.
+- **Running marker** (PLUG-021): `CrashMarker` / `CrashMarkerSession` in `Store/CrashMarker.swift` (10 "Contract delta (T-064)").
 
 ## Status
 | ID | status | test |
