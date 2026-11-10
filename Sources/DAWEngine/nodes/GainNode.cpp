@@ -1,5 +1,6 @@
 #include "nodes/GainNode.h"
 
+#include "automation/WrapJump.h"
 #include "core/ProcessContext.h"
 #include "graph/PassThrough.h"
 

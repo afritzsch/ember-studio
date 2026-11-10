@@ -103,3 +103,24 @@ extension DeviceEvent.Kind: JSONSchemaDescribing {
         JSONSchema.stringEnum(["deviceLost", "deviceRestored", "sampleRateChanged", "processorOverload"])
     }
 }
+
+// T-074 (11): an automation point; `curve` picks the segment shape, `shape` only with "exp".
+extension AutomationPoint: JSONSchemaDescribing {
+    public static var jsonSchema: JSONValue {
+        JSONSchema.object([
+            "tick": JSONSchema.of(Tick.self),
+            "value": ["type": "number", "minimum": 0, "maximum": 1, "description": "normalized 0…1"],
+            "curve": JSONSchema.stringEnum(["linear", "hold", "exp"], description: "the segment to the next point; default linear"),
+            "shape": ["type": "number", "description": "exp only: s in (e^(s·f) − 1)/(e^s − 1), |s| ≤ 50"],
+        ], optional: ["curve", "shape"], description: "An automation breakpoint (AUTO-004)")
+    }
+
+    public static var jsonSchemaExample: JSONValue? { ["tick": 0, "value": 0] }
+}
+
+extension AutomationLane.Mode: JSONSchemaDescribing {
+    public static var jsonSchema: JSONValue {
+        JSONSchema.stringEnum(AutomationLane.Mode.allCases.map(\.rawValue),
+                              description: "read plays the lane; off ignores it; touch/latch/write record (T-075) and play like read")
+    }
+}

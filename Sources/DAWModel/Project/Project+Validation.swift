@@ -13,6 +13,7 @@ extension Project {
         try validateRouting()
         try validateLoop()
         try metronome.validate()
+        try validateAutomation()  // T-074 (11)
     }
 
     /// Assets are well-formed and every audio clip's asset exists (T-030). An asset whose file is

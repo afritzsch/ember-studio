@@ -118,7 +118,52 @@ public enum GraphDescriptionBuilder {
             else { continue }
             b.edge(from, slot.id, .sidechain)
         }
+        b.graph.automation = automation(project, runtime: runtime)
         return b.graph
+    }
+
+    /// AUTO-001/005/008 (T-074): the engine lanes for the project's lanes with points. A lane
+    /// drives its target's param slot; one whose target has no slot (its send or device is gone)
+    /// is left out. `off` lanes go out disabled (AUTO-005).
+    ///
+    /// A strip mute lane drives the strip's mute slot and the mute slot of every send of the
+    /// channel, as the resolved mute does (MIX-007: a muted channel silences its sends, pre-fader
+    /// included). While solo mutes the channel (MIX-006: muted by solo, not by hand) the lane is
+    /// disabled, so the solo-resolved 1 that `paramValues` writes holds and solo never leaks
+    /// through an automated mute.
+    static func automation(_ project: Project, runtime: RuntimeIDs) -> [EngineGraph.Automation] {
+        let muted = SoloResolver.mutedChannels(in: project)
+        var out: [EngineGraph.Automation] = []
+        project.forEachAutomationLane { lane, _ in
+            guard !lane.points.isEmpty else { return }
+            let points = lane.points.map {
+                let (curve, shape) = $0.engineCurve
+                return EngineGraph.Automation.Point(tick: $0.tick, value: $0.value, curve: curve, shape: shape)
+            }
+            func emit(_ id: ParamID?, enabled: Bool = lane.isEnabled) {
+                guard let id else { return }
+                out.append(.init(laneID: lane.id, target: id, points: points, enabled: enabled))
+            }
+            switch lane.target {
+            case .strip(let channel, .mute):
+                let soloMuted = muted.contains(channel) && project.strip(of: channel)?.mute == false
+                let enabled = lane.isEnabled && !soloMuted
+                emit(runtime.stripParam(channel, ParamLayout.Strip.mute), enabled: enabled)
+                for send in project.sends(of: channel) ?? [] { emit(runtime.sendMuteParam(send.id), enabled: enabled) }
+            case .strip(let channel, .gain):
+                emit(runtime.stripParam(channel, ParamLayout.Strip.gain))
+            case .strip(let channel, .pan):
+                emit(runtime.stripParam(channel, ParamLayout.Strip.pan))
+            case .strip:
+                return  // solo and phase aren't automatable (validate() rejects them)
+            case .sendLevel(let send):
+                emit(runtime.sendLevelParam(send))
+            case .device(let slot, let index):
+                guard index >= 0 else { return }
+                emit(runtime.deviceParam(slot, UInt32(index)))
+            }
+        }
+        return out
     }
 
     /// MODEL-022: the param slots every param-bearing node needs, by NodeID. Device slots and
@@ -140,6 +185,14 @@ public enum GraphDescriptionBuilder {
         for slot in project.allDeviceSlots {
             let count = catalog.paramCount(for: slot)
             if count > 0 { out[slot.id] = count }
+        }
+        // AUTO-008/009 (T-074, PLUG-015): a plugin param gets a slot when it is automated, so a
+        // lane on a param without a stored value still has a slot to drive.
+        project.forEachAutomationLane { lane, _ in
+            guard case .device(let slot, let index) = lane.target, index >= 0,
+                project.deviceSlotOwner(slot) != nil
+            else { return }
+            out[slot] = max(out[slot] ?? 0, UInt32(index) + 1)
         }
         return out
     }

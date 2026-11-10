@@ -4,6 +4,7 @@
 #include <cstring>
 #include <initializer_list>
 
+#include "automation/WrapJump.h"
 #include "core/ProcessContext.h"
 #include "dsp/PanLaw.h"
 #include "graph/PassThrough.h"

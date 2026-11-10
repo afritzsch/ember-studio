@@ -114,7 +114,7 @@ struct ParamSmootherTests {
     func multiplyMatchesFill() {
         for (start, target, frames) in [(0.0, 1.0, 512), (1.0, 1.0, 300), (0.8, -0.3, 4096), (2.0, 0.0, 1)]
             as [(Float, Float, Int)] {
-            let ramp = daw.ParamRamp(start: start, target: target, numFrames: UInt32(frames))
+            let ramp = daw.ParamRamp(start: start, target: target, numFrames: UInt32(frames), jumpAt: UInt32.max, after: 0)
             #expect(ramp.isConstant() == (start == target))
             var gains = [Float](repeating: 0, count: frames)
             gains.withUnsafeMutableBufferPointer { ramp.fill($0.baseAddress) }

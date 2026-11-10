@@ -14,7 +14,6 @@
 #include <cstdint>
 
 #include "core/ParamSlotTable.h"
-#include "core/ProcessContext.h"
 #include "core/Realtime.h"
 
 namespace daw {
@@ -79,27 +78,13 @@ struct ParamRamp {
 };
 
 // AUTO-003 (T-074): where and to what a slot jumps inside this block (a loop wrap with
-// automation on it); frame kNoJump: no jump. wrapJump() reads it for a node.
+// automation on it); frame kNoJump: no jump. automation/WrapJump.h reads it for a node.
 struct WrapJump {
     uint32_t frame = ParamRamp::kNoJump;
     float value = 0.0f;
 
     bool active() const DAW_RT { return frame != ParamRamp::kNoJump; }
 };
-
-// The jump of slot `id` in the block `ctx` describes: only in a block with two transport
-// segments, at the second one's first frame, and only if automation registered a value after the
-// wrap for this block (ParamSlotTable::afterWrap). Nodes on the transport's block (not the MIX-023
-// look-ahead block) see the wrap where automation evaluated it.
-inline WrapJump wrapJump(const ProcessContext& ctx, ParamID id) DAW_RT {
-    WrapJump jump;
-    if (ctx.transport.numSegments != 2) return jump;
-    float value = 0.0f;
-    if (!ctx.params.afterWrap(id, value)) return jump;
-    jump.frame = ctx.transport.seg[1].frameOffset;
-    jump.value = value;
-    return jump;
-}
 
 class ParamSmoother {
 public:

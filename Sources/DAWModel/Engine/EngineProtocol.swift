@@ -160,6 +160,37 @@ public struct EngineGraph: Hashable, Sendable {
         }
     }
 
+    /// AUTO-001 (T-074): one engine lane (11 Interfaces, `AutomationDesc`). `target` is a param
+    /// slot; points carry normalized values and the engine's curve codes (0 linear, 1 hold,
+    /// 2 exponential with `shape`).
+    public struct Automation: Hashable, Sendable {
+        public struct Point: Hashable, Sendable {
+            public var tick: Tick
+            public var value: Float
+            public var curve: UInt8
+            public var shape: Float
+
+            public init(tick: Tick, value: Float, curve: UInt8 = 0, shape: Float = 0) {
+                self.tick = tick
+                self.value = value
+                self.curve = curve
+                self.shape = shape
+            }
+        }
+
+        public var laneID: ModelID
+        public var target: ParamID
+        public var points: [Point]
+        public var enabled: Bool
+
+        public init(laneID: ModelID, target: ParamID, points: [Point], enabled: Bool = true) {
+            self.laneID = laneID
+            self.target = target
+            self.points = points
+            self.enabled = enabled
+        }
+    }
+
     public var nodes: [Node]
     public var edges: [Edge]
     public var audioClips: [Clip]
@@ -168,6 +199,8 @@ public struct EngineGraph: Hashable, Sendable {
     public var tempoEvents: [TempoEvent]
     public var timeSignatures: [TimeSignatureEvent]
     public var master: NodeIDValue
+    /// AUTO-001 (T-074), additive.
+    public var automation: [Automation] = []
 
     /// 120 bpm, 4/4, no nodes.
     public init(nodes: [Node] = [], edges: [Edge] = [], audioClips: [Clip] = [], notes: [Note] = [],
