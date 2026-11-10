@@ -139,12 +139,13 @@ struct M7GoldenTests {
         defer { try? FileManager.default.removeItem(at: run.workDirectory) }
         #expect(run.failures == [])
         #expect(run.comparison?.pass == true)
-        // Four NaN-fed effects, each guarding every block of the render (and any the engine ran
-        // before it): nanBlocks counts them all, so it is 4 × the blocks the engine rendered.
+        // Four NaN-fed effects, each guarding every block of the render: 4 × 188 512-frame blocks
+        // (the engine's few blocks outside the render don't play the clip players' sources).
+        let renderBlocks: Int64 = (96000 + 511) / 512
         let nanBlocks = run.telemetry?["nanBlocks"]?.int64Value ?? -1
         let blocks = run.telemetry?["blocksRendered"]?.int64Value ?? -1
-        #expect(blocks >= (96000 + 511) / 512)
-        #expect(nanBlocks == 4 * blocks, "nanBlocks \(nanBlocks), blocksRendered \(blocks)")
+        #expect(blocks >= renderBlocks)
+        #expect(nanBlocks == 4 * renderBlocks, "nanBlocks \(nanBlocks), blocksRendered \(blocks)")
 
         let channels = try Self.reference(name, frames: 96000)
         guard channels.count == 2, channels[0].count == 96000 else { return }
@@ -156,7 +157,7 @@ struct M7GoldenTests {
             let end = index + 1 < slots.count ? slots[index + 1].start : 96000
             for channel in channels {
                 #expect(channel[slot.start] != 0, "\(slot.name): the click is heard")
-                #expect(channel[slot.start..<end].allSatisfy(\.isFinite), "\(slot.name): finite")
+                #expect(channel[slot.start..<end].allSatisfy { $0.isFinite }, "\(slot.name): finite")
                 #expect(channel[slot.quietBy..<end].allSatisfy { $0 == 0 }, "\(slot.name): exact 0 after the tail")
             }
         }
@@ -297,7 +298,7 @@ struct M7GoldenTests {
         #expect(renders[0].frameCount == 96000 && renders[0].channels.count == 2)
         for (a, b) in zip(renders[0].channels, renders[1].channels) {
             #expect(a.map(\.bitPattern) == b.map(\.bitPattern))
-            #expect(a.allSatisfy(\.isFinite))
+            #expect(a.allSatisfy { $0.isFinite })
             // The reverb bus still rings after the last kick and tone have passed.
             #expect(a[94000..<96000].contains { $0 != 0 })
         }

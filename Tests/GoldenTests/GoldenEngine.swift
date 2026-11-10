@@ -222,6 +222,7 @@ final class GoldenEngine: EngineProtocol {
         out.outputDeviceID = t.outputDeviceID
         out.processorOverloads = t.processorOverloads
         out.renderOverruns = t.renderOverruns
+        out.nanBlocks = t.nanBlocks  // DW-142 (T-070); T-077 reads it in effects_silence_nan_guard
         return out
     }
 
