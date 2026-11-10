@@ -31,19 +31,19 @@ struct ExportPanel: View {
                          ids: ["int16", "int24", "float32"].map { "export.sampleFormat.\($0)" },
                          face: { $0.label.replacingOccurrences(of: "Sample Format: ", with: "") })
                 }
-                if let dither = controls["export.dither"] { ControlToggle(control: dither) }
-                if let normalize = controls["export.normalize"] { ControlToggle(control: normalize, face: "Normalize") }
+                if let dither = controls["export.dither"] { ControlToggle(control: dither, checkbox: true) }
+                if let normalize = controls["export.normalize"] { ControlToggle(control: normalize, face: "Normalize", checkbox: true) }
                 Spacer()
                 if let close = controls["export.close"] {
                     ControlButton(control: close, systemImage: "xmark").labelStyle(.iconOnly)
                 }
             }
             HStack(spacing: 16) {
-                if let tail = controls["export.tail"] { ControlToggle(control: tail, face: "Tail") }
+                if let tail = controls["export.tail"] { ControlToggle(control: tail, face: "Tail", checkbox: true) }
                 menu("up to \(ExportModel.tailTitle(model.tailMaxSeconds))", id: "export.tailMax.menu",
                      ids: ExportModel.tailMaxChoices.map { "export.tailMax.\(Int($0))" },
                      face: { $0.label.replacingOccurrences(of: "Tail up to ", with: "") })
-                if let metronome = controls["export.metronome"] { ControlToggle(control: metronome) }
+                if let metronome = controls["export.metronome"] { ControlToggle(control: metronome, checkbox: true) }
                 field("To") {
                     Text(model.destination?.path ?? "—")
                         .font(.callout)
