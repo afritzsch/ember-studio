@@ -60,6 +60,8 @@ public final class FakeEngine: EngineProtocol {
         var recordingDirectory = ""
         var armedMidi: Set<NodeIDValue> = []  // T-053
         var midiInputs: [MidiInputInfo] = []
+        var exportSpecs: [ExportSpec] = []  // T-082
+        var failNextRender: DAWError?  // T-082
     }
 
     private let state = Mutex(State())
@@ -77,6 +79,10 @@ public final class FakeEngine: EngineProtocol {
     // MARK: Test hooks
 
     public var calls: [Call] { state.withLock { $0.calls } }
+    /// T-082: every spec passed to `renderOffline`, in order.
+    public var exportSpecs: [ExportSpec] { state.withLock { $0.exportSpecs } }
+    /// T-082: the next `renderOffline` job fails with `error`.
+    public func failNextRender(_ error: DAWError) { state.withLock { $0.failNextRender = error } }
     /// Every graph passed to `applyGraph`, in order.
     public var appliedGraphs: [EngineGraph] { state.withLock { $0.graphs } }
     public func clearCalls() { state.withLock { $0.calls.removeAll() } }
@@ -322,11 +328,17 @@ public final class FakeEngine: EngineProtocol {
     public func renderOffline(from: Tick, to: Tick, spec: ExportSpec) -> JobID {
         state.withLock { s in
             s.calls.append(.renderOffline(from: from, to: to, path: spec.path))
+            s.exportSpecs.append(spec)  // T-082
             let job = s.nextJob
             s.nextJob += 1
             var render = OfflineRenderResult()
             render.sampleRate = s.telemetry.sampleRate
             s.jobs[job] = EngineJobStatus(job: job, kind: .renderOffline, state: .succeeded, progress: 1, render: render)
+            if let error = s.failNextRender {  // T-082
+                s.failNextRender = nil
+                s.jobs[job] = EngineJobStatus(job: job, kind: .renderOffline, state: .failed, progress: 0, error: error,
+                                              render: render)
+            }
             s.events.append(EngineEvent(kind: .jobFinished, subject: 2, job: job))
             return job
         }

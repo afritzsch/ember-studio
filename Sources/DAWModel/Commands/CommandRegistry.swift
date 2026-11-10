@@ -60,6 +60,8 @@ public enum CommandRegistry {
         // T-052: arming and monitoring (MODEL-005, REC-001/020; outside undo history)
         ArmTrack.self,
         SetMonitoring.self,
+        // T-064: host-side device bypass (MODEL-005, PLUG-018; DW-149 in part)
+        SetDeviceBypass.self,
     ]
 
     private static let table = Mutex<[String: any Command.Type]>(

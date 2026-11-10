@@ -18,6 +18,11 @@ struct ProjectWindowView: View {
                 AudioPreferencesPanel(model: model.audioPrefs, controls: controls)
                 Divider()
             }
+            // UI-042 (T-082): the export dialog, a strip like the audio settings.
+            if model.exportDialog.isOpen {
+                ExportPanel(model: model.exportDialog, controls: controls)
+                Divider()
+            }
             HSplitView {
                 if model.showsBrowser {
                     PanePlaceholder(title: "Browser", detail: "Files and plugins")
@@ -98,6 +103,10 @@ private struct ToolbarRow: View {
             // DW-183: a session-rate change re-converting the project's audio (IO-033).
             if let reload = model.audioPrefs.reloadText {
                 ReloadProgress(text: reload, fraction: model.audioPrefs.reload?.fraction ?? 0, id: "toolbar.reload")
+            }
+            // UI-042 (T-082): a running export, also with its panel closed.
+            if model.exportDialog.isRunning {
+                ReloadProgress(text: model.exportDialog.progressText, fraction: model.exportDialog.progress, id: "toolbar.export")
             }
             Text(String(format: "CPU %.0f%% · xruns %llu", model.telemetry.dspLoadPercent, model.telemetry.xruns))
                 .font(.caption.monospacedDigit())

@@ -127,6 +127,8 @@ OfflineResultPOD toResult(const OfflineRenderStats& stats, double sampleRate) {
     r.rtViolations = stats.rtViolations;
     r.clippedSamples = stats.clippedSamples;
     r.renderSeconds = stats.renderSeconds;
+    r.peak = stats.peak;                    // T-082
+    r.normalizeGain = stats.normalizeGain;  // T-082
     return r;
 }
 
@@ -439,6 +441,10 @@ EngineFacade::Impl::Impl(EngineMode m, const DriverConfigPOD& cfg, FacadeOptions
         }
     }
     if (!(sampleRate >= kMinSampleRate && sampleRate <= kMaxSampleRate)) sampleRate = 48000.0;
+
+    // PLUG-022 (T-064): plugin nodes count the blocks their NaN guard silenced into nanBlocks.
+    plugins->setTelemetry(&engine.telemetry());
+    vst3Plugins->setTelemetry(&engine.telemetry());
 
     // PLUG-010 (T-061): hosted Audio Units. Registered before the creator's hook (which may replace
     // the kind) and kept in registerNodes for rate changes.
@@ -885,6 +891,19 @@ void EngineFacade::Impl::pump() {
         pushEvent(std::move(event));
     }
 
+    // PLUG-022 (T-064): a plugin node that output NaN/inf (silenced, counted in nanBlocks), once
+    // per node instance, AU and VST3.
+    std::vector<NodeID> misbehaved = plugins->takeMisbehaved();
+    for (NodeID slot : vst3Plugins->takeMisbehaved()) misbehaved.push_back(slot);
+    for (NodeID slot : misbehaved) {
+        EngineEventPOD event;
+        event.type = EngineEventType::pluginMisbehaved;
+        event.subject = slot;
+        event.error.code = FacadeErrorCode::internal;
+        event.error.message = "plugin " + std::to_string(slot) + " output NaN or infinity; its output was silenced";
+        pushEvent(std::move(event));
+    }
+
     // IO-023: the driver counts xruns into telemetry; surface them as events.
     const uint64_t xruns = engine.telemetry().snapshot().xruns;
     if (xruns > lastXruns) {
@@ -1010,6 +1029,7 @@ void EngineFacade::Impl::runExport(JobID jobID, Tick from, Tick to, const Export
     spec.blockSize = pod.blockSize;
     spec.tail = TailSpec{pod.tailEnabled, pod.tailThresholdDb, pod.tailQuietSeconds, pod.tailMaxSeconds};
     spec.followLoop = pod.followLoop;  // T-036
+    spec.normalize = pod.normalize;    // T-082
 
     FacadeError error;
     bool render = false;

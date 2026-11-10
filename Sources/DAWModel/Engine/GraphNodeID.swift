@@ -22,9 +22,12 @@ public enum GraphNodeID {
         case output = 3
         /// The project metronome (`NodeKind.metronome`, T-026), owned by the master.
         case metronome = 4
+        /// A device slot's host-side bypass param slot (T-064, PLUG-018). Never a graph node: it
+        /// keys the slot's bypass param range in `RuntimeIDs.params`.
+        case bypass = 5
         /// An audio track's input monitoring mode slot (REC-020/022, T-054). Not a graph node: it
         /// owns the one param slot `EngineGraph.Monitor.modeSlot` names.
-        case monitor = 5
+        case monitor = 6
     }
 
     static let roleShift: UInt64 = 56
@@ -50,6 +53,8 @@ public enum GraphNodeID {
     public static func output(of master: NodeIDValue) -> NodeIDValue { make(.output, master) }
     /// The project metronome's node (TIME-010, T-026), feeding `output(of: master)`.
     public static func metronome(of master: NodeIDValue) -> NodeIDValue { make(.metronome, master) }
+    /// PLUG-018 (T-064): the key of a device slot's bypass param slot in `RuntimeIDs.params`.
+    public static func bypass(of slot: NodeIDValue) -> NodeIDValue { make(.bypass, slot) }
     /// An audio track's monitoring mode slot owner (T-054, REC-022: a slot, not a node).
     public static func monitor(of track: NodeIDValue) -> NodeIDValue { make(.monitor, track) }
 }

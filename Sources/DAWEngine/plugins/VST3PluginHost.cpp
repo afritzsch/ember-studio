@@ -33,6 +33,16 @@ Result<std::unique_ptr<Node>> VST3PluginHost::create(const NodeCreateInfo& info)
     auto parsed = VST3PluginConfig::parse(desc.configJSON);
     if (!parsed) return slotError(desc.id, parsed.error());
     const VST3PluginConfig config = std::move(parsed).value();
+    // PLUG-022 (T-064): every node instance gets its own health, reported at most once.
+    auto health = std::make_shared<PluginHealth>();
+    Telemetry* telemetry = nullptr;
+    {
+        std::lock_guard lock(mutex_);
+        Slot& slot = slots_[desc.id];
+        slot.health = health;
+        slot.healthReported = false;
+        telemetry = telemetry_;
+    }
 
     std::shared_ptr<VST3Instance> live, parked;
     std::optional<std::vector<uint8_t>> pending;
@@ -65,7 +75,7 @@ Result<std::unique_ptr<Node>> VST3PluginHost::create(const NodeCreateInfo& info)
             slot.configState = config.state;
             // The plugin renders as absent; its state is kept for getPluginState (saving).
             return std::unique_ptr<Node>(std::make_unique<VST3PluginNode>(
-                desc.id, nullptr, desc.firstParam, desc.numParams, info.latency, weak_from_this()));
+                desc.id, nullptr, desc.firstParam, desc.numParams, info.latency, weak_from_this(), health, telemetry));
         }
         instance = std::move(made).value();
     }
@@ -88,7 +98,7 @@ Result<std::unique_ptr<Node>> VST3PluginHost::create(const NodeCreateInfo& info)
         if (pending) slot.pending.reset();
     }
     return std::unique_ptr<Node>(std::make_unique<VST3PluginNode>(desc.id, instance, desc.firstParam, desc.numParams,
-                                                                  info.latency, weak_from_this()));
+                                                                  info.latency, weak_from_this(), health, telemetry));
 }
 
 Result<void> VST3PluginHost::instantiate(NodeID slotID, std::string_view identifier) {
@@ -209,6 +219,24 @@ std::string VST3PluginHost::infoJSON(NodeID slotID) const {
         json += "]";
     }
     return json + "}";
+}
+
+// MARK: PLUG-022 (T-064)
+
+std::vector<NodeID> VST3PluginHost::takeMisbehaved() {
+    std::lock_guard lock(mutex_);
+    std::vector<NodeID> out;
+    for (auto& [id, slot] : slots_) {
+        if (!slot.health || slot.healthReported || !slot.health->raised()) continue;
+        slot.healthReported = true;
+        out.push_back(id);
+    }
+    return out;
+}
+
+void VST3PluginHost::setTelemetry(Telemetry* telemetry) {
+    std::lock_guard lock(mutex_);
+    telemetry_ = telemetry;
 }
 
 } // namespace daw

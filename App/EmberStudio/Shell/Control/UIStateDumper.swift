@@ -25,7 +25,7 @@ import Foundation
 ///                                      audio: "assetID", "gain", "fadeIn", "fadeOut", "waveformLevel" | null;
 ///                                      midi: "notes"}],
 ///                    "selection", "marquee", "gesture", "playhead": {"tick", "x"}},
-///        "pianoRoll": {…}, "audioPreferences": {…}, "mixer": {…}}]}
+///        "pianoRoll": {…}, "audioPreferences": {…}, "mixer": {…}, "export": {…}}]}
 @MainActor
 enum UIStateDumper {
     static func dump(_ app: AppModel) -> JSONValue {
@@ -88,6 +88,52 @@ enum UIStateDumper {
             "pianoRoll": dump(window.pianoRoll),
             "audioPreferences": dump(window.audioPrefs),
             "mixer": dump(window.mixer),
+            "export": dump(window.exportDialog),  // T-082
+        ]
+    }
+
+    /// UI-042 (T-082): the export dialog's settings, each range's span, the destination and the
+    /// render in progress or last finished. 12 *Export dialog details*.
+    ///
+    ///     {"open", "range", "ranges": [{id, available, from?, to?, seconds?}], "fileType",
+    ///      "sampleFormat", "dither", "normalize", "tail", "tailMaxSeconds", "includeMetronome",
+    ///      "path", "destinationChosen", "running", "progress",
+    ///      "lastResult": {path, sampleRate, frames, seconds, peak, normalizeGain, clippedSamples,
+    ///                     rtViolations} | null, "error"}
+    static func dump(_ export: ExportModel) -> JSONValue {
+        [
+            "open": .bool(export.isOpen),
+            "range": .string(export.range.rawValue),
+            "ranges": .array(ExportRange.allCases.map { range in
+                var json: [String: JSONValue] = ["id": .string(range.rawValue), "available": .bool(export.isAvailable(range))]
+                if let span = export.span(range) {
+                    json["from"] = .int(span.from.raw)
+                    json["to"] = .int(span.to.raw)
+                    json["seconds"] = .double(export.seconds(span))
+                }
+                return .object(json)
+            }),
+            "fileType": .string(export.fileType.rawValue),
+            "sampleFormat": .string(export.sampleFormat.rawValue),
+            "dither": .bool(export.spec.dither),
+            "normalize": .bool(export.normalize),
+            "tail": .bool(export.tail),
+            "tailMaxSeconds": .double(export.tailMaxSeconds),
+            "includeMetronome": .bool(export.includeMetronome),
+            "path": export.destination.map { .string($0.path) } ?? .null,
+            "destinationChosen": .bool(export.destinationChosen),
+            "running": .bool(export.isRunning),
+            "progress": .double(export.progress),
+            "lastResult": export.lastResult.map { done in
+                [
+                    "path": .string(done.path), "sampleRate": .double(done.render.sampleRate),
+                    "frames": .int(done.render.framesWritten), "seconds": .double(done.render.durationSeconds),
+                    "peak": .double(done.render.peak), "normalizeGain": .double(done.render.normalizeGain),
+                    "clippedSamples": .int(Int64(clamping: done.render.clippedSamples)),
+                    "rtViolations": .int(Int64(clamping: done.render.rtViolations)),
+                ]
+            } ?? .null,
+            "error": export.lastError.map { .string($0) } ?? .null,
         ]
     }
 

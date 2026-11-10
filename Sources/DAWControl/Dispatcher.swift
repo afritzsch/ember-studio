@@ -295,13 +295,15 @@ public final class Dispatcher {
     }
 
     private func projectOpen(_ p: ProjectOpenParams) async throws -> ProjectOpenResult {
-        let store = try await ProjectStore.open(resolveInput(p.path), recover: p.recover ?? false)
+        // PLUG-021 (T-064): safe mode is set before the engine is attached, so no plugin renders.
+        let safeMode = p.safeMode ?? false
+        let store = try await ProjectStore.open(resolveInput(p.path), recover: p.recover ?? false, safeMode: safeMode)
         try install(store, engine: p.engine)
         // DW-097, MODEL-046: relative paths resolve against the folder; a missing or unloadable
         // file leaves its asset offline and its clips render silence.
         let report = await store.loadAssets(timeout: configuration.jobTimeout)
         drainEvents()
-        return ProjectOpenResult(loadReport: report)
+        return ProjectOpenResult(loadReport: report, safeMode: safeMode ? true : nil)
     }
 
     /// Makes `store` current with a new engine at its session rate. The previous store and
@@ -556,6 +558,7 @@ public final class Dispatcher {
         var spec = ExportSpec(path: url.path, fileType: p.format ?? .wav, sampleFormat: p.sampleFormat ?? .float32,
                               blockSize: p.blockSize ?? 512, tailEnabled: p.tail ?? true)
         spec.followLoop = p.loop ?? false  // T-036
+        spec.normalize = p.normalize ?? false  // T-082
         // T-026 (DECISIONS.md Q1): the click stays out of an export unless asked for. The `on`
         // slot is held at 0 for the render (a slot write, no rebuild) and follows the project again
         // afterwards, whatever happens to the job.
@@ -567,7 +570,8 @@ public final class Dispatcher {
         renderRtViolations += render.rtViolations
         return RenderOfflineResult(path: url.path, durationSec: render.durationSeconds, renderTimeSec: render.renderSeconds,
                                    sampleRate: render.sampleRate, frames: render.framesWritten,
-                                   rtViolations: render.rtViolations, clippedSamples: render.clippedSamples)
+                                   rtViolations: render.rtViolations, clippedSamples: render.clippedSamples,
+                                   normalizeGain: spec.normalize ? render.normalizeGain : nil)
     }
 
     /// DW-095: applies any pending structural change and waits until the engine has built it, so a

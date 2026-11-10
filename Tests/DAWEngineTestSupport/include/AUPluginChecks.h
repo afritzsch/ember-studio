@@ -20,6 +20,8 @@ bool registerFakeAudioUnit();
 // all live fakes have rendered.
 int liveFakeAudioUnits();
 void setFakeAudioUnitLatency(double seconds);
+// T-064 (PLUG-022): every fake AU writes a NaN into the first frame of each block while set.
+void setFakeAudioUnitEmitsNaN(bool on);
 uint64_t fakeAudioUnitNoteOns();
 
 // PLUG-010: identifiers parse and format like the scanner's (four-character codes, 0x hex), and
@@ -55,6 +57,11 @@ CheckResult auStateRoundTrip();
 // changes, and gets a new one when the identifier changes; instantiatePlugin parks an AU that the
 // build adopts; a state set before the slot had an AU is applied to its first one.
 CheckResult auFailureAndAdoption();
+
+// T-064: PLUG-022, the fake AU writing NaN is silenced, counted in telemetry nanBlocks and reported
+// once (AUPluginHost::takeMisbehaved), and plays again once it recovers; PLUG-018, host bypass of an
+// AU is a slot write that passes the input through unchanged, same AU instance. 0 RT violations.
+CheckResult auNanGuardAndBypass();
 
 // DW-214 probes. How long a render-thread parameter event takes to show in AUDelay's parameter
 // tree (the V2 bridge updates the tree from its own event-listener queue): returns the worst

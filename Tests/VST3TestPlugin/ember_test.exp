@@ -8,3 +8,4 @@ _ember_test_note_counts
 _ember_test_controller_stats
 _ember_test_set_controller_value
 _ember_test_live_processors
+_ember_test_set_emit_nan

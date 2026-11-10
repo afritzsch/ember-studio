@@ -98,6 +98,9 @@ Additive. New method `engine.pluginInfo {slot}` (PLUG-010/015): the engine's `pl
 ### Contract delta (T-062), accepted (autobuild, see docs/autobuild/DECISIONS.md "T-062 contract")
 Additive. `SetInstrument` (and `RestoreTrack`/`RestoreBus` inserts) take `"device": {"format": "vst3", "identifier": "path#classUID", "name": …, "vendor": …, "version": …}`. `engine.pluginInfo` answers VST3 slots with the T-061 shape (`address`/`id` = ParamID, `min` 0, `max` 1, values normalized). `project.save` writes each VST3 slot's state (`EVS3` container, 10 Contract delta (T-062)) to `Plugins/<slotID>.state`.
 
+### Contract delta (T-082), accepted (autobuild, see docs/autobuild/DECISIONS.md "T-082 normalize")
+Additive. `render.offline` takes `normalize? = false` (UI-042): the export is scaled by one gain so its sample peak is −0.1 dBFS, applied before quantization (`ExportSpecPOD.normalize`, 08), up or down; silence stays as it is. With it the result adds `normalizeGain` (linear; absent without `normalize`). The default renders exactly as before. Golden: `export_normalize`. In the app, `ui.perform` drives the export dialog (`export.*`, 12 *Export dialog details*) and `ui.state` windows carry `export`.
+
 ### `dawctl`
 | ID | Requirement |
 |---|---|

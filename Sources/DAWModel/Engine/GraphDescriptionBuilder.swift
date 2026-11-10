@@ -24,10 +24,14 @@ import Foundation
 ///
 /// Edge IDs hash (from, to, kind), so an edge whose ends don't change keeps its ID across rebuilds.
 ///
-/// Not in the graph: bypassed devices (until host-side bypass, PLUG-018), an instrument on an audio
-/// track, a MIDI track's clip player when it has no (active) instrument, outputs and sends to a bus
-/// that doesn't exist. Param values aren't in the graph either; they travel through `setParam`
-/// (`paramValues`).
+/// Not in the graph: an instrument on an audio track, a MIDI track's clip player when it has no
+/// instrument, outputs and sends to a bus that doesn't exist. Param values aren't in the graph
+/// either; they travel through `setParam` (`paramValues`).
+///
+/// PLUG-018 (T-064): bypassed devices stay in the graph. Every device slot's node carries a bypass
+/// param slot (`bypassParam`, keyed `GraphNodeID.bypass(of: slot)` in the runtime IDs) that the
+/// engine reads to pass the input through, latency-matched. So bypass is a param value: toggling
+/// it never changes the graph (MODEL-021), and a bypassed instrument keeps its clip player.
 public enum GraphDescriptionBuilder {
     public static func build(_ project: Project, runtime: RuntimeIDs) -> EngineGraph {
         var b = Emitter(runtime: runtime)
@@ -58,10 +62,10 @@ public enum GraphDescriptionBuilder {
                                                   armed: track.armed))
                 }
             case .midi:
-                if let instrument = track.instrument, !instrument.bypass {
+                if let instrument = track.instrument {
                     b.node(source, .midiClipPlayer)
                     for case .midi(let clip) in track.clips { b.appendNotes(of: clip, player: source) }
-                    b.node(instrument.id, instrument.nodeKind, config: instrument.configJSON)
+                    b.device(instrument)
                     b.edge(source, instrument.id, .midi)
                     head = instrument.id
                 }
@@ -129,9 +133,9 @@ public enum GraphDescriptionBuilder {
         return b.graph
     }
 
-    /// MODEL-022: the param slots every param-bearing node needs, by NodeID. Device slots and
-    /// sends get theirs whether or not they are in the graph right now (bypassed, dangling), so
-    /// toggling bypass keeps their slots.
+    /// MODEL-022: the param slots every param-bearing node needs, by NodeID. Sends get theirs
+    /// whether or not they are in the graph right now (dangling). Every device slot also gets one
+    /// bypass slot, keyed `GraphNodeID.bypass(of: slot.id)` (PLUG-018, T-064).
     public static func paramRequirements(_ project: Project, catalog: ParamCatalog) -> [NodeIDValue: UInt32] {
         var out: [NodeIDValue: UInt32] = [:]
         out[project.master.id] = ParamLayout.Strip.count
@@ -149,6 +153,7 @@ public enum GraphDescriptionBuilder {
         for slot in project.allDeviceSlots {
             let count = catalog.paramCount(for: slot)
             if count > 0 { out[slot.id] = count }
+            out[GraphNodeID.bypass(of: slot.id)] = 1
         }
         return out
     }
@@ -160,8 +165,12 @@ public enum GraphDescriptionBuilder {
     ///
     /// T-026: the metronome's `on` slot holds `project.metronome.enabled`, unless
     /// `metronomeSuppressed` (an export that leaves the click out) forces it off.
+    ///
+    /// PLUG-018/021 (T-064): a device's bypass slot holds 1 while the slot is bypassed, or while
+    /// `pluginsBypassed` (safe mode, a session-only override) and the slot hosts an AU or VST3.
     public static func paramValues(
-        _ project: Project, runtime: RuntimeIDs, catalog: ParamCatalog, metronomeSuppressed: Bool = false
+        _ project: Project, runtime: RuntimeIDs, catalog: ParamCatalog, metronomeSuppressed: Bool = false,
+        pluginsBypassed: Bool = false
     ) -> [ParamID: Float] {
         let muted = SoloResolver.mutedChannels(in: project)
         var out: [ParamID: Float] = [:]
@@ -205,6 +214,10 @@ public enum GraphDescriptionBuilder {
             for p in slot.params where values.indices.contains(p.index) { values[p.index] = p.value }
             for (i, value) in values.enumerated() { out[range.first + UInt32(i)] = value }
         }
+        for slot in project.allDeviceSlots {
+            let bypassed = slot.bypass || pluginsBypassed && slot.isPlugin
+            set(GraphNodeID.bypass(of: slot.id), 0, bypassed ? 1 : 0)
+        }
         return out
     }
 
@@ -238,11 +251,18 @@ private struct Emitter {
         self.runtime = runtime
     }
 
-    mutating func node(_ id: NodeIDValue, _ kind: NodeKind, config: String = "") {
+    mutating func node(_ id: NodeIDValue, _ kind: NodeKind, config: String = "", bypassParam: ParamID? = nil) {
         let range = runtime.params[id]
         graph.nodes.append(.init(id: id, kind: kind, configVersion: runtime.configVersions[id] ?? 0,
-                                 firstParam: range?.first ?? 0, numParams: range?.count ?? 0, configJSON: config))
+                                 firstParam: range?.first ?? 0, numParams: range?.count ?? 0, configJSON: config,
+                                 bypassParam: bypassParam))
         emitted.insert(id)
+    }
+
+    /// A device slot's node, with its bypass slot (PLUG-018), bypassed or not.
+    mutating func device(_ slot: DeviceSlot) {
+        node(slot.id, slot.nodeKind, config: slot.configJSON,
+             bypassParam: runtime.paramID(GraphNodeID.bypass(of: slot.id), 0))
     }
 
     mutating func edge(_ from: NodeIDValue, _ to: NodeIDValue, _ kind: EngineGraph.EdgeKind = .audio) {
@@ -252,11 +272,11 @@ private struct Emitter {
                                  from: from, to: to, kind: kind))
     }
 
-    /// The active inserts in order after `head`; returns the new head.
+    /// The inserts in order after `head`, bypassed ones included (PLUG-018); returns the new head.
     mutating func chain(_ inserts: [DeviceSlot], after head: NodeIDValue?) -> NodeIDValue? {
         var head = head
-        for slot in inserts where !slot.bypass {
-            node(slot.id, slot.nodeKind, config: slot.configJSON)
+        for slot in inserts {
+            device(slot)
             if let head { edge(head, slot.id) }
             head = slot.id
         }
@@ -309,6 +329,16 @@ extension DeviceSlot {
         // Plain integers, floats and optionals: encoding can't fail.
         guard let data = try? encoder.encode(["zones": zones]) else { return "" }
         return String(decoding: data, as: UTF8.self)
+    }
+}
+
+extension DeviceSlot {
+    /// An AU or VST3 slot (what safe mode bypasses, PLUG-021).
+    public var isPlugin: Bool {
+        switch kind {
+        case .au, .vst3: true
+        case .builtin: false
+        }
     }
 }
 

@@ -28,6 +28,15 @@ public final class ProjectStore {
     /// MODEL-021: the engine this store keeps in step, if any (`attachEngine`).
     @ObservationIgnored public private(set) var engineSync: EngineSync?
 
+    /// PLUG-021 (T-064, docs/autobuild/DECISIONS.md "T-064 crash marker"): safe mode. While it is
+    /// on, the attached engine host-bypasses every AU and VST3 slot (PLUG-018), whatever their
+    /// `bypass` says; slots, params and plugin state are kept, and nothing is written to the
+    /// project, so it isn't an edit (no undo entry, not dirty). Turning it off gives every slot its
+    /// own bypass back. `open(_:recover:safeMode:)` sets it for a project opened after a crash.
+    public var isSafeMode = false {
+        didSet { engineSync?.arePluginsBypassed = isSafeMode }
+    }
+
     /// MODEL-040: the project folder, once opened or saved. Nil for a new project.
     public private(set) var folderURL: URL?
     /// What open found (MODEL-042/045/046, DW-111); `loadAssets` updates the offline assets.
@@ -168,7 +177,7 @@ public final class ProjectStore {
         _ engine: any EngineProtocol, debounce: Duration = EngineSync.defaultDebounce
     ) throws(DAWError) -> EngineSync {
         detachEngine()
-        let sync = try EngineSync(engine: engine, project: project, debounce: debounce)
+        let sync = try EngineSync(engine: engine, project: project, debounce: debounce, pluginsBypassed: isSafeMode)
         // DW-130 (T-056): the document follows a session-rate change the engine made by itself.
         sync.onEngineSampleRateChange = { [weak self] rate in self?.followEngineSampleRate(rate) }
         connectRecording(sync)  // T-052: recordings folder, REC-004 takes → ImportAsset + AddClip
@@ -258,6 +267,12 @@ public final class ProjectStore {
     /// safely repaired (DW-111), and missing audio files are reported, not fatal (MODEL-046).
     /// Attach an engine and call `loadAssets()` to load the audio.
     public static func open(_ url: URL, recover: Bool) async throws(DAWError) -> ProjectStore {
+        try await open(url, recover: recover, safeMode: false)
+    }
+
+    /// PLUG-021 (T-064): `open(_:recover:)` with `isSafeMode` set before any engine is attached,
+    /// so the project's plugins never render (they are host-bypassed from the first graph).
+    public static func open(_ url: URL, recover: Bool, safeMode: Bool) async throws(DAWError) -> ProjectStore {
         let folder = ProjectFolder(url: url)
         let (project, report) = try await Task.detached { () -> Result<(Project, ProjectLoadReport), DAWError> in
             Result { () throws(DAWError) in try folder.load(recover: recover) }
@@ -265,6 +280,7 @@ public final class ProjectStore {
         let store = ProjectStore(project: project)
         store.folderURL = url
         store.loadReport = report
+        store.isSafeMode = safeMode
         if report.recovered {
             // The project differs from project.json until it is saved.
             store.cleanMarker = .max

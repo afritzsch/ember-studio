@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cstring>
+#include <limits>
 #include <vector>
 
 #include "AUPluginChecks.h"
@@ -29,6 +30,8 @@ namespace {
 
 constexpr uint32_t kMaxDelay = 1 << 16;
 constexpr uint32_t kMaxFrames = 4096;
+// T-064 (PLUG-022): while set, every fake writes a NaN into the first frame of each block.
+std::atomic<bool> gEmitNaN{false};
 
 struct FakeDSP {
     std::vector<float> in[2], aux[2];
@@ -193,6 +196,7 @@ static NSHashTable<DAWTestFakeAudioUnit*>* liveFakes() {
             }
             dsp->writePos = (dsp->writePos + 1) % kMaxDelay;
         }
+        if (gEmitNaN.load(std::memory_order_relaxed) && frames > 0) out[0][0] = std::numeric_limits<float>::quiet_NaN();
         // Events past the block (shouldn't happen) are dropped.
         if (flags) *flags = 0;
         return noErr;
@@ -234,6 +238,8 @@ void setFakeAudioUnitLatency(double seconds) {
         for (DAWTestFakeAudioUnit* unit in fakes()) [unit setTestLatency:seconds];
     }
 }
+
+void setFakeAudioUnitEmitsNaN(bool on) { gEmitNaN.store(on); }
 
 uint64_t fakeAudioUnitNoteOns() {
     @autoreleasepool {

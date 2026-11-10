@@ -78,6 +78,7 @@ struct CommandRegistryTests {
         ArmTrack(trackID: 3, armed: true, inputPair: 2),
         ArmTrack(trackID: 3, armed: false),
         SetMonitoring(trackID: 3, mode: .auto),
+        SetDeviceBypass(slotID: 4, bypass: true),  // T-064
     ]
 
     @Test("MODEL-006: built-in type strings are stable and unique")
@@ -95,6 +96,7 @@ struct CommandRegistryTests {
             "SetMetronome",
             "SetSessionSampleRate", "RestoreSessionSampleRate",
             "ArmTrack", "SetMonitoring",
+            "SetDeviceBypass",
         ])
         let all = CommandRegistry.registered.map { $0.type }
         #expect(Set(all).count == all.count)

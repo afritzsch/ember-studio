@@ -46,7 +46,12 @@
 #include "graph/LatencyReporter.h"
 #include "graph/NodeRegistry.h"
 
+// PLUG-018 (T-064): a node whose NodeDesc has a bypassParam is wrapped in a BypassNode for each
+// graph (graph/BypassNode.h); the pool keeps the wrapped node, so bypass never re-creates it.
+
 namespace daw {
+
+class BypassState;
 
 class GraphBuilder {
 public:
@@ -126,6 +131,8 @@ private:
         std::shared_ptr<MidiDelayLine> line;
     };
     std::unordered_map<uint64_t, MidiEdgeDelay> midiDelayLines_;
+    // PLUG-018 (T-064): the BypassStates of the last graph built, per bypassable NodeID.
+    std::unordered_map<NodeID, std::shared_ptr<BypassState>> bypassStates_;
 
     std::shared_ptr<LatencyRelay> relay_ = std::make_shared<LatencyRelay>();
 };
