@@ -111,6 +111,10 @@ Unattended phases started by `/autobuild` (see `.claude/skills/autobuild/SKILL.m
 - Lead spec items: DW-187, DW-188, DW-195 done.
 - End: 4/4 merged, main green apart from the UI-010 load flake (T-074 trial merge test.sh 12/12), week 42%, five-hour window 31%, no worker session left open. Run stopped as the user asked (final phase).
 
+### Phase 8 (2026-11-10)
+- New run (the conductor numbered it 8). Start: week 43%, five 4%. WEEK_STOP 50 is near, so this is likely the run's last phase.
+- Wave: T-088 insert-chain commands + lane cascade + velocity repair (M), T-089 transport/export follow-ups (E+B), T-090 app follow-ups (U), T-077 M7 goldens (D). T-088..T-090 are new tasks from the user's 2026-11-10 answers (DECISIONS.md → User review); pre-decisions logged in DECISIONS.md (phase 8 rows).
+
 ## Summary for the user
 
 This run (the second) had two phases, 6 and 7 (2026-11-09 → 2026-11-10). The week went 1% → 42%. It stopped after phase 7 because you asked.
