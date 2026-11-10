@@ -48,6 +48,7 @@ Additive; the facade side is in 08 "Contract delta (T-061)". How the AU half is 
 - **Latency** (PLUG-013): `latency` at prepare, then KVO; a change goes to the node's `LatencyReporter` from a global dispatch queue (MIX-024).
 - **Sidechain** (PLUG-014, DW-159): the AU's aux input bus (bus 1) is enabled and fed from `NodeIO::sidechain` (graph `toPort` 0).
 - **State** (PLUG-016): `fullState` ↔ binary plist, off the RT thread.
+- **Lifecycle (DW-214, clarified at merge).** V2 AUs run behind Apple's `AUAudioUnitV2Bridge`, whose parameter tree follows render-thread parameter events asynchronously (a few ms), so `pluginInfoJSON` values lag them; and the bridge's listener crashes if the unit is destroyed while its messages are pending. So `AUInstance` stops KVO, render resources and host blocks first and drops a bridged unit's last reference 1 s later on a serial queue (AUv3 units are released at once), and one process-wide, non-RT lifecycle lock serializes prepare, teardown and release (CoreAudio aborts when one V2 AU initializes while another uninitializes).
 
 ### Contract delta (T-062), accepted (autobuild, see docs/autobuild/DECISIONS.md "T-062 contract")
 Additive; the facade side is in 08 "Contract delta (T-062)". The VST3 half (`Sources/DAWEngine/plugins/VST3*`) mirrors the AU half of the T-061 delta:

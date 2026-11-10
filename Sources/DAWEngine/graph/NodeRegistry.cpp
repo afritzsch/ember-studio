@@ -28,11 +28,6 @@ Result<void> NodeRegistry::set(NodeKind kind, NodeKindInfo info) {
     return {};
 }
 
-void NodeRegistry::setParamInfo(NodeKind kind, std::span<const ParamInfo> table) {
-    const auto index = static_cast<std::size_t>(kind);
-    if (index < kNumKinds) kinds_[index].paramInfo = table;
-}
-
 const NodeKindInfo* NodeRegistry::find(NodeKind kind) const {
     const auto index = static_cast<std::size_t>(kind);
     if (index >= kNumKinds || !kinds_[index].create) return nullptr;

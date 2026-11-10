@@ -67,9 +67,6 @@ public:
     // the kind, not one factory (test nodes registered under real kinds, TEST-004).
     Result<void> set(NodeKind kind, NodeKindInfo info);
 
-    // DSP-041: gives `kind` a param table without touching its factory, before or after set().
-    void setParamInfo(NodeKind kind, std::span<const ParamInfo> table);
-
     // Null when `kind` has no factory.
     const NodeKindInfo* find(NodeKind kind) const;
 

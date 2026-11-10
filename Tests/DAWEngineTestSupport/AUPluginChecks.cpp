@@ -1,8 +1,10 @@
 #include "AUPluginChecks.h"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <memory>
 #include <random>
 #include <string>
@@ -17,6 +19,7 @@
 #include "daw/GraphDescription.h"
 #include "graph/NodeRegistry.h"
 #include "plugins/AUIdentifier.h"
+#include "plugins/AUInstance.h"
 #include "plugins/AUPluginConfig.h"
 #include "plugins/AUPluginHost.h"
 #include "plugins/AUPluginNode.h"
@@ -185,8 +188,13 @@ CheckResult auDelayThroughGraph() {
     // Each of the four slots was pushed once (they never changed again).
     auto pooled = std::static_pointer_cast<AUPluginNode>(rig->engine().nodes().get(20));
     DAW_CHECK(pooled && pooled->paramEventsPushed() == 4);
-    const auto values = instance->params(true);
-    DAW_CHECK(values.size() == 4 && std::fabs(values[1].value - 0.25f) < 1e-6f && values[0].value == 100.0f);
+    // DW-214: AUDelay is a V2 AU; its parameter tree follows render-thread events from Apple's
+    // listener queue a little later (AUInstance.h), so wait for it rather than read once.
+    std::vector<AUParamInfo> values;
+    DAW_CHECK(eventually([&] {
+        values = instance->params(true);
+        return values.size() == 4 && std::fabs(values[1].value - 0.25f) < 1e-6f && values[0].value == 100.0f;
+    }));
     DAW_CHECK(instance->renderErrors() == 0);
     return checks;
 }
@@ -570,6 +578,124 @@ CheckResult auFailureAndAdoption() {
     DAW_CHECK(later.ok() && later.value() != std::vector<uint8_t>({1, 2, 3}));  // the pending state is used up
     renderRandom(*rig, 4800, 68);
     DAW_CHECK(rig->violations() == 0);
+    return checks;
+}
+
+// MARK: DW-214 probes
+
+namespace {
+
+// One AU outside any graph: prepared, fed silence, rendered in 512-frame blocks.
+struct BareAU {
+    explicit BareAU(const char* identifier) {
+        auto id = parseAUIdentifier(identifier);
+        if (!id) return;
+        auto made = AUInstance::instantiate(*id);
+        if (!made) return;
+        instance = std::move(made).value();
+        if (!instance->prepare(kRate, 512)) instance.reset();
+    }
+    void render(uint32_t frames = 512) {
+        float* in[2] = {silence.data(), silence.data() + 512};
+        float* out[2] = {output.data(), output.data() + 512};
+        NodeIO io;
+        io.audioIn = AudioBufferView{in, 2, frames};
+        io.audioOut = AudioBufferView{out, 2, frames};
+        (void)instance->render(io, frames);
+    }
+    std::shared_ptr<AUInstance> instance;
+    std::vector<float> silence = std::vector<float>(1024, 0.0f);
+    std::vector<float> output = std::vector<float>(1024, 0.0f);
+};
+
+} // namespace
+
+double auParamTreeLagMicros(uint32_t trials) {
+    BareAU au(kDelay);
+    if (!au.instance) return -1;
+    double worst = 0;
+    uint32_t stale = 0;
+    for (uint32_t t = 0; t < trials; ++t) {
+        const float value = 0.1f + 0.01f * static_cast<float>(t % 50);  // delay time, s
+        au.instance->scheduleParam(1, value, 0);
+        au.render();
+        if (std::fabs(au.instance->params(true)[1].value - value) >= 1e-6f) ++stale;  // read at once
+        const auto start = std::chrono::steady_clock::now();
+        bool arrived = false;
+        while (std::chrono::steady_clock::now() - start < 2s) {
+            const auto values = au.instance->params(true);
+            if (std::fabs(values[1].value - value) < 1e-6f) {
+                arrived = true;
+                break;
+            }
+            std::this_thread::sleep_for(50us);
+        }
+        if (!arrived) return -1;
+        worst = std::max(worst, std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - start).count());
+    }
+    std::printf("DW-214 tree reads stale right after render: %u of %u\n", stale, trials);
+    return worst;
+}
+
+uint32_t auTeardownStress(uint32_t iterations, uint32_t blocksPerInstance) {
+    uint32_t done = 0;
+    std::mt19937 rng(214);
+    for (uint32_t i = 0; i < iterations; ++i) {
+        BareAU au(i % 2 == 0 ? kDelay : kSampler);
+        if (!au.instance) continue;
+        const auto& params = au.instance->params();
+        for (uint32_t b = 0; b < blocksPerInstance; ++b) {
+            if (!params.empty()) {
+                const uint32_t index = static_cast<uint32_t>(rng() % params.size());
+                const AUParamInfo& p = params[index];
+                const float x = std::uniform_real_distribution<float>(0.0f, 1.0f)(rng);
+                au.instance->scheduleParam(index, p.min + (p.max - p.min) * x, 0);
+            }
+            au.render();
+        }
+        au.instance.reset();  // destroyed right after the last render, with tree messages pending
+        ++done;
+        if (done % 100 == 0) {
+            std::printf("DW-214 teardown progress: %u\n", done);
+            std::fflush(stdout);
+        }
+    }
+    return done;
+}
+
+CheckResult auTeardownRegression(uint32_t iterations) {
+    CheckResult checks;
+    DAW_CHECK(auTeardownStress(iterations, 8) == iterations);
+    DAW_CHECK(eventually([] { return AUInstance::pendingV2Releases() == 0; }, 6000ms));
+    return checks;
+}
+
+CheckResult auConcurrentLifecycle(uint32_t iterations) {
+    CheckResult checks;
+    std::atomic<uint32_t> made{0}, renderErrors{0};
+    auto churn = [&](uint32_t seed) {
+        std::mt19937 rng(seed);
+        for (uint32_t i = 0; i < iterations; ++i) {
+            BareAU au((rng() & 1) ? kDelay : kSampler);
+            if (!au.instance) continue;
+            ++made;
+            const auto& params = au.instance->params();
+            for (uint32_t b = 0; b < 4; ++b) {
+                if (!params.empty()) {
+                    const uint32_t index = static_cast<uint32_t>(rng() % params.size());
+                    au.instance->scheduleParam(index, params[index].min, 0);
+                }
+                au.render();
+            }
+            renderErrors += static_cast<uint32_t>(au.instance->renderErrors());
+        }
+    };
+    std::thread a(churn, 1), b(churn, 2);
+    a.join();
+    b.join();
+    DAW_CHECK(made == 2 * iterations);
+    DAW_CHECK(renderErrors == 0);
+    DAW_CHECK(eventually([] { return AUInstance::pendingV2Releases() == 0; }, 6000ms));
     return checks;
 }
 

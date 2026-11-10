@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <atomic>
 #include <cstring>
 #include <mutex>
 
@@ -39,6 +40,44 @@ Error auError(ErrorCode code, const std::string& what, NSError* error) {
 }
 
 std::string str(NSString* s) { return s ? std::string(s.UTF8String ?: "") : std::string(); }
+
+// DW-214. A V2 Audio Unit loaded through AUAudioUnit is wrapped in Apple's AUAudioUnitV2Bridge,
+// whose parameter tree is kept up to date by an AUEventListener on a private dispatch queue
+// ("AUAudioUnitV2Bridge.eventListener"): every parameter change (our render-thread events, the AU's
+// own) is queued and applied to the tree a little later. The listener's block holds the bridge
+// weakly and, for a parameter-value-change message, dereferences it without a nil check
+// (AudioToolboxCore, macOS 27.0.1: `-[AUAudioUnitV2Bridge _createParameterTree]_block_invoke+120`
+// reads an ivar at 0x331 through the nil weak self). So if the bridge's last reference goes away
+// while messages are still queued, the listener crashes the process (SIGSEGV at 0x331) as soon as
+// dealloc has started. Apple's code; what we control is when that last reference goes:
+//   1. ~Impl first stops everything that queues messages: KVO, the host blocks and the render
+//      resources (no render, no parameter events, no metering changes after this);
+//   2. the unit itself is released on kReleaseQueue after kV2ReleaseGraceSeconds, by which time
+//      the listener has drained (it takes ~1–3 ms under heavy load, see AUPluginTests DW-214).
+// AUv3 units (in or out of process) have no bridge and are released at once, as before.
+constexpr double kV2ReleaseGraceSeconds = 1.0;
+std::atomic<uint32_t> gPendingV2Releases{0};
+
+// DW-214. CoreAudio aborts (CAVerboseAbort in AudioUnitInitialize) when one V2 AU is initialized
+// while another is being uninitialized on a different thread, which daw.compile (prepare) and
+// daw.reclaim (an instance's destruction) can do at the same time. Every lifecycle step
+// (allocate/deallocate render resources, the final release) runs under this one process-wide
+// lock. Non-RT only; lock order: Impl::mutex, then this.
+std::mutex gLifecycleMutex;
+
+dispatch_queue_t releaseQueue() {
+    static dispatch_queue_t queue =
+        dispatch_queue_create("dev.emberstudio.au-release", dispatch_queue_attr_make_with_qos_class(
+                                                                  DISPATCH_QUEUE_SERIAL, QOS_CLASS_UTILITY, 0));
+    return queue;
+}
+
+// True when `component` is a V2 Audio Unit, which AUAudioUnit wraps in the V2 bridge.
+bool isV2(AudioComponent component) {
+    AudioComponentDescription full{};
+    return AudioComponentGetDescription(component, &full) == noErr &&
+           (full.componentFlags & kAudioComponentFlag_IsV3AudioUnit) == 0;
+}
 
 } // namespace
 
@@ -112,6 +151,7 @@ struct HostTransport {
 
 struct AUInstance::Impl {
     AUAudioUnit* unit = nil;
+    bool bridged = false;                          // a V2 AU behind AUAudioUnitV2Bridge (DW-214)
     DAWAULatencyObserver* observer = nil;          // registered on unit
     AURenderBlock renderBlock = nil;               // taken at prepare
     AUScheduleMIDIEventBlock midiBlock = nil;      // taken at prepare (nil: no MIDI)
@@ -133,8 +173,29 @@ struct AUInstance::Impl {
     std::vector<uint64_t> addresses;               // params_[i].address
 
     ~Impl() {
-        if (unit != nil && observer != nil) [unit removeObserver:observer forKeyPath:@"latency"];
-        if (unit != nil && unit.renderResourcesAllocated) [unit deallocateRenderResources];
+        if (unit != nil) {
+            if (observer != nil) [unit removeObserver:observer forKeyPath:@"latency"];
+            std::lock_guard lifecycle(gLifecycleMutex);  // DW-214
+            if (unit.renderResourcesAllocated) [unit deallocateRenderResources];
+            // The host blocks point at this Impl, which is going away (the unit may outlive it).
+            unit.musicalContextBlock = nil;
+            unit.transportStateBlock = nil;
+            if (bridged) {
+                // DW-214: the bridge's last reference goes after its listener has drained.
+                __block AUAudioUnit* held = unit;
+                unit = nil;
+                gPendingV2Releases.fetch_add(1, std::memory_order_relaxed);
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, static_cast<int64_t>(kV2ReleaseGraceSeconds * NSEC_PER_SEC)),
+                               releaseQueue(), ^{
+                                   std::lock_guard lifecycle(gLifecycleMutex);
+                                   @autoreleasepool {
+                                       held = nil;  // the last reference: the bridge deallocates here
+                                   }
+                                   gPendingV2Releases.fetch_sub(1, std::memory_order_relaxed);
+                               });
+            }
+            unit = nil;  // an AUv3's release (dispose) happens here, under the lock too
+        }
         std::free(outList);
     }
 
@@ -221,6 +282,7 @@ Result<std::shared_ptr<AUInstance>> AUInstance::instantiate(const AUComponentID&
         std::shared_ptr<AUInstance> instance(new AUInstance(component));
         Impl& impl = *instance->impl_;
         impl.unit = unit;
+        impl.bridged = isV2(found);
 
         // PLUG-015: index i ↔ allParameters[i], fixed for the instance.
         for (AUParameter* p in unit.parameterTree.allParameters) {
@@ -276,6 +338,8 @@ double AUInstance::tailSeconds() const {
     }
 }
 
+uint32_t AUInstance::pendingV2Releases() { return gPendingV2Releases.load(std::memory_order_relaxed); }
+
 uint32_t AUInstance::latencySamples() const { return latency_->samples.load(std::memory_order_acquire); }
 
 void AUInstance::setLatencyReporter(LatencyReporter reporter) {
@@ -302,6 +366,7 @@ Result<void> AUInstance::prepare(double sampleRate, uint32_t maxBlock) {
         Impl& impl = *impl_;
         std::lock_guard lock(impl.mutex);
         if (prepared_.load(std::memory_order_acquire) && rate_ == sampleRate && maxBlock_ == maxBlock) return {};
+        std::lock_guard lifecycle(gLifecycleMutex);  // DW-214: (de)initialize one AU at a time
         AUAudioUnit* unit = impl.unit;
         prepared_.store(false, std::memory_order_release);
         if (unit.renderResourcesAllocated) [unit deallocateRenderResources];

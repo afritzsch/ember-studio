@@ -89,6 +89,8 @@ Unattended phases started by `/autobuild` (see `.claude/skills/autobuild/SKILL.m
 
 - T-053 merged after its worker merged main twice (T-062's chained `registerNodes`, T-070's telemetry fields; kept both): test.sh 12/12, swift test 2× green. Worker closed. M5 now needs only T-054.
 
+- DW-214 merged (T-070's follow-up): destroying a V2 AU right after parameter events crashed in Apple's `AUAudioUnitV2Bridge` listener (production-reachable: removing a device, rate change, engine teardown), and concurrent V2 init/uninit aborted. Fixed with a deferred release and a lifecycle lock; mutation-checked (5/5 crashes before, 8/8 × 1500 teardowns clean after). test.sh 12/12, swift test 2× green. Worker closed.
+
 ## Summary for the user
 
 The run had five phases (2026-11-02 → 2026-11-04). The week went 0% → 75%; phase 5 ran past WEEK_STOP because you authorized it.

@@ -1,3 +1,4 @@
+import Foundation
 import DAWEngineTestSupport
 import Testing
 
@@ -29,4 +30,28 @@ struct AUPluginTests {
 
     @Test("PLUG-010/012: a missing AU renders as absent and is reported; slots keep their AU; parked AUs are adopted")
     func failureAndAdoption() { expectPasses(daw.testing.auFailureAndAdoption()) }
+}
+
+// DW-214: destroying AUs right after rendering parameter events. Before the fix this crashed in
+// Apple's AUAudioUnitV2Bridge parameter listener (SIGSEGV at 0x331) within ~100 iterations under
+// load, taking the whole test process down. The opt-in probe (DAW_AU_STRESS=<iterations>) also
+// prints the parameter-tree lag and how many immediate reads are stale.
+@Suite("AU teardown (DW-214)", .serialized)
+struct AUTeardownStressTests {
+    @Test("DW-214: 150 AUDelay/AUSampler instances destroyed right after parameter events; no crash, every bridge released")
+    func regression() { expectPasses(daw.testing.auTeardownRegression(150)) }
+
+    @Test("DW-214: V2 AUs initialized and uninitialized on two threads at once (daw.compile vs daw.reclaim); no crash")
+    func concurrentLifecycle() { expectPasses(daw.testing.auConcurrentLifecycle(40)) }
+
+    @Test("DW-214 probe (opt-in): parameter-tree lag and a long teardown stress")
+    func stress() {
+        guard let n = ProcessInfo.processInfo.environment["DAW_AU_STRESS"].flatMap(UInt32.init) else { return }
+        let lag = daw.testing.auParamTreeLagMicros(200)
+        print("DW-214 tree lag worst µs:", lag)
+        let done = daw.testing.auTeardownStress(n, 8)
+        print("DW-214 teardown iterations:", done)
+        #expect(done == n)
+        expectPasses(daw.testing.auTeardownRegression(0))  // waits for the deferred releases
+    }
 }
