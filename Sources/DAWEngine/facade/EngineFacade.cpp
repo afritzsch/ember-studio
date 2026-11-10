@@ -439,6 +439,10 @@ EngineFacade::Impl::Impl(EngineMode m, const DriverConfigPOD& cfg, FacadeOptions
     }
     if (!(sampleRate >= kMinSampleRate && sampleRate <= kMaxSampleRate)) sampleRate = 48000.0;
 
+    // PLUG-022 (T-064): plugin nodes count the blocks their NaN guard silenced into nanBlocks.
+    plugins->setTelemetry(&engine.telemetry());
+    vst3Plugins->setTelemetry(&engine.telemetry());
+
     // PLUG-010 (T-061): hosted Audio Units. Registered before the creator's hook (which may replace
     // the kind) and kept in registerNodes for rate changes.
     registerNodes = [hook = std::move(registerNodes), host = plugins](NodeRegistry& r) -> Result<void> {
@@ -881,6 +885,19 @@ void EngineFacade::Impl::pump() {
         event.type = EngineEventType::pluginCrashed;
         event.subject = failure.slot;
         event.error = toFacadeError(failure.error);
+        pushEvent(std::move(event));
+    }
+
+    // PLUG-022 (T-064): a plugin node that output NaN/inf (silenced, counted in nanBlocks), once
+    // per node instance, AU and VST3.
+    std::vector<NodeID> misbehaved = plugins->takeMisbehaved();
+    for (NodeID slot : vst3Plugins->takeMisbehaved()) misbehaved.push_back(slot);
+    for (NodeID slot : misbehaved) {
+        EngineEventPOD event;
+        event.type = EngineEventType::pluginMisbehaved;
+        event.subject = slot;
+        event.error.code = FacadeErrorCode::internal;
+        event.error.message = "plugin " + std::to_string(slot) + " output NaN or infinity; its output was silenced";
         pushEvent(std::move(event));
     }
 

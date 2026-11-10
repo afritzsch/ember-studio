@@ -129,7 +129,7 @@ final class ToastCenter {
             } else {
                 post(.overload, .warning, title: "Audio dropout", message: Self.overloadMessage(event.count), count: event.count)
             }
-        case .pluginCrashed:
+        case .pluginCrashed, .pluginMisbehaved:  // T-064: PLUG-022's event shares the toast
             post(.pluginCrashed, .error, title: "A plugin misbehaved",
                  message: event.error.map { "\($0)" } ?? "It was disabled; the project autosaved.")
         case .assetLoadFailed:

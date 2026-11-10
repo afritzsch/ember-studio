@@ -373,6 +373,9 @@ public struct EngineEvent: Hashable, Sendable, Codable {
         /// `subject` is the rejected graph version.
         case graphRejected
         case jobFinished
+        /// PLUG-022 (T-064): `subject` is the device slot whose plugin output NaN/inf; its output
+        /// was silenced (telemetry `nanBlocks`). Once per node instance.
+        case pluginMisbehaved
     }
 
     public var kind: Kind

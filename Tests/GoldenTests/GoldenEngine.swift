@@ -246,6 +246,7 @@ final class GoldenEngine: EngineProtocol {
             case .assetLoadFailed: .assetLoadFailed
             case .graphRejected: .graphRejected
             case .jobFinished: .jobFinished
+            case .pluginMisbehaved: .pluginMisbehaved  // T-064
             default: .deviceChanged
             }
             var device: DeviceChange?

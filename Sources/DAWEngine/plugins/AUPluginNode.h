@@ -28,6 +28,10 @@
 // passes its input through, an instrument is silent — and the failure is reported once through
 // AUPluginHost (a pluginCrashed event carrying the error). It never renders the AU.
 //
+// NaN guard (PLUG-022, T-064): a rendered block with a non-finite sample becomes silence, counts
+// in Telemetry's nanBlocks and raises the node's PluginHealth, which the host reports once as a
+// pluginMisbehaved event (plugins/PluginNanGuard.h).
+//
 // reset() (a locate) does nothing: effects keep their tails (TIME-008), and the MIDI source sends
 // the note-offs (DSP-003).
 
@@ -41,6 +45,7 @@
 #include "core/Realtime.h"
 #include "graph/LatencyReporter.h"
 #include "plugins/AUInstance.h"
+#include "plugins/PluginNanGuard.h"
 
 namespace daw {
 
@@ -54,7 +59,8 @@ public:
     // `instance` null: the inert node of a failed instantiation. `instrument`: what an inert node
     // outputs (silence) and whether there is an input to pass through.
     AUPluginNode(NodeID id, std::shared_ptr<AUInstance> instance, bool instrument, ParamID firstParam,
-                 uint32_t numParams, LatencyReporter reporter, std::weak_ptr<AUPluginHost> host);
+                 uint32_t numParams, LatencyReporter reporter, std::weak_ptr<AUPluginHost> host,
+                 std::shared_ptr<PluginHealth> health = nullptr, Telemetry* telemetry = nullptr);
 
     void prepare(const PrepareInfo& info) override;
     void process(ProcessContext& ctx, NodeIO& io) DAW_RT override;
@@ -64,6 +70,7 @@ public:
     bool active() const { return active_; }
     const std::shared_ptr<AUInstance>& instance() const { return instance_; }
     uint64_t paramEventsPushed() const { return paramEvents_; }
+    uint64_t nanBlocks() const { return nanBlocks_.load(std::memory_order_relaxed); }  // PLUG-022
 
 private:
     void pushParams(const ProcessContext& ctx) DAW_RT;
@@ -75,6 +82,9 @@ private:
     uint32_t numParams_;
     LatencyReporter reporter_;
     std::weak_ptr<AUPluginHost> host_;
+    std::shared_ptr<PluginHealth> health_;  // PLUG-022
+    Telemetry* telemetry_;
+    std::atomic<uint64_t> nanBlocks_{0};
 
     bool active_ = false;
     // Audio thread only (sized in prepare).

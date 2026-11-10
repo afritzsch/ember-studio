@@ -398,6 +398,7 @@ public final class EngineClient: EngineProtocol {
         case .assetLoadFailed: .assetLoadFailed
         case .graphRejected: .graphRejected
         case .jobFinished: .jobFinished
+        case .pluginMisbehaved: .pluginMisbehaved  // T-064
         default: .deviceChanged
         }
         // T-056 (IO-033, DW-044): the re-conversion's progress.
