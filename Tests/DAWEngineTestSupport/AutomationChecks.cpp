@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <limits>
 #include <numbers>
+#include <thread>
 #include <vector>
 
 #include "NodeTestHarness.h"
@@ -18,6 +19,8 @@
 #include "nodes/ChannelStrip.h"
 #include "nodes/Compressor.h"
 #include "nodes/GainNode.h"
+#include "plugins/AUPluginConfig.h"
+#include "plugins/AUPluginHost.h"
 
 using namespace daw;
 using namespace daw::testing::nodes;
@@ -329,6 +332,53 @@ CheckResult automationLoopWrapJump() {
     for (uint32_t i = 0; i < kBlock; ++i) whole = whole && nearRel(out[i], kH * (1.0 + 1.0 * (i + 1) / kBlock));
     DAW_CHECK(whole);
     DAW_CHECK(plain.rig.violations() == 0);
+    return checks;
+}
+
+CheckResult automationAUParam() {
+    CheckResult checks;
+    DAW_CHECK(RtTrap::install());
+    auto host = std::make_shared<AUPluginHost>();
+    Rig rig([host](NodeRegistry& r) { (void)r.set(NodeKind::auPlugin, host->kindInfo()); });
+    rig.addAsset(makeAsset(1, 1, 1'000'000, [](uint32_t, int64_t) { return 0.0f; }));
+    // AUDelay (aufx:dely:appl): 0 dry/wet mix %, 1 delay time s, 2 feedback %, 3 lowpass Hz.
+    auto first = rig.engine().params().allocate(4, std::numeric_limits<float>::quiet_NaN());
+    DAW_CHECK(first.ok());
+    if (!first.ok()) return checks;
+    const ParamID p = first.value();
+    GraphDescription d = baseDescription();
+    d.nodes.push_back(NodeDesc{10, NodeKind::audioClipPlayer, 1, 0, 0, {}});
+    d.nodes.push_back(NodeDesc{20, NodeKind::auPlugin, 1, p, 4, AUPluginConfig::makeJSON("aufx:dely:appl", {})});
+    d.edges.push_back(EdgeDesc{1, 10, 20, EdgeKind::audio, 0});
+    d.edges.push_back(EdgeDesc{2, 20, 1, EdgeKind::audio, 0});
+    d.audioClips.push_back(clip(10, 1, 0, 30'000, 1));
+    // Mix: 0.25 → 0.75 over 1920 ticks; delay time: held 0.5 (normalized).
+    d.automation.push_back(AutomationDesc{1, p + 0, {pd(0, 0.25f), pd(1920, 0.75f)}, true});
+    d.automation.push_back(AutomationDesc{2, p + 1, {pd(0, 0.5f)}, true});
+    DAW_CHECK(rig.publish(d));
+    auto instance = host->instance(20);
+    DAW_CHECK(instance != nullptr && instance->params().size() == 4);
+    if (!instance || instance->params().size() != 4) return checks;
+    const AUParamInfo mix = instance->params()[0], time = instance->params()[1];
+
+    DAW_CHECK(rig.transport().locate(960) && rig.transport().play());
+    rig.renderFrames(2000, [] { return 500u; });
+    // The slots hold the lane through the AU parameter's own range (linear, AUTO-008) …
+    const float expectedMix = ParamMapping{mix.min, mix.max, ParamMapping::Scale::linear}.map(
+        0.25f + 0.5f * static_cast<float>(960 + 1500 / kSamplesPerTick) / 1920.0f);
+    DAW_CHECK(nearRel(rig.engine().params().get(p + 0), expectedMix));
+    const float expectedTime = time.min + 0.5f * (time.max - time.min);
+    DAW_CHECK(nearRel(rig.engine().params().get(p + 1), expectedTime));
+    // … and reach the AU as render-thread parameter events (PLUG-015, AUTO-009). V2 AUs show
+    // them in the parameter tree a little later (DW-214).
+    bool reached = false;
+    for (int i = 0; i < 5000 && !reached; ++i) {
+        const auto values = instance->params(true);
+        reached = values.size() == 4 && nearRel(values[0].value, expectedMix, 1e-4) && nearRel(values[1].value, expectedTime, 1e-4);
+        if (!reached) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    DAW_CHECK(reached);
+    DAW_CHECK(rig.violations() == 0);
     return checks;
 }
 

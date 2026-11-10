@@ -33,4 +33,8 @@ CheckResult automationDrivesSlots();
 // entry (no lane) ramps as before.
 CheckResult automationLoopWrapJump();
 
+// AUTO-008/009 with a hosted AU (Apple's AUDelay): lanes on its params are mapped through the AU
+// parameters' own ranges and reach the AU as render-thread parameter events (PLUG-015).
+CheckResult automationAUParam();
+
 } // namespace daw::testing
