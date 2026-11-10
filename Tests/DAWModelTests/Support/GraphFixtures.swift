@@ -156,6 +156,7 @@ enum GraphSnapshot {
         case .input: return "input:\(owner)"
         case .output: return "output:\(owner)"
         case .metronome: return "metronome:\(owner)"
+        case .monitor: return "monitor:\(owner)"  // T-054
         case nil: return "?\(node)"
         }
     }
