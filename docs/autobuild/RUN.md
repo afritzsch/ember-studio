@@ -105,6 +105,7 @@ Unattended phases started by `/autobuild` (see `.claude/skills/autobuild/SKILL.m
 - T-082 merged (ecad572) during the pause: test.sh 11/12 and one of two swift test runs failed only on the UI-010 perf smoke (load from other apps, load average 26–34; DW-223); UI-010 alone 3× green. Worker closed.
 - T-064 merged (9fbb025) during the pause (it had finished; only an optional UI-010 baseline was open): 08 conflict kept both contract deltas; test.sh 11/12 and swift test 2× failed only on UI-010 (alone 3× green). Worker closed. T-083 now ready.
 - Resumed T-054 and T-074 at 1794315741 (five-hour window 0%, week 37%), each told to `git merge main` first.
+- T-054 merged: test.sh 11/12 (only UI-010, DW-223), swift test 2× green. Worker closed. M5 complete.
 
 ## Summary for the user
 

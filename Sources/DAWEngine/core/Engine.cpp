@@ -145,9 +145,11 @@ void Engine::render(RenderTarget& target, uint32_t numFrames) DAW_RT {
         // MIX-023: timeline nodes run graph->latency() samples ahead, and a new run of playback
         // is pre-rolled first (Engine.h).
         const uint32_t latency = graph->latency();
+        // REC-021 (T-054): monitored tracks hear the device input, when the block has any.
+        const bool monitorEnabled = !target.input.empty();
         if (!block.playing || transport_.locatedWhilePlaying()) runPrerolled_ = false;
         if (block.numSegments > 0 && !runPrerolled_) {
-            if (latency > 0) preRoll(*graph, block);
+            if (latency > 0) preRoll(*graph, block, monitorEnabled);
             runPrerolled_ = true;
         }
         TransportBlock ahead = block;
@@ -159,7 +161,7 @@ void Engine::render(RenderTarget& target, uint32_t numFrames) DAW_RT {
         ProcessContext timeline{n, graph->sampleRate(), ahead, params_};
         // REC-011: after the pre-roll, whose chunks are rendered and thrown away.
         if (liveMidi_ != nullptr) liveMidi_->beginBlock(transport_, n, graph->sampleRate(), cycleHostTicks);
-        graph->process(ctx, timeline);
+        graph->process(ctx, timeline, MonitorInput{monitorEnabled, &target.input});
         if (liveMidi_ != nullptr) liveMidi_->endBlock();
 
         // ENG-041: write master to the target.
@@ -202,7 +204,7 @@ void Engine::render(RenderTarget& target, uint32_t numFrames) DAW_RT {
     renderEpoch_.store(epoch + 2, std::memory_order_seq_cst);
 }
 
-void Engine::preRoll(const RenderGraph& graph, const TransportBlock& block) DAW_RT {
+void Engine::preRoll(const RenderGraph& graph, const TransportBlock& block, bool monitorEnabled) DAW_RT {
     // MIX-023: L frames before the block, chunked to the graph's maxBlock (CONV-RT-04: bounded
     // by latency / maxBlock). Timeline nodes play [p, p + L) on the transport's loop; the others
     // see a straight run of the L frames before p. The master output is dropped.
@@ -219,7 +221,8 @@ void Engine::preRoll(const RenderGraph& graph, const TransportBlock& block) DAW_
         const TransportBlock ahead = layOut(block, tempo, advance(start, done, loop), n, loop);
         ProcessContext ctx{n, graph.sampleRate(), before, params_};
         ProcessContext timeline{n, graph.sampleRate(), ahead, params_};
-        graph.process(ctx, timeline);
+        // REC-021 (T-054): monitored tracks pre-roll silence (no input to give, no clip to leak).
+        graph.process(ctx, timeline, MonitorInput{monitorEnabled, nullptr});
         done += n;
     }
 }

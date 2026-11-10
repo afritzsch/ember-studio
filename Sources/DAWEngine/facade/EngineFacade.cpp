@@ -270,6 +270,7 @@ struct EngineFacade::Impl {
     mutable std::mutex mutex;
     DriverConfigPOD config;
     std::set<NodeID> armedTracks;  // DW-067: input runs while this isn't empty
+    bool monitorInput = false;     // T-054: or while this is set (setMonitorInput)
     double sampleRate = 0;
 
     // Graphs (DW-047, DW-053). applyGraph is the compiler's only submitter, so its tickets are
@@ -510,7 +511,7 @@ DriverConfig EngineFacade::Impl::driverConfig() const {
     DriverConfig out;
     out.outputDevice = config.outputDevice;
     out.inputDevice = config.inputDevice;
-    out.inputEnabled = !armedTracks.empty();
+    out.inputEnabled = !armedTracks.empty() || monitorInput;  // T-054: monitoring `on`
     out.sampleRate = config.sampleRate;
     out.bufferFrames = config.bufferFrames;
     out.outputChannels = config.outputChannels;
@@ -1409,15 +1410,30 @@ void EngineFacade::armInput(NodeID track, uint32_t inputChannelPair, bool armed)
     if (impl.recorder.capturing()) impl.finalizeRecording();
     if (impl.midi.capturing()) impl.finalizeMidiRecording();  // REC-012 (T-053): both end together
     impl.recorder.setArmed(track, inputChannelPair, armed);
-    const bool wasEnabled = !impl.armedTracks.empty();
+    const bool wasEnabled = !impl.armedTracks.empty() || impl.monitorInput;
     if (armed)
         impl.armedTracks.insert(track);
     else
         impl.armedTracks.erase(track);
-    if (wasEnabled == impl.armedTracks.empty() && impl.driverStarted) {
+    const bool enabled = !impl.armedTracks.empty() || impl.monitorInput;
+    if (wasEnabled != enabled && impl.driverStarted) {
         if (auto restarted = impl.restartDriver(); !restarted) impl.pushStartFailed(restarted.error());
     }
     impl.prepareRecording();  // REC-001: the FIFOs exist before the transport records
+}
+
+// MARK: Input monitoring (09, T-054)
+
+void EngineFacade::setMonitorInput(bool wanted) {
+    std::lock_guard lock(impl_->mutex);
+    Impl& impl = *impl_;
+    if (impl.monitorInput == wanted) return;
+    const bool wasEnabled = !impl.armedTracks.empty() || impl.monitorInput;
+    impl.monitorInput = wanted;
+    const bool enabled = !impl.armedTracks.empty() || impl.monitorInput;
+    if (wasEnabled != enabled && impl.driverStarted) {
+        if (auto restarted = impl.restartDriver(); !restarted) impl.pushStartFailed(restarted.error());
+    }
 }
 
 // MARK: MIDI input (09, T-053)
@@ -1647,6 +1663,12 @@ TelemetryPOD EngineFacade::telemetry() const {
     t.nanBlocks = s.nanBlocks;  // DW-142 (T-070)
     t.midiInputDrops = impl_->midi.droppedEvents();                       // REC-010/012 (T-053)
     t.armedMidiTracks = static_cast<uint32_t>(impl_->midi.armedCount());  // T-053
+    // REC-021 (T-054): input + output + graph latency, while a device runs.
+    t.monitorInput = impl_->monitorInput;
+    if (t.deviceRunning) {
+        const uint64_t total = uint64_t{t.deviceInputLatency} + s.deviceOutputLatency + s.graphLatency;
+        t.monitoringLatency = static_cast<uint32_t>(std::min<uint64_t>(total, UINT32_MAX));
+    }
     if (impl_->driver) {
         t.outputDeviceID = t.deviceRunning ? impl_->driver->current().outputDevice : 0;
         t.processorOverloads = impl_->driver->processorOverloads();

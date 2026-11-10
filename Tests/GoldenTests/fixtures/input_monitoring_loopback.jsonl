@@ -1,0 +1,41 @@
+# input_monitoring_loopback (REC-020, REC-021, T-054): a monitored track plays its input through
+# its chain, and what it plays goes out like any track.
+# The realtime engine runs Fake Device A at 48 kHz with a 1024-frame buffer: input and output
+# latency are 1024 samples each, and the loopback brings the output back as input D = 2048
+# samples later (longer than the 960-sample click, so each echo stands alone). The metronome
+# (level 0.5) plays into the master. Track "Mon" monitors `on` (unarmed) with strip gain 0.5, so
+# every sound comes back D later at 0.5 · √½ · √½ = 0.25 of its level (its strip's and the master
+# strip's centre pans): an echo train. Track "Mic", armed on pair 0 with monitoring off, records
+# the same input through a punch range of ticks [480, 3360) = samples [12000, 84000): the take,
+# placed at start − D (REC-003), is the master output sample for sample over the range. The punch
+# keeps the take's end fixed: in realtime the stop lands a few cycles after transport.wait, so an
+# open-ended take would end at a different sample every run.
+# The export leaves the click out, and offline renders never monitor (Mon has no clips), so what
+# sounds is the take through Mic's and the master's pans (× 0.5):
+#   beat 2's click at 24000: 0.5 · 0.5 = 0.25          = −12.041 dBFS
+#   its first echo at 26048: 0.5 · 0.25 · 0.5 = 0.0625  = −24.082 dBFS
+#   its second echo at 28096: 0.015625                  = −36.124 dBFS
+# Without monitoring the echoes are silent (record_loopback_alignment).
+# @expect {"field": "frames", "value": 120000}
+# @expect {"field": "peakDb", "value": -240, "range": {"start": 0, "end": 12000}}
+# @expect {"field": "peakDb", "value": -240, "range": {"start": 84000, "end": 120000}}
+# @expect {"field": "peakDb", "value": -12.041, "tolerance": 0.002, "range": {"start": 24000, "end": 24001}}
+# @expect {"field": "peakDb", "value": -24.082, "tolerance": 0.002, "range": {"start": 26048, "end": 26049}}
+# @expect {"field": "peakDb", "value": -36.124, "tolerance": 0.002, "range": {"start": 28096, "end": 28097}}
+project.new {"name": "input_monitoring_loopback", "sampleRate": 48000, "engine": {"mode": "realtime", "driver": "fake", "bufferFrames": 1024}}
+command.apply {"command": {"type": "AddTrack", "kind": "audio", "name": "Mic"}}
+command.apply {"command": {"type": "AddTrack", "kind": "audio", "name": "Mon"}}
+command.apply {"command": {"type": "ArmTrack", "trackID": 2, "armed": true, "inputPair": 0}}
+command.apply {"command": {"type": "SetMonitoring", "trackID": 2, "mode": "off"}}
+command.apply {"command": {"type": "SetMonitoring", "trackID": 3, "mode": "on"}}
+command.apply {"command": {"type": "SetParam", "target": {"kind": "strip", "channel": 3, "param": "gain"}, "value": 0.5}}
+transport.setMetronome {"enabled": true, "level": 0.5}
+transport.setPunch {"enabled": true, "start": 480, "end": 3360}
+transport.record {"enabled": true}
+transport.play {}
+transport.wait {"untilTick": 3840, "timeoutMs": 10000}
+transport.stop {}
+transport.record {"enabled": false}
+command.apply {"command": {"type": "ArmTrack", "trackID": 2, "armed": false}}
+command.apply {"command": {"type": "SetMonitoring", "trackID": 3, "mode": "off"}}
+render.offline {"from": 0, "to": 4800, "path": "input_monitoring_loopback.wav", "tail": false}

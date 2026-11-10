@@ -267,6 +267,23 @@ Host bypass (PLUG-018), the plugin NaN guard (PLUG-022) and safe mode (PLUG-021)
 
 Affected: T-064. T-074 and T-054 add their own defaulted fields to `GraphDescription` in the same additive way; T-065 (device chain UI) shows bypass from the model and toggles it with `SetDeviceBypass`; T-083 (crash dialog) uses `CrashMarkerSession.crashedSessions` and `ProjectStore.open(_:recover:safeMode:)`.
 
+### Contract delta (T-054), accepted (autobuild, see docs/autobuild/DECISIONS.md "T-054 contract")
+09's REC-020..022 need each audio track's monitoring in the graph, a way to run the device input without an arm, and the software monitoring latency. Everything is **additive and defaulted**:
+```cpp
+struct MonitorDesc { NodeID player; ParamID modeSlot; uint32_t inputPair; bool armed; };   // GraphDescription.h
+struct GraphDescription { /* … */ std::vector<MonitorDesc> monitors = {}; };              // T-054, additive
+void GraphDescriptionBuilder::addMonitor(NodeID player, ParamID modeSlot, uint32_t inputPair, bool armed);
+void setMonitorInput(bool wanted);   // DW-067 extension: input also runs while `wanted`; a change restarts the driver
+// TelemetryPOD gains:  uint32_t monitoringLatency = 0;   // device input + output + graph latency; 0 with no device running
+//                      bool monitorInput = false;        // setMonitorInput's flag
+```
+- **Monitors.** These follow 09's T-054 delta. The mode is a param slot (`setParam`, no rebuild); `armed` and `inputPair` are structural. GraphBuilder validates monitors (`invalidArgument`). A description without monitors (graphs built by hand, older callers) renders as before.
+- **Engine seams (facade-internal).** `core/InputMonitoring.h` holds `MonitoringMode`, `monitoringActive` (REC-020's truth table), `kMonitorFadeFrames` and `MonitorInput`. `RenderGraph::process` takes an optional `MonitorInput`, and `RenderStepDesc` an optional `RenderMonitorDesc`. `Engine::render` passes `RenderTarget::input`; the MIX-023 pre-roll passes none, so active steps output silence.
+
+Swift (`EngineProtocol.swift`): `EngineGraph.Monitor`, `EngineGraph.monitors` (default empty), `EngineGraph.MonitoringSlot`, `EngineTelemetry.monitoringLatency/monitorInput`, and the requirement `setMonitorInput(_:)` with a no-op default in a protocol extension. `EngineClient` passes the monitors through `addMonitor`.
+
+Affected: T-054 only. T-064/T-074 add their own GraphDescription fields next to `monitors`. Tests: `MonitoringTests` (DAWEngineTests), `MonitoringModelTests`, `GraphDescriptionBuilderTests` "monitors", `RecordingUITests` "monitoringLatency".
+
 ## Status
 | ID | status | test |
 |---|---|---|

@@ -45,6 +45,7 @@ module DAWEngineTestSupport {
   header "RecordingChecks.h"
   header "MidiInputChecks.h"
   header "BypassChecks.h"
+  header "MonitoringChecks.h"
   requires cplusplus
   export *
 }

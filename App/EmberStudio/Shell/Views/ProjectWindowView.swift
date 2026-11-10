@@ -254,6 +254,12 @@ private struct TrackHeaderRow: View {
                     ForEach(track.monitorControls) { control in
                         ControlToggle(control: control, face: control.label.replacingOccurrences(of: "Monitoring ", with: ""))
                     }
+                    // REC-021 (T-054): read-only, what software monitoring adds.
+                    if let latency = track.monitoringLatency {
+                        Divider()
+                        Text(latency.title)
+                            .accessibilityIdentifier("track.\(track.id).monitor.latency")
+                    }
                 }
                 .fixedSize()
                 .accessibilityIdentifier("track.\(track.id).monitor.menu")

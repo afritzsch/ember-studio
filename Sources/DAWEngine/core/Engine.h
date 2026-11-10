@@ -113,7 +113,7 @@ private:
     // (0: none, or no graph); and whether the current run of playback has been pre-rolled.
     uint64_t latencySerial_ = 0;
     bool runPrerolled_ = false;
-    void preRoll(const RenderGraph& graph, const TransportBlock& block) DAW_RT;
+    void preRoll(const RenderGraph& graph, const TransportBlock& block, bool monitorEnabled) DAW_RT;
     // REC-010/011 (T-053). Set before rendering starts; the ticks are render thread only.
     LiveMidiInput* liveMidi_ = nullptr;
     uint64_t cycleHostTicks_ = 0;

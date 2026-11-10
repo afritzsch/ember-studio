@@ -150,6 +150,31 @@ struct RecordingUITests {
         #expect(center.toasts.map(\.kind) == [.recordingDropped])
     }
 
+    @Test("REC-021 (T-054): an audio track's monitor menu shows the monitoring latency (input + output + graph) and ui.state carries it; MIDI tracks have none")
+    func monitoringLatency() async throws {
+        let app = AppModel(engine: .fake)
+        let window = app.newProject()
+        window.addTrack(.audio)
+        window.addTrack(.midi)
+        let audio = window.project.tracks[0].id
+        try window.control("track.\(audio).monitor.on").action()  // input runs without an arm
+        app.pump()
+        let t = window.telemetry
+        #expect(t.monitorInput && t.deviceRunning && t.deviceInputLatency > 0 && t.deviceOutputLatency > 0)
+        #expect(t.monitoringLatency == t.deviceInputLatency + t.deviceOutputLatency + t.graphLatency)
+        let latency = try #require(window.trackHeaders[0].monitoringLatency)
+        #expect(latency.samples == t.monitoringLatency)
+        #expect(abs(latency.milliseconds - Double(t.monitoringLatency) / t.sampleRate * 1000) < 1e-9)
+        #expect(latency.title == "Latency \(t.monitoringLatency) samples (\(String(format: "%.1f", latency.milliseconds)) ms)")
+        #expect(window.trackHeaders[1].monitoringLatency == nil)
+        let tracks = UIStateDumper.dump(window, isMain: true)["tracks"]
+        #expect(tracks?[0]?["monitoringLatency"]?["samples"] == .int(Int64(t.monitoringLatency)))
+        #expect(tracks?[0]?["monitoringLatency"]?["ms"]?.doubleValue == latency.milliseconds)
+        #expect(tracks?[1]?["monitoringLatency"] == .null)
+        #expect(t.rtViolations == 0)
+        await app.quit()
+    }
+
     @Test("UI-050: ui.state tracks carry armed, inputPair and monitoring")
     func uiState() throws {
         let (window, _) = try makeWindow(tracks: ["Gtr"])

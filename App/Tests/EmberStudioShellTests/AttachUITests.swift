@@ -31,8 +31,11 @@ struct AttachUITests {
         #expect(w["selection"] == ["tracks": [.int(Int64(track))], "clips": []])
         #expect(w["zoom"]?["pixelsPerBeat"]?.doubleValue == 64)
         #expect(w["scroll"]?["y"]?.doubleValue == 0 && w["visibleTracks"] == [.int(Int64(track))])
-        #expect(w["tracks"]?[0] == ["id": .int(Int64(track)), "name": "Gtr", "kind": "audio", "mute": false, "solo": false,
-                                    "selected": true, "armed": false, "inputPair": 0, "monitoring": "auto"])
+        // T-054 (REC-021): monitoringLatency depends on the device; RecordingUITests checks its value.
+        var track0 = try #require(w["tracks"]?[0]?.objectValue)
+        #expect(track0.removeValue(forKey: "monitoringLatency")?["samples"]?.int64Value != nil)
+        #expect(JSONValue.object(track0) == ["id": .int(Int64(track)), "name": "Gtr", "kind": "audio", "mute": false, "solo": false,
+                                             "selected": true, "armed": false, "inputPair": 0, "monitoring": "auto"])
         #expect(w["transport"]?["playing"] == false)
         #expect(w["toasts"]?[0]?["kind"] == "overload" && w["toasts"]?[0]?["count"] == 3)
         let mute = w["controls"]?.arrayValue?.first { $0["id"] == .string("track.\(track).mute") }
