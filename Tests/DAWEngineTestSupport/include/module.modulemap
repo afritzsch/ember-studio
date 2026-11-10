@@ -38,6 +38,7 @@ module DAWEngineTestSupport {
   header "PreviewNoteChecks.h"
   header "ReverbChecks.h"
   header "DelayChecks.h"
+  header "EqChecks.h"
   header "SessionRateChecks.h"
   header "AUPluginChecks.h"
   header "VST3PluginChecks.h"

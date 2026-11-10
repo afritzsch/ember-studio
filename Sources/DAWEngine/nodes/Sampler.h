@@ -37,10 +37,16 @@
 // applied at that frame, and one past the block at its end.
 //
 // Params, relative to NodeDesc::firstParam, read once per block (ENG-021). A sampler whose
-// numParams doesn't cover a param uses its default (the model publishes none for it yet), and
-// out-of-range or NaN values are clamped or read as the default. See kParamInfo.
+// numParams doesn't cover a param uses its default (the model gives it the published table since
+// T-070, DSP-041), and out-of-range or NaN values are clamped or read as the default. See
+// kParamInfo.
+//
+// NaN guard (DSP-040, DW-142): a block whose output went non-finite (a NaN or ±Inf in an asset)
+// is silenced and every voice stops; it counts in nanBlocks() and, when the factory was given
+// one, in Telemetry.
 
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <span>
@@ -51,6 +57,7 @@
 #include "core/NodeIO.h"
 #include "core/Realtime.h"
 #include "core/Result.h"
+#include "core/Telemetry.h"
 #include "daw/GraphDescription.h"
 #include "dsp/Adsr.h"
 #include "dsp/ParamInfo.h"
@@ -101,15 +108,17 @@ public:
     };
 
     // Non-RT. The registry entry for NodeKind::sampler (registerBuiltinNodes).
-    static NodeKindInfo kindInfo(AssetLookup lookup);
+    // NaN blocks count into `telemetry` (DW-142); null means not at all.
+    static NodeKindInfo kindInfo(AssetLookup lookup, Telemetry* telemetry = nullptr);
 
     // Non-RT. Parses the configJSON format above; assets aren't resolved.
     static Result<std::vector<Zone>> parseZones(std::string_view configJSON);
     // Non-RT. parseZones, then resolves each zone's asset through `lookup`.
-    static Result<std::unique_ptr<Sampler>> create(const NodeDesc& desc, const AssetLookup& lookup);
+    static Result<std::unique_ptr<Sampler>> create(const NodeDesc& desc, const AssetLookup& lookup,
+                                                   Telemetry* telemetry = nullptr);
 
     // `firstParam` / `numParams` as in the NodeDesc.
-    Sampler(std::vector<Zone> zones, ParamID firstParam, uint32_t numParams);
+    Sampler(std::vector<Zone> zones, ParamID firstParam, uint32_t numParams, Telemetry* telemetry = nullptr);
 
     void prepare(const PrepareInfo& info) override;
     void process(ProcessContext& ctx, NodeIO& io) DAW_RT override;
@@ -119,6 +128,8 @@ public:
     uint32_t soundingVoices() const DAW_RT;  // not stolen, not idle
     uint32_t fadingVoices() const DAW_RT;    // stolen, fading out
     uint32_t soundingVoices(uint8_t channel, uint8_t key) const DAW_RT;
+    // DSP-040: blocks silenced by the NaN guard since construction. Any thread.
+    uint64_t nanBlocks() const { return nanBlocks_.load(std::memory_order_relaxed); }
 
 private:
     static constexpr uint32_t kVoiceSlots = 2 * kMaxVoices;
@@ -150,6 +161,7 @@ private:
     std::vector<Zone> zones_;
     ParamID firstParam_;
     uint32_t numParams_;
+    Telemetry* telemetry_;  // DW-142: NaN blocks count here; null when not wired
     double sampleRate_ = 48000.0;
     float stealFrames_ = 240.0f;
 
@@ -162,6 +174,7 @@ private:
     float velocitySensitivity_ = 1.0f;
     float* left_ = nullptr;   // this block's output
     float* right_ = nullptr;
+    std::atomic<uint64_t> nanBlocks_{0};
 };
 
 } // namespace daw

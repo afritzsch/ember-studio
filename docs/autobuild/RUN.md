@@ -85,6 +85,8 @@ Unattended phases started by `/autobuild` (see `.claude/skills/autobuild/SKILL.m
 
 - T-062 merged: test.sh 12/12 (new `test-plugins` stage), swift test 2× green. Worker closed. T-063 (plugin editors) now ready.
 
+- T-070 merged (EQ, `NodeRegistry::paramInfo`, `nanBlocks` telemetry, sampler NaN guard, `routing` fixture through EngineClient). test.sh failed only on the AUDelay param flake (DW-214, also seen by T-053 without T-070); plain swift test 2× green. T-070's worker takes DW-214 as a follow-up.
+
 ## Summary for the user
 
 The run had five phases (2026-11-02 → 2026-11-04). The week went 0% → 75%; phase 5 ran past WEEK_STOP because you authorized it.

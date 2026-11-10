@@ -220,7 +220,8 @@ Result<std::vector<Sampler::Zone>> Sampler::parseZones(std::string_view configJS
     return zones;
 }
 
-Result<std::unique_ptr<Sampler>> Sampler::create(const NodeDesc& desc, const AssetLookup& lookup) {
+Result<std::unique_ptr<Sampler>> Sampler::create(const NodeDesc& desc, const AssetLookup& lookup,
+                                                 Telemetry* telemetry) {
     auto zones = parseZones(desc.configJSON);
     if (!zones) {
         Error e = zones.error();
@@ -230,19 +231,21 @@ Result<std::unique_ptr<Sampler>> Sampler::create(const NodeDesc& desc, const Ass
     std::vector<Zone> resolved = std::move(zones).value();
     if (lookup)
         for (Zone& z : resolved) z.asset = lookup(z.assetID);
-    return std::make_unique<Sampler>(std::move(resolved), desc.firstParam, desc.numParams);
+    return std::make_unique<Sampler>(std::move(resolved), desc.firstParam, desc.numParams, telemetry);
 }
 
-NodeKindInfo Sampler::kindInfo(AssetLookup lookup) {
-    return NodeKindInfo{[lookup = std::move(lookup)](const NodeCreateInfo& info) -> Result<std::unique_ptr<Node>> {
-        auto sampler = create(info.desc, lookup);
+NodeKindInfo Sampler::kindInfo(AssetLookup lookup, Telemetry* telemetry) {
+    NodeKindInfo kind{[lookup = std::move(lookup), telemetry](const NodeCreateInfo& info) -> Result<std::unique_ptr<Node>> {
+        auto sampler = create(info.desc, lookup, telemetry);
         if (!sampler) return sampler.error();
         return std::unique_ptr<Node>(std::move(sampler).value());
     }};
+    kind.paramInfo = kParamInfo;  // DSP-041, DW-141
+    return kind;
 }
 
-Sampler::Sampler(std::vector<Zone> zones, ParamID firstParam, uint32_t numParams)
-    : zones_(std::move(zones)), firstParam_(firstParam), numParams_(numParams) {}
+Sampler::Sampler(std::vector<Zone> zones, ParamID firstParam, uint32_t numParams, Telemetry* telemetry)
+    : zones_(std::move(zones)), firstParam_(firstParam), numParams_(numParams), telemetry_(telemetry) {}
 
 void Sampler::prepare(const PrepareInfo& info) {
     sampleRate_ = info.sampleRate;
@@ -483,6 +486,23 @@ void Sampler::process(ProcessContext& ctx, NodeIO& io) DAW_RT {
         handle(e);
     }
     render(pos, numFrames);
+
+    // DSP-040 (DW-142): a NaN or ±Inf in an asset (or a blow-up) silences the block and stops every
+    // voice, so a bad sample can't keep sounding; held notes are gone, pedal and bend stay.
+    bool finite = true;
+    for (uint32_t c = 0; c < out.numChannels && finite; ++c)
+        for (uint32_t i = 0; i < numFrames; ++i)
+            if (!std::isfinite(out.channels[c][i])) {
+                finite = false;
+                break;
+            }
+    if (!finite) {
+        for (uint32_t c = 0; c < out.numChannels; ++c)
+            std::memset(out.channels[c], 0, std::size_t{out.numFrames} * sizeof(float));
+        for (Voice& v : voices_) v = Voice{};
+        nanBlocks_.fetch_add(1, std::memory_order_relaxed);
+        if (telemetry_ != nullptr) telemetry_->countNanBlock();
+    }
 }
 
 } // namespace daw

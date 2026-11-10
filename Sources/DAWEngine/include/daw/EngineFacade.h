@@ -236,6 +236,9 @@ struct TelemetryPOD {
     uint64_t recordDrops = 0;
     uint32_t deviceInputLatency = 0;
     uint32_t armedTracks = 0;
+    // DW-142 (T-070): blocks the built-in effects' NaN guards silenced (DSP-040), since the
+    // engine was created.
+    uint64_t nanBlocks = 0;
     // REC-010/011 (T-053): MIDI input events dropped (a full queue or a full record buffer, all
     // time) and the tracks armed for MIDI input (armMidiInput).
     uint64_t midiInputDrops = 0;

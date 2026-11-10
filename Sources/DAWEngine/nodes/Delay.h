@@ -51,8 +51,8 @@
 // output.
 //
 // NaN guard (DSP-040): a block whose input holds a NaN or ±Inf outputs silence and clears the
-// lines and filters, so one bad block can't poison the echoes. It is counted in nanBlocks();
-// Telemetry has no processor NaN counter yet (DW-142).
+// lines and filters, so one bad block can't poison the echoes. It is counted in nanBlocks() and
+// in Telemetry when the factory was given one (DW-142).
 //
 // Delay memory (kMaxSeconds per channel) is allocated in prepare() at the session rate; process()
 // never allocates. Latency 0. reset() keeps the echoes: an effect keeps running across a locate
@@ -69,6 +69,7 @@
 #include "core/ParamSlotTable.h"
 #include "core/ParamSmoother.h"
 #include "core/Realtime.h"
+#include "core/Telemetry.h"
 #include "dsp/ParamInfo.h"
 #include "graph/NodeRegistry.h"
 
@@ -126,7 +127,7 @@ public:
     static std::span<const ParamInfo> paramInfo() { return kParamInfo; }
 
     // Non-RT. The registry entry for NodeKind::delay (registerBuiltinNodes).
-    static NodeKindInfo kindInfo();
+    static NodeKindInfo kindInfo(Telemetry* telemetry = nullptr);
 
     // T in frames for the given (clamped) param values at `bpm` and `rate`: the rule above.
     static uint32_t delayFrames(float timeMs, bool sync, float note, double bpm, double rate) DAW_RT;
@@ -134,7 +135,8 @@ public:
     static uint32_t crossfadeFrames(double rate) DAW_RT;
 
     // `firstParam` / `numParams` as in the NodeDesc.
-    Delay(ParamID firstParam, uint32_t numParams) : firstParam_(firstParam), numParams_(numParams) {}
+    Delay(ParamID firstParam, uint32_t numParams, Telemetry* telemetry = nullptr)
+        : firstParam_(firstParam), numParams_(numParams), telemetry_(telemetry) {}
 
     void prepare(const PrepareInfo& info) override;
     void process(ProcessContext& ctx, NodeIO& io) DAW_RT override;
@@ -152,6 +154,7 @@ private:
 
     ParamID firstParam_;
     uint32_t numParams_;
+    Telemetry* telemetry_;  // DW-142: NaN blocks count here; null when not wired
     double sampleRate_ = 48000.0;
 
     // Two ring buffers, power-of-two sized: L is line_[0 … cap_), R is line_[cap_ … 2·cap_).
