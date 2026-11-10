@@ -144,6 +144,8 @@ public final class EngineClient: EngineProtocol {
             render.rtViolations = r.rtViolations
             render.clippedSamples = r.clippedSamples
             render.renderSeconds = r.renderSeconds
+            render.peak = r.peak  // T-082
+            render.normalizeGain = r.normalizeGain
             status.render = render
         }
         return status
@@ -511,6 +513,7 @@ public final class EngineClient: EngineProtocol {
         out.tailQuietSeconds = spec.tailQuietSeconds
         out.tailMaxSeconds = spec.tailMaxSeconds
         out.followLoop = spec.followLoop  // T-036
+        out.normalize = spec.normalize  // T-082
         return out
     }
 

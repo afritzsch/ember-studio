@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <filesystem>
 #include <memory>
 #include <string>
@@ -30,6 +31,56 @@ SamplePos nextLoopedStart(SamplePos pos, uint32_t numFrames, bool looping, Sampl
     const SamplePos next = loopStart + std::min(rest, loopEnd - loopStart);
     return next == loopEnd ? loopStart : next;
 }
+
+// T-082 (ExportSpec::normalize): the rendered export as interleaved float32 in an anonymous temp
+// file (tmpfile(): a unique name, removed when closed, so parallel exports never share it, 00 §9).
+// Pass one appends every kept block; pass two reads it back in blockSize chunks.
+class FloatSpool {
+public:
+    explicit FloatSpool(uint32_t numChannels, uint32_t blockSize)
+        : numChannels_(numChannels), interleaved_(std::size_t{numChannels} * blockSize) {}
+    ~FloatSpool() {
+        if (file_) std::fclose(file_);
+    }
+    FloatSpool(const FloatSpool&) = delete;
+    FloatSpool& operator=(const FloatSpool&) = delete;
+
+    Result<void> open() {
+        file_ = std::tmpfile();
+        if (!file_) return makeError(ErrorCode::io, "offline render: can't create the normalize temp file");
+        return {};
+    }
+
+    Result<void> append(const AudioBufferView& block) {
+        for (uint32_t f = 0; f < block.numFrames; ++f)
+            for (uint32_t c = 0; c < numChannels_; ++c) interleaved_[std::size_t{f} * numChannels_ + c] = block.channels[c][f];
+        const std::size_t count = std::size_t{block.numFrames} * numChannels_;
+        if (std::fwrite(interleaved_.data(), sizeof(float), count, file_) != count)
+            return makeError(ErrorCode::io, "offline render: writing the normalize temp file failed");
+        return {};
+    }
+
+    Result<void> rewind() {
+        if (std::fflush(file_) != 0 || std::fseek(file_, 0, SEEK_SET) != 0)
+            return makeError(ErrorCode::io, "offline render: reading the normalize temp file failed");
+        return {};
+    }
+
+    // Reads `numFrames` frames into `channels`, each scaled by `gain`.
+    Result<void> read(float* const* channels, uint32_t numFrames, float gain) {
+        const std::size_t count = std::size_t{numFrames} * numChannels_;
+        if (std::fread(interleaved_.data(), sizeof(float), count, file_) != count)
+            return makeError(ErrorCode::io, "offline render: reading the normalize temp file failed");
+        for (uint32_t f = 0; f < numFrames; ++f)
+            for (uint32_t c = 0; c < numChannels_; ++c) channels[c][f] = interleaved_[std::size_t{f} * numChannels_ + c] * gain;
+        return {};
+    }
+
+private:
+    uint32_t numChannels_;
+    std::vector<float> interleaved_;
+    std::FILE* file_ = nullptr;
+};
 
 } // namespace
 
@@ -71,6 +122,19 @@ Result<void> OfflineDriver::render(Engine& engine, Tick from, Tick to, const Exp
         auto created = AudioFileWriter::create(spec.file, format);
         if (!created) return created.error();
         writer = std::move(created).value();
+    }
+    // T-082: with normalize, pass one goes to a float spool instead of the writer and the sink.
+    std::unique_ptr<FloatSpool> spool;
+    if (spec.normalize && maxFrames > 0) {
+        spool = std::make_unique<FloatSpool>(spec.numChannels, spec.blockSize);
+        if (auto opened = spool->open(); !opened) {
+            if (writer) {
+                writer.reset();
+                std::error_code ec;
+                std::filesystem::remove(spec.file, ec);
+            }
+            return opened;
+        }
     }
 
     // The render target: allocated here, before the loop, never inside it.
@@ -163,11 +227,19 @@ Result<void> OfflineDriver::render(Engine& engine, Tick from, Tick to, const Exp
         }
 
         const AudioBufferView block{channels.data(), numChannels, keep};
-        if (writer) {
-            failure = writer->write(block);
+        for (uint32_t c = 0; c < numChannels; ++c)  // T-082: the export's sample peak
+            for (uint32_t f = 0; f < keep; ++f)
+                stats_.peak = std::max(stats_.peak, std::fabs(static_cast<double>(channels[c][f])));
+        if (spool) {
+            failure = spool->append(block);
             if (!failure) break;
+        } else {
+            if (writer) {
+                failure = writer->write(block);
+                if (!failure) break;
+            }
+            if (spec.sink) spec.sink(block);
         }
-        if (spec.sink) spec.sink(block);
         written += keep;
         stats_.framesWritten = written;
         if (progress) progress(OfflineProgress{written, rangeFrames, maxFrames});
@@ -188,6 +260,29 @@ Result<void> OfflineDriver::render(Engine& engine, Tick from, Tick to, const Exp
         transport.setOutputLatency(latencyBefore);
         renderCounted(0);
     }
+
+    // T-082 pass two: the spooled render, scaled so its peak is kNormalizePeakDb, into the writer
+    // (which dithers and quantizes) and the sink, in blockSize chunks. Silence (or a peak that
+    // isn't finite) keeps gain 1.
+    if (spool && failure) {
+        const double target = std::pow(10.0, kNormalizePeakDb / 20.0);
+        if (std::isfinite(stats_.peak) && stats_.peak > 0) stats_.normalizeGain = target / stats_.peak;
+        const float gain = static_cast<float>(stats_.normalizeGain);
+        failure = spool->rewind();
+        for (int64_t done = 0; failure && done < written;) {
+            const uint32_t n = static_cast<uint32_t>(std::min<int64_t>(blockSize, written - done));
+            failure = spool->read(channels.data(), n, gain);
+            if (!failure) break;
+            const AudioBufferView block{channels.data(), numChannels, n};
+            if (writer) {
+                failure = writer->write(block);
+                if (!failure) break;
+            }
+            if (spec.sink) spec.sink(block);
+            done += n;
+        }
+    }
+    spool.reset();
 
     if (writer) {
         stats_.clippedSamples = writer->clippedSamples();

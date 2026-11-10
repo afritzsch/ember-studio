@@ -127,6 +127,8 @@ OfflineResultPOD toResult(const OfflineRenderStats& stats, double sampleRate) {
     r.rtViolations = stats.rtViolations;
     r.clippedSamples = stats.clippedSamples;
     r.renderSeconds = stats.renderSeconds;
+    r.peak = stats.peak;                    // T-082
+    r.normalizeGain = stats.normalizeGain;  // T-082
     return r;
 }
 
@@ -1009,6 +1011,7 @@ void EngineFacade::Impl::runExport(JobID jobID, Tick from, Tick to, const Export
     spec.blockSize = pod.blockSize;
     spec.tail = TailSpec{pod.tailEnabled, pod.tailThresholdDb, pod.tailQuietSeconds, pod.tailMaxSeconds};
     spec.followLoop = pod.followLoop;  // T-036
+    spec.normalize = pod.normalize;    // T-082
 
     FacadeError error;
     bool render = false;

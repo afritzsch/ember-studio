@@ -556,6 +556,7 @@ public final class Dispatcher {
         var spec = ExportSpec(path: url.path, fileType: p.format ?? .wav, sampleFormat: p.sampleFormat ?? .float32,
                               blockSize: p.blockSize ?? 512, tailEnabled: p.tail ?? true)
         spec.followLoop = p.loop ?? false  // T-036
+        spec.normalize = p.normalize ?? false  // T-082
         // T-026 (DECISIONS.md Q1): the click stays out of an export unless asked for. The `on`
         // slot is held at 0 for the render (a slot write, no rebuild) and follows the project again
         // afterwards, whatever happens to the job.
@@ -567,7 +568,8 @@ public final class Dispatcher {
         renderRtViolations += render.rtViolations
         return RenderOfflineResult(path: url.path, durationSec: render.durationSeconds, renderTimeSec: render.renderSeconds,
                                    sampleRate: render.sampleRate, frames: render.framesWritten,
-                                   rtViolations: render.rtViolations, clippedSamples: render.clippedSamples)
+                                   rtViolations: render.rtViolations, clippedSamples: render.clippedSamples,
+                                   normalizeGain: spec.normalize ? render.normalizeGain : nil)
     }
 
     /// DW-095: applies any pending structural change and waits until the engine has built it, so a
