@@ -48,3 +48,16 @@ The user reviewed the phase 6–7 decisions and **confirmed every one as built**
 - **T-053 MIDI routing:** keep "all sources → all armed MIDI tracks"; a per-track MIDI input/channel picker goes in the backlog (not urgent).
 - **T-074 wrap jump:** keep; the other built-ins stay a backlog item (DW-232).
 - Unchanged and confirmed: T-064 session-only safe mode and in-graph bypass, T-082 normalize at −0.1 dBFS, T-074 implicit lane creation and undoable edits, T-053 latency-compensated note placement, and all "Contract delta, accepted (autobuild)" sections.
+
+### Older open questions and phase 1–5 decisions (answered the same day)
+- **DW-061:** on a tempo edit the playhead keeps its **tick (bar/beat) position** (change from today's sample position).
+- **DW-063:** offline exports **reset all nodes first** (effect tails cleared), so exports are repeatable.
+- **DW-125:** the **transport handles short loops** (it may wrap more than once per block); tempo edits are not refused.
+- **DW-156:** **one live engine per app**; only the front project plays, and switching windows hands the engine over.
+- **Changes to earlier autobuild decisions:**
+  - T-042 / DW-150: velocity-0 notes are **repaired on open** (clamped to 1) instead of failing with `invalidProject`.
+  - T-026: the export dialog's "Include metronome" checkbox **starts in the metronome's current state** (on when the click is on). The `includeMetronome` spec flag stays explicit.
+  - T-056: `play()` during asset re-conversion **waits for it to finish** (queued) instead of being refused.
+- **Confirmed as built:** T-035 missing-asset clip hides what's under it; T-023 pre-fader sidechain ignores mute; metronome/arm/monitoring/sample-rate stay out of undo; T-061 analysis-based AU goldens; T-034/T-043 editing UX (arrow nudge, toolbar tempo, piano-roll open gestures, quantize presets); T-055 layout; T-072 delay defaults and crossfade; all other phase 1–5 rows.
+- **Spec housekeeping** (DW-004, 008, 012, 015, 066, 069, 080, 116, 122, 135, 153, 196, 207): the user delegates these to the autobuild lead: apply the recommended option, log it here, and schedule Interfaces changes when a task needs them.
+- These answers are user decisions. The `SPEC.md` decision log was not edited (only the user does that); leads treat this section as authoritative until the user copies it there.

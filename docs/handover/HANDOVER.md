@@ -14,6 +14,7 @@ Autobuild stopped: user asked to finish after phase 7. To continue, start a new 
 - Phase 7 week usage: 20% → 42% (two 5-hour pauses of ~3.7 h and ~4 h; T-082 and T-064 merged during the second).
 
 ## Suggested next wave (for a new run)
+- **User answers on 2026-11-10 (DECISIONS.md → User review → Older open questions):** new work to schedule: DW-061 playhead keeps ticks on tempo edits; DW-063 exports reset nodes; DW-125 transport handles sub-block loops; DW-156 one engine per app; velocity-0 notes repaired on open (DW-150); export dialog's metronome checkbox follows the metronome; play waits for re-conversion (T-056). Spec housekeeping DWs are yours to decide.
 - **User review after phase 7 (see DECISIONS.md → User review):** all phase 6–7 decisions confirmed. Schedule early: DW-149 insert-chain commands, DW-234 (delete lanes with their send/device, one undo step), DW-230 feedback guard for monitoring. Backlog: per-track MIDI input picker, DW-232.
 - **T-075** automation recording + lane UI (U+M, M7): read DW-236 (only automatable params) and DW-237 (stopped writes) first.
 - **T-077** M7 goldens (D): could also take DW-232 (wrap jump for the other built-ins).
@@ -117,6 +118,8 @@ Autobuild stopped: user asked to finish after phase 7. To continue, start a new 
 - **Workers read briefings from `.git/autobuild/brief-T-XXX.txt`:** a short new_session prompt pointing at the file keeps list_sessions output small and works (a scratchpad path outside the worktree also worked).
 
 ## Open questions for the user (not yet answered)
+**Answered by the user on 2026-11-10:** DW-061, DW-063, DW-125, DW-156, DW-230, DW-234, every decision row in DECISIONS.md (phases 1–7) and the UX choices below. See DECISIONS.md → *User review*. The spec-housekeeping DWs below are delegated to the lead. What's still the user's: the manual checks in the app (DW-166, DW-206, DW-222, T-034's key check) and whether to file Apple Feedback (DW-214).
+
 - DW-061: on a tempo edit, should the playhead keep its sample position (current behaviour) or its tick position (recommended; what most DAWs do)?
 - DW-063: should offline exports reset all nodes (effect tails too) for fully repeatable exports on one engine?
 - DW-125: a tempo edit after SetLoop can shrink an enabled loop below one block. Should the transport handle short loops, or should such tempo edits be refused?
