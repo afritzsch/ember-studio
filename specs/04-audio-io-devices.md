@@ -50,6 +50,12 @@ class CoreAudioDriver final : public AudioDriver { ... };
 class OfflineDriver { public: Result<void> render(Engine&, Tick from, Tick to, const ExportSpec&, ProgressFn); };
 enum class EngineEventType : uint8_t { deviceChanged, overload, recordingFinalized, assetsReloaded, pluginCrashed };
 struct AudioAsset { uint64_t assetID; double sampleRate; uint32_t channels; int64_t frames; const float* const* data; };
+// DW-069, DW-116 (accepted (autobuild, see docs/autobuild/DECISIONS.md)): defined as built in
+struct DriverConfig;      // io/DriverConfig.h: device, rate, buffer 32…2048, channels, input choice (IO-003/004)
+struct DeviceLatency;     // io/DeviceLatency.h: LatencyComponents → input/output frames (IO-005)
+struct DeviceSwap;        // io/DeviceMonitor.h: DeviceSwapReason + the new device/rate (IO-021)
+class DeviceMonitorHost;  // io/DeviceMonitor.h: the facade side of the hot-swap sequence (IO-021)
+class DeviceMonitor;      // io/DeviceMonitor.h: IO-020..022, runs on daw.device
 }
 ```
 

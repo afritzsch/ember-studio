@@ -19,7 +19,7 @@ These apply to any code reachable from `Engine::render()`.
 | CONV-RT-03 | No Objective-C or Swift runtime calls, no logging, no file or socket I/O, no syscalls except those CoreAudio makes. |
 | CONV-RT-04 | Unbounded loops are forbidden; every loop is bounded by block size, node count or voice count. |
 | CONV-RT-05 | Cross-thread communication uses only `std::atomic`, SPSC ring buffers (`daw::SpscQueue`) or the snapshot pointer (ENG). |
-| CONV-RT-06 | RT functions are annotated `DAW_RT` (a macro, expands to `[[clang::nonblocking]]` when available) so they can be found by grep and checked by the compiler. |
+| CONV-RT-06 | RT functions are annotated `DAW_RT` (a macro, expands to `noexcept [[clang::nonblocking]]` when available: clang warns on a nonblocking function that isn't `noexcept`, and `-Werror` fails; DW-008) so they can be found by grep and checked by the compiler. |
 
 The debug RT trap (ENG-030..033) enforces RT-01/02 at runtime. A violation fails tests.
 
@@ -33,6 +33,7 @@ Named threads, created only by `DAWEngine`:
 | `daw.reclaim` | Frees retired snapshots and other RT-retired objects |
 | `daw.diskwrite` | Writes recorded audio from FIFOs to disk |
 | `daw.loader` | Decodes and resamples audio files into RAM |
+| `daw.export` | Runs offline render jobs (export, `render.offline`) for the facade, off the main thread (T-014, DW-080) |
 | `daw.device` | Reacts to device notifications (IO-020..022): runs the hot-swap sequence through the facade, never on `daw.audio` (T-051) |
 | `daw.midi` | Owns the CoreMIDI client (REC-010): connects sources as they appear, closes gone ones; CoreMIDI's own receive thread feeds the input queues (T-053) |
 

@@ -54,6 +54,10 @@ When an agent finishes an audio-affecting task it must:
 3. Check `daw_engine_telemetry.rtViolations == 0`.
 4. For UI tasks: attach mode → `daw_ui_perform` → `daw_ui_state` assertions → `daw_ui_snapshot` for visual review.
 
+Notes (DW-135, DW-122):
+- Fixtures with `@node` test nodes (e.g. FakeLatencyNode, SineNode) render silence through `dawctl`/`dawmcp`: only the GoldenTests harness registers the test-only nodes. Check those fixtures with `swift test --filter GoldenTests`.
+- Real-device switches: `DAW_SKIP_DEVICE_TESTS=1` skips the CoreAudio device runs; `DAW_AUDIBLE_DEVICE_TEST=1` plays IO-001's sine audibly; `DAW_DEVICE_INPUT_TESTS=1` runs the input/duplex device checks (IO-004); `DAW_DEVICE_EVENT_TESTS=1` runs the real sample-rate flip (IO-020). The opt-in ones are off by default.
+
 ## C++ unit tests
 Engine tests are Swift Testing suites in `Tests/DAWEngineTests` that call engine C++ directly through the test-only module `DAWEngineTestSupport` (`Tests/DAWEngineTestSupport`, T-085). Nothing test-only goes into `Sources/DAWEngine`: no test functions, no `extern "C"` hooks, no deliberate violations.
 
