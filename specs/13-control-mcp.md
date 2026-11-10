@@ -95,6 +95,9 @@ Additive. New methods `midi.inputs` → `{inputs: [{uniqueID, name, connected}]}
 ### Contract delta (T-061), accepted (autobuild, see docs/autobuild/DECISIONS.md "T-061 contract")
 Additive. New method `engine.pluginInfo {slot}` (PLUG-010/015): the engine's `pluginInfoJSON` for a device slot's hosted plugin, `{slot, identifier, loaded, error?, name, instrument, midi, sidechain, inputChannels, outputChannels, latencySamples, tailSeconds, params: [{index, address, id, name, unit, min, max, value, canRamp}]}` (08, 10 Contract delta (T-061)). A slot the engine has never seen answers `{slot, loaded: false}`. Tool: `daw_engine_plugin_info`. Hosted plugins are placed with `SetInstrument` (`"device": {"format": "au", "identifier": "aumu:samp:appl", "name": …, "vendor": …, "version": …}`). `project.save` writes each hosted slot's live state to `Plugins/<slotID>.state` (MODEL-043): the dispatcher installs `EnginePluginStates` as the store's `pluginStateProvider`.
 
+### Contract delta (T-062), accepted (autobuild, see docs/autobuild/DECISIONS.md "T-062 contract")
+Additive. `SetInstrument` (and `RestoreTrack`/`RestoreBus` inserts) take `"device": {"format": "vst3", "identifier": "path#classUID", "name": …, "vendor": …, "version": …}`. `engine.pluginInfo` answers VST3 slots with the T-061 shape (`address`/`id` = ParamID, `min` 0, `max` 1, values normalized). `project.save` writes each VST3 slot's state (`EVS3` container, 10 Contract delta (T-062)) to `Plugins/<slotID>.state`.
+
 ### `dawctl`
 | ID | Requirement |
 |---|---|

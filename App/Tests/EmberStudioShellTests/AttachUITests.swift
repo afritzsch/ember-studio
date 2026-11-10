@@ -71,6 +71,78 @@ struct AttachUITests {
         #expect(await failure(["accessibilityId": "transport.play", "action": "click"])?.dawError == "invalidArgument", "disabled")
     }
 
+    @Test("UI-030, UI-052 (T-076): ui.state reports the mixer's strips, values, meters and control ids; ui.perform drives its faders, pans and routing")
+    func mixer() async throws {
+        let t = TestApp()
+        let window = t.app.newProject()
+        window.perform(AddTrack(name: "Gtr", kind: .audio))
+        window.perform(AddBus(name: "Verb"))
+        let track = window.project.tracks[0].id
+        let bus = window.project.buses[0].id
+        window.perform(AddSend(channelID: track, busID: bus))
+        window.mixer.meters.readMeter = { id in id == track ? MeterReading(peak: 0.5, rms: 0.25) : nil }
+        let d = t.app.dispatcher
+        var state = try await d.call(.uiState)
+        var mixer = try #require(state["windows"]?[0]?["mixer"])
+        #expect(mixer["open"] == true && mixer["gesture"] == .null)
+        var strip = try #require(mixer["strips"]?[0])
+        #expect(strip["kind"] == "audio" && strip["name"] == "Gtr" && strip["controlPrefix"] == .string("mixer.track.\(track)"))
+        #expect(strip["gain"]?.doubleValue == 1 && strip["gainDB"]?.doubleValue == 0 && strip["faderPosition"]?.doubleValue == 0.75)
+        #expect(strip["pan"]?.doubleValue == 0 && strip["panLabel"] == "C" && strip["armed"] == false)
+        #expect(strip["output"] == ["kind": "master", "name": "Master"])
+        #expect(strip["sends"]?[0]?["targetName"] == "Verb" && strip["sends"]?[0]?["tap"] == "postFader")
+        #expect(strip["meter"]?["peak"]?.doubleValue == 0.5 && strip["meter"]?["clipped"] == false)
+        let ids = strip["controls"]?.arrayValue?.compactMap(\.stringValue) ?? []
+        #expect(ids.contains("track.\(track).mute") && ids.contains("mixer.track.\(track).fader.up") && ids.contains("track.\(track).arm"))
+        #expect(mixer["strips"]?.arrayValue?.count == 3)
+        let master = try #require(mixer["strips"]?[2])
+        #expect(master["kind"] == "master" && master["output"] == .null && master["meter"] == .null)
+        // Nudge, reset, pan and route through ui.perform.
+        _ = try await d.call(.uiPerform, ["accessibilityId": .string("mixer.track.\(track).fader.down"), "action": "click"])
+        state = try await d.call(.uiState)
+        mixer = try #require(state["windows"]?[0]?["mixer"])
+        strip = try #require(mixer["strips"]?[0])
+        #expect((strip["gainDB"]?.doubleValue).map { abs($0 + 1) < 1e-4 } == true)
+        _ = try await d.call(.uiPerform, ["accessibilityId": .string("mixer.track.\(track).fader.reset"), "action": "press"])
+        _ = try await d.call(.uiPerform, ["accessibilityId": .string("mixer.track.\(track).pan.left"), "action": "click"])
+        #expect(window.project.tracks[0].strip.gain == 1 && window.project.tracks[0].strip.pan == -0.05)
+        _ = try await d.call(.uiPerform, ["accessibilityId": .string("mixer.track.\(track).output.bus.\(bus)"), "action": "on"])
+        #expect(window.project.tracks[0].output == .bus(bus))
+        // A cycle: the toast names it, the project doesn't change.
+        _ = try await d.call(.uiPerform, ["accessibilityId": .string("mixer.bus.\(bus).output.bus.\(bus)"), "action": "on"])
+        state = try await d.call(.uiState)
+        #expect(state["windows"]?[0]?["toasts"]?[0]?["message"]?.stringValue?.contains("routing cycle") == true)
+        #expect(window.project.buses[0].output == .master)
+        // The tab closed: its controls leave the list, its strips stay readable.
+        window.bottomPane = nil
+        state = try await d.call(.uiState)
+        mixer = try #require(state["windows"]?[0]?["mixer"])
+        #expect(mixer["open"] == false && mixer["strips"]?.arrayValue?.count == 3)
+        #expect(state["windows"]?[0]?["controls"]?.arrayValue?.contains { $0["id"] == .string("mixer.track.\(track).fader.up") } == false)
+    }
+
+    @Test("UI-030, UI-051: ui.snapshot renders a mixer with strips (real window); the meter layers are captured")
+    func mixerSnapshot() async throws {
+        let dir = try TempDir()
+        let t = TestApp(workingDirectory: dir.url)
+        let manager = realWindowManager(for: t.app)
+        let window = t.app.newProject()
+        defer { manager.close(window) }
+        window.perform(AddTrack(name: "Lead", kind: .audio))
+        window.perform(AddTrack(name: "Keys", kind: .midi))
+        window.perform(AddBus(name: "Verb"))
+        window.perform(AddSend(channelID: window.project.tracks[0].id, busID: window.project.buses[0].id))
+        let content = try #require(manager.nsWindow(for: window)?.contentView)
+        content.layoutSubtreeIfNeeded()
+        let meters = window.mixer.meters
+        meters.readMeter = { _ in MeterReading(peak: 0.9, rms: 0.5) }
+        meters.displayFrame()
+        let result = try await t.app.dispatcher.call(.uiSnapshot, ["path": .string(dir.file("mixer.png").path)])
+        let path = try #require(result["pngPath"]?.stringValue)
+        let image = try #require(NSBitmapImageRep(data: try Data(contentsOf: URL(fileURLWithPath: path))))
+        #expect(image.pixelsWide >= 760)
+    }
+
     @Test("UI-051: ui.snapshot renders the main window to PNG with cacheDisplay; daw_ui_snapshot gets the path")
     func uiSnapshot() async throws {
         let dir = try TempDir()
