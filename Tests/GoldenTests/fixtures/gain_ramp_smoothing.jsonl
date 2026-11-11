@@ -1,17 +1,21 @@
 # gain_ramp_smoothing (M1, ENG-022, DW-026): a gain step 0 -> 1 ramps linearly over one block.
 # The source is a constant 1.0 (an ImpulseNode firing every frame, TEST-004); the two strips'
 # centre pan law leaves 0.5 at unity gain (MIX-005).
-# A first render with the track's gain at 0 primes its strip's smoother at 0. The gain then
-# steps to 1 between renders, so the golden render's first 512-frame block ramps
-# 0.5 * (i + 1) / 512 and every later block is 0.5. GoldenTests checks the samples too.
+# The step happens inside the render (T-089): a strip-gain lane holds 0 (silence) until tick 512
+# and is unity from there (normalized 5/6 on the 0…+12 dB fader, automation/ParamMapping.h).
+# Tick 512 is frame 12800, the start of 512-frame block 25, where automation writes 1 into the
+# slot and the strip ramps to it over the block (ENG-022): frames 12800 + i are
+# 0.5 * (i + 1) / 512, everything before is 0, everything after is 0.5. GoldenTests checks the
+# samples too.
+# Until T-089 the step was a SetParam between two renders, the first priming the smoother; an
+# offline render now resets every node first (DW-063), so the second render would jump instead.
 # @node {"kind": "audioClipPlayer", "type": "impulse", "samples": 1, "level": 1}
 # @expect {"field": "frames", "value": 24000}
-# @expect {"field": "peakDb", "value": -12.04, "tolerance": 0.01, "range": {"start": 255, "end": 256}}
+# @expect {"field": "peakDb", "value": -240, "range": {"start": 0, "end": 12800}}
+# @expect {"field": "peakDb", "value": -12.04, "tolerance": 0.01, "range": {"start": 13055, "end": 13056}}
 # @expect {"field": "peakDb", "value": -6.02, "tolerance": 0.001}
-# @expect {"field": "rmsDb", "value": -6.02, "tolerance": 0.001, "range": {"start": 511, "end": 24000}}
+# @expect {"field": "rmsDb", "value": -6.02, "tolerance": 0.001, "range": {"start": 13311, "end": 24000}}
 project.new {"name": "gain_ramp_smoothing", "sampleRate": 48000}
 command.apply {"command": {"type": "AddTrack", "name": "DC", "kind": "audio"}}
-command.apply {"command": {"type": "SetParam", "target": {"kind": "strip", "channel": 2, "param": "gain"}, "value": 0}}
-render.offline {"from": 0, "to": 96, "path": "primed.wav", "tail": false, "blockSize": 512}
-command.apply {"command": {"type": "SetParam", "target": {"kind": "strip", "channel": 2, "param": "gain"}, "value": 1}}
+command.apply {"command": {"type": "AddAutomationPoints", "target": {"kind": "strip", "channel": 2, "param": "gain"}, "points": [{"tick": 0, "value": 0, "curve": "hold"}, {"tick": 512, "value": 0.8333333333333334}]}}
 render.offline {"from": 0, "to": 960, "path": "gain_ramp_smoothing.wav", "tail": false, "blockSize": 512}
