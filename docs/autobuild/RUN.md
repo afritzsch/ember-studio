@@ -11,6 +11,7 @@ Unattended phases started by `/autobuild` (see `.claude/skills/autobuild/SKILL.m
 | 5 | T-052, T-061, T-055, T-072 | all 4 (T-055 part 1, T-072, T-052, T-072 follow-up, T-055 follow-up, T-061) | 50 → 75 | User-authorized final phase (week ≥ 50%). Recording (REC-001..005), AU hosting, audio prefs + arm/monitor, delay; DW-148/DW-172 autosave flakes fixed at the root (MODEL-041 blocked the main actor); two 5-hour pauses and a Mac sleep |
 | 6 | T-053, T-062, T-070, T-076 | all 4 (T-076, T-062, T-070, T-053) + DW-214 AU crash fix | 1 → 20 | New run (week reset). M5 needs only T-054; VST3 + EQ + mixer done; `NodeRegistry::paramInfo` and `nanBlocks` telemetry; a production AU teardown crash found and fixed; one 5-hour pause (~4 h, T-076 merged during it) |
 | 7 | T-054, T-064, T-074, T-082 | all 4 (T-082, T-064, T-054, T-074) | 20 → 42 | Final phase (user asked to stop after it). M5 complete (input monitoring); host bypass + NaN guard + safe mode; automation lanes + player; export dialog with normalize. Two 5-hour pauses (~3.7 h, ~4 h); T-082/T-064 merged during the second. UI-010 perf smoke failed in most full runs (load, DW-223) |
+| 8 | T-077, T-088, T-089, T-090 | all 4 (T-077, T-089, T-090, T-088) | 43 → 61 | New run; last phase (week ≥ 50 mid-phase). User follow-ups as T-088..T-090: insert-chain commands + lane cascade, tick-keeping tempo edits / short loops / repeatable exports / queued play, one live engine + feedback guard; M7 goldens. One 5-hour pause (~4.2 h). Every trial merge 12/12 and swift test 2× green |
 
 ## Phase notes
 
@@ -116,10 +117,46 @@ Unattended phases started by `/autobuild` (see `.claude/skills/autobuild/SKILL.m
 - Wave: T-088 insert-chain commands + lane cascade + velocity repair (M), T-089 transport/export follow-ups (E+B), T-090 app follow-ups (U), T-077 M7 goldens (D). T-088..T-090 are new tasks from the user's 2026-11-10 answers (DECISIONS.md → User review); pre-decisions logged in DECISIONS.md (phase 8 rows).
 - Week crossed 50% during the phase (52% at the first report): last phase of this run, the wave finishes. T-089 asked about four goldens that used a second render as a locate stand-in → reworked under DW-063 (DECISIONS "T-089 goldens").
 - 5-hour pause at five=85 (epoch 1794348534), all four workers paused; resumed at 1794363726 (~4.2 h).
+- T-088 got a lead follow-up: drop SetLoop's 4096-sample minimum (T-089 handles short loops), so T-088 merged after T-089.
+- Merged in order: T-077 (ce7ee31), T-089 (5f42420), T-090 (9cabbf7; 08 conflict kept both contract deltas), T-088 (652fc4f). Each trial merge: scripts/test.sh 12/12, swift test 2× green (UI-010 is now load-tolerant). Each worker closed right after its merge.
+- Lead housekeeping (user-delegated): DW-004, 008, 012, 069, 080, 116, 122, 135 applied; DW-015, 066, 153, 196, 207 decided and scheduled.
+- End: 4/4 merged, main green, week 61%, five-hour window 46%, no worker session left open. Run stopped: week ≥ 50.
 
 ## Summary for the user
 
-This run (the second) had two phases, 6 and 7 (2026-11-09 → 2026-11-10). The week went 1% → 42%. It stopped after phase 7 because you asked.
+This run (the third) had one phase, 8 (2026-11-10 → 2026-11-11). The week went 43% → 61%. It stopped because the week passed the 50% limit during the phase. The wave was finished anyway.
+
+**Merged in this run (4 tasks, all on `main`, pushed):**
+- **T-088**: insert-chain commands `InsertDevice`/`RemoveDevice`/`MoveDevice` on tracks, buses and the master (DW-149). Removing a send or device also removes its automation lanes, in one undo step (DW-234, your answer). Velocity-0 notes are repaired on open (your answer). SetLoop accepts any non-empty loop.
+- **T-089**:
+  - On a tempo edit, the playhead keeps its tick (DW-061).
+  - Loops shorter than a block work (DW-125).
+  - Offline renders reset every node first, so exports are repeatable (DW-063).
+  - Play during an asset re-conversion is queued (T-056 change). All four were your answers.
+- **T-090**: one live engine per app: the front window plays (DW-156). A feedback warning appears for built-in mic → built-in speakers (DW-230). "Include Metronome" starts in the metronome's state. The UI-010 perf smoke is no longer load-flaky.
+- **T-077**: M7 goldens (EQ response, NaN/silence guards, bypass nulls, param steps, a combined M7 scene).
+- Also, the spec housekeeping you delegated: DW-004, 008, 012, 069, 080, 116, 122 and 135 are done; DW-015, 066, 153, 196 and 207 are decided and scheduled.
+- Milestones: M2–M5 complete. M6 needs T-063 and T-065. M7 needs only T-075. M8 needs T-080, T-081, T-083 and T-084.
+
+**Decisions to review:** `docs/autobuild/DECISIONS.md`, phase 8 rows (10 rows, dated 2026-11-10/11). The main ones:
+- Background windows keep an offline engine.
+- The feedback guard warns with a one-click "Monitoring Off" (it also warns for `on` monitoring without an arm) instead of silently turning monitoring off.
+- Four goldens that used a second render as a stand-in for a locate were reworked or regenerated under DW-063 (each commit says why).
+- InsertDevice addresses the master by its ID.
+
+**Tasks parked:** none. There are no `wip` tasks or WIP branches. 5 tasks are `ready`: T-063, T-075, T-080, T-083, T-084.
+
+**Your manual checks** (HANDOVER → *Open questions*):
+- New: DW-247. With headphones in the jack, does the MacBook report them (`outputIsHeadphones`)? If not, the feedback guard warns falsely.
+- Still open: DW-166, DW-206, DW-222, T-034's keys.
+
+**Permission prompts that blocked work:** none in this run. `git worktree remove --force` is still denied in auto mode, so merged worktrees stay on disk; the list is in HANDOVER → *Sessions only the user can close*.
+
+**Sessions you should close:** the conductor ("macDAW") once it reports. Every phase-8 worker is closed; the conductor closes this lead (8).
+
+### Earlier run (phases 6–7)
+
+That run (the second) had two phases, 6 and 7 (2026-11-09 → 2026-11-10). The week went 1% → 42%. It stopped after phase 7 because you asked.
 
 **Merged in this run (8 tasks plus one crash fix, all on `main`, pushed):**
 - Phase 6:
