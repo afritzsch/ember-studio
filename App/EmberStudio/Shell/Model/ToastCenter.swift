@@ -9,6 +9,8 @@ struct Toast: Identifiable, Equatable {
         /// T-055: takes recorded and added to the project; a take that couldn't be saved or added.
         case recordingFinalized, recordingFailed
         case recoveryAvailable, offlineAssets, repairs, info, error
+        /// DW-230 (T-090): a track monitors the built-in microphone through the built-in speakers.
+        case feedbackRisk
     }
 
     enum Severity: String, Codable, Sendable, Comparable {

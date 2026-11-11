@@ -29,6 +29,12 @@ public:
     bool isAlive() const;       // kAudioDevicePropertyDeviceIsAlive
     uint32_t clockDomain() const;  // kAudioDevicePropertyClockDomain; 0 = unknown
     uint32_t channels(DeviceDirection direction) const;  // kAudioDevicePropertyStreamConfiguration
+    // T-090 (DW-230, the monitoring feedback guard): kAudioDevicePropertyTransportType is
+    // kAudioDeviceTransportTypeBuiltIn (the Mac's own speakers, microphone, headphone jack).
+    bool isBuiltIn() const;
+    // T-090: kAudioDevicePropertyDataSource of one direction, a four-char code ('ispk' internal
+    // speakers, 'hdpn' headphones, 'imic' internal microphone, ...); 0 when the device has none.
+    uint32_t dataSource(DeviceDirection direction) const;
 
     // IO-003: rates, buffer range and channels of one direction.
     Result<DeviceCaps> caps(DeviceDirection direction) const;

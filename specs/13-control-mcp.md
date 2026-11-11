@@ -104,6 +104,14 @@ Additive. The transport state every `transport.*` method returns carries `playPe
 ### Contract delta (T-082), accepted (autobuild, see docs/autobuild/DECISIONS.md "T-082 normalize")
 Additive. `render.offline` takes `normalize? = false` (UI-042): the export is scaled by one gain so its sample peak is −0.1 dBFS, applied before quantization (`ExportSpecPOD.normalize`, 08), up or down; silence stays as it is. With it the result adds `normalizeGain` (linear; absent without `normalize`). The default renders exactly as before. Golden: `export_normalize`. In the app, `ui.perform` drives the export dialog (`export.*`, 12 *Export dialog details*) and `ui.state` windows carry `export`.
 
+### Contract delta (T-090), accepted (autobuild, see docs/autobuild/DECISIONS.md "T-090 one engine", "T-090 feedback guard")
+Additive. `device.list` devices carry `isBuiltIn`, `outputIsHeadphones` and `isDefaultInput` (08 delta T-090). In the app (attach mode), `ui.state` gains the following (12 *One live engine*, *Monitoring feedback guard*):
+- `liveWindow` (top level): the id of the window that holds the live engine; null with `--engine offline` or without windows.
+- Per window: `engine: {live, mode: realtime|offline} | null` and `feedbackWarning: {tracks[{id, name, monitoring, armed}], input{id, name}, output{id, name}, toast} | null`.
+- The `audioPreferences` devices carry the three new fields.
+
+With a realtime engine choice, `project.new`/`project.open` through the socket give the new project the app's one live engine; they no longer make a second one. A project that `engine: {mode: "realtime"}` asks for explicitly still gets its own engine, as before.
+
 ### `dawctl`
 | ID | Requirement |
 |---|---|

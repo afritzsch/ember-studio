@@ -402,6 +402,11 @@ struct DeviceInfoPOD {
     uint32_t outputChannels = 0;
     double nominalSampleRate = 0;
     bool isDefaultOutput = false;
+    // T-090 (DW-230), additive: what the monitoring feedback guard needs to tell the Mac's own
+    // microphone and speakers from everything else.
+    bool isBuiltIn = false;           // transport type built-in (speakers, microphone, headphone jack)
+    bool outputIsHeadphones = false;  // the output's data source is headphones ('hdpn'), not speakers
+    bool isDefaultInput = false;      // the system default input (what inputDevice 0 records from)
 };
 
 enum class PluginFormatPOD : uint8_t { audioUnit, vst3 };

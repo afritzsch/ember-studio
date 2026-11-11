@@ -59,6 +59,9 @@ class DeviceMonitor;      // io/DeviceMonitor.h: IO-020..022, runs on daw.device
 }
 ```
 
+### Contract delta (T-090), accepted (autobuild, see docs/autobuild/DECISIONS.md "T-090 feedback guard")
+Additive device enumeration only. `CoreAudioDevice` (io, non-RT) gains `bool isBuiltIn() const` (`kAudioDevicePropertyTransportType` is `kAudioDeviceTransportTypeBuiltIn`) and `uint32_t dataSource(DeviceDirection) const` (`kAudioDevicePropertyDataSource` as a four-char code such as 'ispk', 'hdpn' or 'imic'; 0 when the device has none). The facade reports them in `DeviceInfoPOD` (08 delta T-090) for DW-230's feedback guard. Nothing in the driver changes.
+
 ## Status
 | ID | status | test |
 |---|---|---|

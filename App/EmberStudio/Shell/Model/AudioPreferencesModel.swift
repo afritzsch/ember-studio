@@ -3,8 +3,9 @@ import Foundation
 import Observation
 
 /// UI-040 (T-055): the audio preferences of one project window: output and input device, the
-/// session sample rate, buffer size and input channels, with the latency they give. Every window
-/// has its own engine (one per project), so the preferences belong to the window.
+/// session sample rate, buffer size and input channels, with the latency they give. The panel acts
+/// on the window's engine: the app's one live engine while the window is in front, an offline one
+/// (no device controls) while it isn't (DW-156, T-090; `AppModel`).
 ///
 /// Device, buffer and input changes call `EngineProtocol.setDevice` with the window's engine
 /// config (realtime engines only). The sample rate is the project's: it changes through
@@ -13,8 +14,8 @@ import Observation
 /// audio to a new rate (IO-033) `reload` follows its `assetsReloaded` events, for the progress bar.
 ///
 /// The engine doesn't report the config it runs (only the device and rate, in telemetry), so the
-/// model keeps the last config it applied to each engine, starting from the one the engine was
-/// created with (`EngineProtocol.mode`).
+/// model keeps the last config it applied to each engine (app-wide, since the live engine moves
+/// between windows), starting from the one the engine was created with (`EngineProtocol.mode`).
 @Observable
 @MainActor
 final class AudioPreferencesModel {
@@ -34,8 +35,28 @@ final class AudioPreferencesModel {
     /// Every device name seen on this window's engines, so a toast can still name a device that
     /// has gone (a lost device leaves the engine's list).
     @ObservationIgnored private var knownNames: [UInt32: String] = [:]
-    /// The config last applied to an engine (`engine` identifies which).
-    @ObservationIgnored private var applied: (engine: ObjectIdentifier, config: DriverConfig)?
+    /// The config last applied to each engine. App-wide, not per window: the live engine moves to
+    /// whichever window is in front (DW-156, T-090), and its config goes with it.
+    private static var appliedConfigs: [ObjectIdentifier: AppliedConfig] = [:]
+
+    private final class AppliedConfig {
+        weak var engine: (any EngineProtocol)?
+        let config: DriverConfig
+        init(_ engine: any EngineProtocol, _ config: DriverConfig) {
+            self.engine = engine
+            self.config = config
+        }
+    }
+
+    private static func applied(to engine: any EngineProtocol) -> DriverConfig? {
+        guard let entry = appliedConfigs[ObjectIdentifier(engine)], entry.engine === engine else { return nil }
+        return entry.config
+    }
+
+    private static func setApplied(_ config: DriverConfig, to engine: any EngineProtocol) {
+        appliedConfigs = appliedConfigs.filter { $0.value.engine != nil }  // engines gone
+        appliedConfigs[ObjectIdentifier(engine)] = AppliedConfig(engine, config)
+    }
 
     /// IO-003.
     static let bufferSizes: [UInt32] = [32, 64, 128, 256, 512, 1024, 2048]
@@ -49,8 +70,7 @@ final class AudioPreferencesModel {
     /// (no device to configure) or none.
     var config: DriverConfig? {
         guard let engine, case .realtime(let created) = engine.mode else { return nil }
-        if let applied, applied.engine == ObjectIdentifier(engine) { return applied.config }
-        return created
+        return Self.applied(to: engine) ?? created
     }
 
     var driver: DeviceDriverKind? { config?.driver }
@@ -151,6 +171,7 @@ final class AudioPreferencesModel {
         let devices = engine?.devices() ?? []
         for device in devices { knownNames[device.id] = device.name }
         if devices != self.devices { self.devices = devices }
+        window?.feedbackGuard.devicesListed(devices)  // DW-230 (T-090): a fresh list, a fresh check
     }
 
     func selectOutput(_ id: UInt32) { change("Output device") { $0.outputDevice = id } }
@@ -173,7 +194,7 @@ final class AudioPreferencesModel {
         config.sampleRate = 0
         do {
             try engine.setDevice(config)
-            applied = (ObjectIdentifier(engine), config)
+            Self.setApplied(config, to: engine)
             lastError = nil
         } catch {
             lastError = error.description
@@ -193,7 +214,7 @@ final class AudioPreferencesModel {
                 if event.device?.reason == .deviceLost, let engine, var config,
                    config.outputDevice != 0, config.outputDevice == event.device?.previousDeviceID {
                     config.outputDevice = 0
-                    applied = (ObjectIdentifier(engine), config)
+                    Self.setApplied(config, to: engine)
                 }
                 refreshDevices()
             case .assetsReloaded:
@@ -208,11 +229,11 @@ final class AudioPreferencesModel {
         }
     }
 
-    /// The window shows another project (with another engine).
+    /// The window shows another project, or its project got another engine (DW-156: the live engine
+    /// came or went). The config applied to an engine stays with that engine.
     func engineReplaced() {
         reload = nil
         lastError = nil
-        applied = nil
         refreshDevices()
     }
 
