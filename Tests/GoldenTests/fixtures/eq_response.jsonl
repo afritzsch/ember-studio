@@ -1,0 +1,25 @@
+# eq_response (M7, DSP-030, DSP-040, T-077): the built-in EQ's impulse response, measured against the
+# analytic RBJ magnitude of its bands (06 "EQ semantics"), one EQ per side.
+# Both tracks play assets/click_48k.wav (1.0 at frame 0, then silence) at tick 0. Hard pans put each
+# track on one side at × 1 and the master's centre pan gives × √½, so each channel is √½ × an EQ's
+# impulse response.
+#   L "Slopes": HP on at 100 Hz, LP on at 4000 Hz, both Q √½ (12 dB/oct Butterworth sections); the
+#     shelves and peaks are off. Below the HP it falls 12 dB per octave (12.5 → 25 Hz: 11.98 dB).
+#   R "Bells": low shelf 150 Hz −6 dB, peak 1 at 1000 Hz +9 dB Q 2 (a bell boost), peak 2 at
+#     5000 Hz −9 dB Q 3 (a bell cut), high shelf 12000 Hz +4 dB; HP and LP off.
+# The response at a frequency is the DTFT of the 24000-frame render (the response has decayed to
+# exact 0 long before its end). DSP-040: every section's state snaps to exact 0 below −240 dBFS, so
+# both channels are exactly 0 from frame 12000 on.
+# IDs: master 1, Slopes 2 (EQ insert 3), Bells 4 (EQ insert 5), click asset 6.
+# EqGoldenTests checks the response at 13 frequencies per side against the analytic RBJ product
+# (within 0.01 dB; 06 asks for 0.1 dB) and the HP slope.
+# @expect {"field": "frames", "value": 24000}
+# @expect {"field": "peakDb", "value": -240, "range": {"start": 12000, "end": 24000}}
+# @expect {"field": "firstNonSilentSample", "value": 0}
+project.new {"name": "eq_response", "sampleRate": 48000}
+command.apply {"command": {"type": "RestoreTrack", "index": 0, "track": {"id": 2, "name": "Slopes", "kind": "audio", "color": {"red": 0.5, "green": 0.5, "blue": 0.5}, "clips": [], "takeFolders": [], "inserts": [{"id": 3, "kind": {"format": "builtin", "node": "eq"}, "params": [{"index": 0, "value": 1}, {"index": 1, "value": 100}, {"index": 2, "value": 0.7071067811865476}, {"index": 3, "value": 0}, {"index": 7, "value": 0}, {"index": 11, "value": 0}, {"index": 15, "value": 0}, {"index": 19, "value": 1}, {"index": 20, "value": 4000}, {"index": 21, "value": 0.7071067811865476}], "bypass": false}], "strip": {"gain": 1, "pan": -1, "mute": false, "solo": false, "phaseInvert": false}, "sends": [], "output": {"kind": "master"}, "armed": false, "monitoring": "auto", "automation": []}}}
+command.apply {"command": {"type": "RestoreTrack", "index": 1, "track": {"id": 4, "name": "Bells", "kind": "audio", "color": {"red": 0.5, "green": 0.5, "blue": 0.5}, "clips": [], "takeFolders": [], "inserts": [{"id": 5, "kind": {"format": "builtin", "node": "eq"}, "params": [{"index": 0, "value": 0}, {"index": 3, "value": 1}, {"index": 4, "value": 150}, {"index": 5, "value": -6}, {"index": 6, "value": 0.7071067811865476}, {"index": 7, "value": 1}, {"index": 8, "value": 1000}, {"index": 9, "value": 9}, {"index": 10, "value": 2}, {"index": 11, "value": 1}, {"index": 12, "value": 5000}, {"index": 13, "value": -9}, {"index": 14, "value": 3}, {"index": 15, "value": 1}, {"index": 16, "value": 12000}, {"index": 17, "value": 4}, {"index": 18, "value": 0.7071067811865476}, {"index": 19, "value": 0}], "bypass": false}], "strip": {"gain": 1, "pan": 1, "mute": false, "solo": false, "phaseInvert": false}, "sends": [], "output": {"kind": "master"}, "armed": false, "monitoring": "auto", "automation": []}}}
+asset.import {"path": "assets/click_48k.wav"}
+command.apply {"command": {"type": "AddClip", "trackID": 2, "start": 0, "assetID": 6}}
+command.apply {"command": {"type": "AddClip", "trackID": 4, "start": 0, "assetID": 6}}
+render.offline {"from": 0, "to": 960, "path": "eq_response.wav", "tail": false}

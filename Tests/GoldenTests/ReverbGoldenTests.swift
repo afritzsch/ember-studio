@@ -22,6 +22,16 @@ struct ReverbGoldenTests {
 
     /// 06 DSP-033 for constant params and the same input on both sides: returns (L, R).
     static func oracle(_ input: [Double]) -> ([Double], [Double]) {
+        let (wetL, wetR) = wet(input, size: size, decay: decay, damping: damping, predelayMs: predelayMs)
+        return (input.indices.map { (1 - mix) * input[$0] + mix * wetL[$0] },
+                input.indices.map { (1 - mix) * input[$0] + mix * wetR[$0] })
+    }
+
+    /// The wet outputs (L, R) of 06's FDN for constant size, decay, damping and pre-delay, with the
+    /// same input on both sides. The output is `(1 − mix)·dry + mix·wet` (T-077 reuses it with a
+    /// ramped mix).
+    static func wet(_ input: [Double], size: Double, decay: Double, damping: Double, predelayMs: Double,
+                    rate: Double = rate) -> ([Double], [Double]) {
         let base: [Double] = [2411, 2647, 2953, 3203, 3541, 3833, 4241, 4799]
         let scale = 0.15 + 0.85 * size
         let lengths = base.map { max(1, ($0 * scale * rate / 48000).rounded()) }
@@ -55,8 +65,8 @@ struct ReverbGoldenTests {
                 wL += sign(1, i) * x[i]
                 wR += sign(2, i) * x[i]
             }
-            left.append((1 - mix) * input[t] + mix * 0.25 * wL)
-            right.append((1 - mix) * input[t] + mix * 0.25 * wR)
+            left.append(0.25 * wL)
+            right.append(0.25 * wR)
         }
         return (left, right)
     }

@@ -115,7 +115,7 @@ DSP effects (T-070..073) depend only on the Node API and can be **pulled forward
 | T-074 | E+M | Automation lanes model + AutomationPlayer + plugin param path | AUTO-001..005, 008..010 | T-030, T-061/T-062 (for AUTO-009) | done |
 | T-075 | U+M | Automation recording (touch/latch/write) + lane UI | AUTO-006, 007, UI-015 | T-074, T-033 | ready |
 | T-076 | U | Mixer view + meters + routing pickers | UI-030, 031, 033 | T-022, T-032 | done |
-| T-077 | D | M7 goldens | TEST (M7 set) | T-071, T-073, T-074 | wip(t-077-m7-goldens) |
+| T-077 | D | M7 goldens | TEST (M7 set) | T-071, T-073, T-074 | done |
 
 ### M8 — Comping, export, hardening
 | Task | Lane | Title | Requirements | Depends on | Status |
@@ -124,7 +124,7 @@ DSP effects (T-070..073) depend only on the Node API and can be **pulled forward
 | T-081 | U | Take folder / comp editing UI | UI-016 | T-080, T-033 | todo |
 | T-082 | U | Export dialog | UI-042 | T-009, T-032 | done |
 | T-083 | U | Crash recovery dialog | UI-043 | T-031, T-064 | ready |
-| T-084 | E | Sanitizer CI jobs, perf smoke, GitHub Actions | TEST-007, 008, BUILD-009 | T-077 | todo |
+| T-084 | E | Sanitizer CI jobs, perf smoke, GitHub Actions | TEST-007, 008, BUILD-009 | T-077 | ready |
 
 ### Follow-ups from the user review (2026-11-10, see docs/autobuild/DECISIONS.md → User review)
 | Task | Lane | Title | Requirements | Depends on | Status |
@@ -442,3 +442,6 @@ Recorded by the lead from worker reports.
 | DW-236 | T-074 | The model doesn't know built-in `automatable` flags (ParamCatalog parses only defaults), so a lane on a non-automatable built-in param is accepted by the model and dropped by the engine; T-075's lane UI should offer only automatable params, or ParamCatalog parses the flag | M/U (T-075) | todo |
 | DW-237 | T-074 | While stopped, `AutomationSet` writes lane values once per position or graph change: a `SetParam` while stopped holds until play/locate, and any rebuild while stopped rewrites the lane value at the playhead. T-075 (AUTO-007) should confirm | E/U (T-075) | todo |
 | DW-238 | T-074 (T-064) | Swift warning in `Tests/DAWModelTests/HostBypassModelTests.swift:192` ('open' mutated after capture by sendable closure) | M (tests) | todo |
+| DW-239 | T-077 | 14's golden table has no rows for `clip_overlap_crossfade`, `export_normalize`, `input_monitoring_loopback`, `plugin_bypass_null` | lead (14) | todo |
+| DW-240 | T-077 | `Tests/GoldenTests/GoldenEngine.swift` mirrors `EngineClient`'s telemetry by hand and dropped `nanBlocks` (fixed in T-077); it may drop other later fields (`recordDrops`, `deviceInputLatency`, `armedTracks`, …). Share one conversion | B / tests | todo |
+| DW-241 | T-077 | Wall-clock tests flaky under parallel load besides UI-010 (DW-223): DW-032 `SyncCostTests` step-cost bounds, CTL-031 `ProgressTests` values.count ≥ 3 | E/B (T-084 perf job) | todo |

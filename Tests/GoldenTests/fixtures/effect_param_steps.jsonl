@@ -1,0 +1,37 @@
+# effect_param_steps (M7, ENG-022 for the effects, AUTO-002, DSP-030..033, T-077): a param step on
+# each built-in effect (a hold-curve automation lane) ramps linearly across exactly one block, the
+# first block whose start tick is at or past the step; nothing jumps (no zipper, no click).
+# Four tracks play assets/tone_441_48k.wav (a 441 Hz sine at 0.5, 35000 frames) through one effect,
+# 1440 ticks (36000 frames) apart; centre pans give × 0.5. 512-frame blocks. Each lane holds its
+# first value and steps 720 ticks (18000 frames) into the tone:
+#   EQ (peak 1 at 441 Hz Q 1, other bands flat): gain 0 → +12 dB (lane 0.5 → 0.75 on −24…24 dB) at
+#     tick 720; block 36 (frames 18432..18943) moves the coefficients from the 0 dB design to the
+#     +12 dB one (06 "Coefficient changes").
+#   Comp (threshold 0 dB, ratio 1: no gain reduction): makeup 0 → 12 dB (0 → 0.5 on 0…24 dB) at
+#     tick 2160, ramped over block 106 (54272..54783).
+#   Delay (20 ms, feedback 0, lowpass off): mix 0 → 1 at tick 3600, block 176 (90112..90623).
+#   Reverb (size 0.3, decay 0.5 s, damping 0.5, pre-delay 0): mix 0 → 1 at tick 5040, block 247
+#     (126464..126975).
+# Before a step the EQ, compressor and delay pass the tone exactly (0.25 peak) and the reverb is dry.
+# IDs: master 1, EQ 2 (3), Comp 4 (5), Delay 6 (7), Reverb 8 (9), tone asset 10.
+# EffectGoldenTests checks every sample against per-effect oracles with the ENG-022 ramp.
+# @expect {"field": "frames", "value": 144000}
+# @expect {"field": "peakDb", "value": -12.041, "tolerance": 0.001, "range": {"start": 0, "end": 18432}}
+# @expect {"field": "peakDb", "value": -12.041, "tolerance": 0.001, "range": {"start": 36000, "end": 54272}}
+# @expect {"field": "peakDb", "value": -0.041, "tolerance": 0.001, "range": {"start": 54784, "end": 71000}}
+# @expect {"field": "spectrumPeakHz", "value": 441, "tolerance": 2}
+project.new {"name": "effect_param_steps", "sampleRate": 48000}
+command.apply {"command": {"type": "RestoreTrack", "index": 0, "track": {"id": 2, "name": "EQ", "kind": "audio", "color": {"red": 0.5, "green": 0.5, "blue": 0.5}, "clips": [], "takeFolders": [], "inserts": [{"id": 3, "kind": {"format": "builtin", "node": "eq"}, "params": [{"index": 0, "value": 0}, {"index": 3, "value": 0}, {"index": 7, "value": 1}, {"index": 8, "value": 441}, {"index": 9, "value": 0}, {"index": 10, "value": 1}, {"index": 11, "value": 0}, {"index": 15, "value": 0}, {"index": 19, "value": 0}], "bypass": false}], "strip": {"gain": 1, "pan": 0, "mute": false, "solo": false, "phaseInvert": false}, "sends": [], "output": {"kind": "master"}, "armed": false, "monitoring": "auto", "automation": []}}}
+command.apply {"command": {"type": "RestoreTrack", "index": 1, "track": {"id": 4, "name": "Comp", "kind": "audio", "color": {"red": 0.5, "green": 0.5, "blue": 0.5}, "clips": [], "takeFolders": [], "inserts": [{"id": 5, "kind": {"format": "builtin", "node": "compressor"}, "params": [{"index": 0, "value": 0}, {"index": 1, "value": 1}, {"index": 2, "value": 10}, {"index": 3, "value": 100}, {"index": 4, "value": 0}, {"index": 5, "value": 0}, {"index": 6, "value": 0}], "bypass": false}], "strip": {"gain": 1, "pan": 0, "mute": false, "solo": false, "phaseInvert": false}, "sends": [], "output": {"kind": "master"}, "armed": false, "monitoring": "auto", "automation": []}}}
+command.apply {"command": {"type": "RestoreTrack", "index": 2, "track": {"id": 6, "name": "Delay", "kind": "audio", "color": {"red": 0.5, "green": 0.5, "blue": 0.5}, "clips": [], "takeFolders": [], "inserts": [{"id": 7, "kind": {"format": "builtin", "node": "delay"}, "params": [{"index": 0, "value": 20}, {"index": 1, "value": 0}, {"index": 2, "value": 5}, {"index": 3, "value": 0}, {"index": 4, "value": 20000}, {"index": 5, "value": 0}, {"index": 6, "value": 0}], "bypass": false}], "strip": {"gain": 1, "pan": 0, "mute": false, "solo": false, "phaseInvert": false}, "sends": [], "output": {"kind": "master"}, "armed": false, "monitoring": "auto", "automation": []}}}
+command.apply {"command": {"type": "RestoreTrack", "index": 3, "track": {"id": 8, "name": "Reverb", "kind": "audio", "color": {"red": 0.5, "green": 0.5, "blue": 0.5}, "clips": [], "takeFolders": [], "inserts": [{"id": 9, "kind": {"format": "builtin", "node": "reverb"}, "params": [{"index": 0, "value": 0.3}, {"index": 1, "value": 0.5}, {"index": 2, "value": 0.5}, {"index": 3, "value": 0}, {"index": 4, "value": 0}], "bypass": false}], "strip": {"gain": 1, "pan": 0, "mute": false, "solo": false, "phaseInvert": false}, "sends": [], "output": {"kind": "master"}, "armed": false, "monitoring": "auto", "automation": []}}}
+asset.import {"path": "assets/tone_441_48k.wav"}
+command.apply {"command": {"type": "AddClip", "trackID": 2, "start": 0, "assetID": 10}}
+command.apply {"command": {"type": "AddClip", "trackID": 4, "start": 1440, "assetID": 10}}
+command.apply {"command": {"type": "AddClip", "trackID": 6, "start": 2880, "assetID": 10}}
+command.apply {"command": {"type": "AddClip", "trackID": 8, "start": 4320, "assetID": 10}}
+command.apply {"command": {"type": "AddAutomationPoints", "target": {"kind": "device", "slot": 3, "index": 9}, "points": [{"tick": 0, "value": 0.5, "curve": "hold"}, {"tick": 720, "value": 0.75}]}}
+command.apply {"command": {"type": "AddAutomationPoints", "target": {"kind": "device", "slot": 5, "index": 5}, "points": [{"tick": 1440, "value": 0, "curve": "hold"}, {"tick": 2160, "value": 0.5}]}}
+command.apply {"command": {"type": "AddAutomationPoints", "target": {"kind": "device", "slot": 7, "index": 6}, "points": [{"tick": 2880, "value": 0, "curve": "hold"}, {"tick": 3600, "value": 1}]}}
+command.apply {"command": {"type": "AddAutomationPoints", "target": {"kind": "device", "slot": 9, "index": 4}, "points": [{"tick": 4320, "value": 0, "curve": "hold"}, {"tick": 5040, "value": 1}]}}
+render.offline {"from": 0, "to": 5760, "path": "effect_param_steps.wav", "tail": false}

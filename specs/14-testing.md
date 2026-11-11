@@ -46,6 +46,13 @@
 | `automation_ramp` | M7 | AUTO-002 |
 | `sidechain_compressor` | M7 | DSP-031, MIX-008 |
 | `reverb_determinism` | M7 | DSP-033, IO-011 |
+| `automation_loop_wrap` | M7 | AUTO-003 (strip/send jump at the wrap frame; the other built-ins are DW-232) |
+| `delay_tempo_sync` | M7 | DSP-032 |
+| `eq_response` | M7 | DSP-030 (impulse response vs analytic RBJ ≤ 0.01 dB: bell boost/cut, shelves, HP/LP slopes), DSP-040 (exact 0 tail) |
+| `effects_silence_nan_guard` | M7 | DSP-040 (EQ, comp, delay, reverb: tails end in exact 0; NaN in → silence, `nanBlocks` counted, DW-142) |
+| `builtin_bypass_null` | M7 | PLUG-018 for the built-ins (bypassed EQ/comp/delay/reverb null against the dry signal) |
+| `effect_param_steps` | M7 | ENG-022, AUTO-002 on effect params (EQ gain, comp makeup, delay mix, reverb mix ramp over one block) |
+| `m7_scene` | M7 | DSP-030..033, MIX-007, AUTO-002, IO-011 (EQ → comp → send → reverb bus, delay insert, two lanes; bit-identical on fresh engines) |
 
 ## Agent verification recipe
 When an agent finishes an audio-affecting task it must:
@@ -86,7 +93,7 @@ Engine tests are Swift Testing suites in `Tests/DAWEngineTests` that call engine
 |---|---|---|
 | TEST-005 | done (T-050) | `FakeDeviceDriverTests` (exact cycle counts in buffer-size blocks, latency published, stop/restart; real-time pacing vs as-fast-as-possible; loopback N frames; scripted rate change / overload / device loss on exact frames via the `io/DeviceNotification.h` seam for T-051; a realtime EngineFacade on `FakeDeviceDriverAdapter`; 0 RT violations) |
 | TEST-001 | done (T-019) | `GoldenRenderTests` (one case per `fixtures/*.jsonl`, run in-process through `ControlScript` + `Dispatcher.handle(_:)`); `GoldenHarnessTests` (directives, script failures). Fixture directives `# @node` (test-only node under a real kind) and `# @expect` (audio.analyze assertions) |
-| TEST-002 | done (T-019) | `GoldenRenderTests` (audio.compare ≤ −100 dBFS, equal length); "referencesMatchFixtures"; `GoldenHarnessTests` "mismatchFails". M1 goldens: `sine_through_graph`, `gain_ramp_smoothing`, `wav_playback_resampled`. M2 (T-025): `pan_law`, `bus_send_sum`, `pdc_alignment_null`, `send_ramps`, each with a `GoldenReferenceTests` check of the reference against the spec numbers; `@expect` takes `"channel"`. M4 (T-044): `sampler_pitch`, `midi_loop_wrap`, `midi_locate_no_stuck_notes` (`M4GoldenReferenceTests`, per-sample oracle from 06) |
+| TEST-002 | done (T-019) | `GoldenRenderTests` (audio.compare ≤ −100 dBFS, equal length); "referencesMatchFixtures"; `GoldenHarnessTests` "mismatchFails". M1 goldens: `sine_through_graph`, `gain_ramp_smoothing`, `wav_playback_resampled`. M2 (T-025): `pan_law`, `bus_send_sum`, `pdc_alignment_null`, `send_ramps`, each with a `GoldenReferenceTests` check of the reference against the spec numbers; `@expect` takes `"channel"`. M4 (T-044): `sampler_pitch`, `midi_loop_wrap`, `midi_locate_no_stuck_notes` (`M4GoldenReferenceTests`, per-sample oracle from 06). M7 (T-077): `eq_response`, `effects_silence_nan_guard`, `builtin_bypass_null`, `effect_param_steps`, `m7_scene` (`M7GoldenTests`, oracles from 06; `m7_scene` bit-identical on two fresh engines) |
 | TEST-003 | done (T-019) | `scripts/update-goldens.sh` (prints the audio.analyze before/after summary; refuses fixtures that fail or miss their `@expect`s); `GoldenHarnessTests` "missingReferenceFails" |
 | TEST-004 | done (T-019) | `TestNodeTests` (SineNode, ImpulseNode, FakeLatencyNode, NaNNode, registration); `AllocatingNodeTests`; registered only through `FacadeOptions::registerNodes` in test builds |
 | TEST-* (rest) | todo | |

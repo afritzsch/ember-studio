@@ -1,0 +1,41 @@
+# effects_silence_nan_guard (M7, DSP-040, DW-142, T-077): after the input stops, each built-in
+# effect's output reaches exact 0 (no denormal tail), and an effect fed NaN outputs silence and
+# counts the block in telemetry instead of passing NaN on.
+# Four tracks each play assets/click_48k.wav (1.0 at frame 0) through one effect, half a second
+# apart (ticks 0, 960, 1920, 2880 = frames 0, 24000, 48000, 72000); centre pans give × 0.5.
+#   EQ: HP 60 Hz Q 1, peak 1 at 200 Hz +12 dB Q 4 (a ringing filter): exact 0 after ≈ 11600 frames.
+#   Comp: threshold −40 dB, ratio 8, attack 1 ms, release 50 ms, knee 6, makeup 6 dB: the click
+#     only, then exact 0 (in × gain).
+#   Delay: 10 ms, feedback 0.5, lowpass 3000 Hz, mix 0.5: echoes every 480 frames, exact 0 after
+#     ≈ 12100 frames (values below 1e-9 are stored as 0).
+#   Reverb: size 0.2, decay 0.15 s, damping 0.5, pre-delay 0, mix 0.5: exact 0 after ≈ 18000 frames.
+# Four more tracks, without clips, run the same four effects on a NaN source: the test-only NaN
+# node stands in for their clip players (TEST-004). Each effect's guard silences every block
+# (they add exact 0 to the mix, so a leak would turn the whole render NaN) and counts it in the
+# nanBlocks telemetry counter. dawctl has no NaN node, so there those tracks are silent and the
+# render is the same bits.
+# IDs: master 1, EQ 2 (3), Comp 4 (5), Delay 6 (7), Reverb 8 (9), NaN EQ 10 (11), NaN Comp 12 (13),
+# NaN Delay 14 (15), NaN Reverb 16 (17), click asset 18.
+# EffectGoldenTests checks that every sample is finite, that each slot ends in exact 0 and that
+# nanBlocks is 4 × the render's blocks.
+# @node {"kind": "audioClipPlayer", "type": "nan"}
+# @expect {"field": "frames", "value": 96000}
+# @expect {"field": "peakDb", "value": -240, "range": {"start": 12000, "end": 24000}}
+# @expect {"field": "peakDb", "value": -240, "range": {"start": 24001, "end": 48000}}
+# @expect {"field": "peakDb", "value": -240, "range": {"start": 61000, "end": 72000}}
+# @expect {"field": "peakDb", "value": -240, "range": {"start": 91000, "end": 96000}}
+project.new {"name": "effects_silence_nan_guard", "sampleRate": 48000}
+command.apply {"command": {"type": "RestoreTrack", "index": 0, "track": {"id": 2, "name": "EQ", "kind": "audio", "color": {"red": 0.5, "green": 0.5, "blue": 0.5}, "clips": [], "takeFolders": [], "inserts": [{"id": 3, "kind": {"format": "builtin", "node": "eq"}, "params": [{"index": 0, "value": 1}, {"index": 1, "value": 60}, {"index": 2, "value": 1}, {"index": 3, "value": 0}, {"index": 7, "value": 1}, {"index": 8, "value": 200}, {"index": 9, "value": 12}, {"index": 10, "value": 4}, {"index": 11, "value": 0}, {"index": 15, "value": 0}, {"index": 19, "value": 0}], "bypass": false}], "strip": {"gain": 1, "pan": 0, "mute": false, "solo": false, "phaseInvert": false}, "sends": [], "output": {"kind": "master"}, "armed": false, "monitoring": "auto", "automation": []}}}
+command.apply {"command": {"type": "RestoreTrack", "index": 1, "track": {"id": 4, "name": "Comp", "kind": "audio", "color": {"red": 0.5, "green": 0.5, "blue": 0.5}, "clips": [], "takeFolders": [], "inserts": [{"id": 5, "kind": {"format": "builtin", "node": "compressor"}, "params": [{"index": 0, "value": -40}, {"index": 1, "value": 8}, {"index": 2, "value": 1}, {"index": 3, "value": 50}, {"index": 4, "value": 6}, {"index": 5, "value": 6}, {"index": 6, "value": 0}], "bypass": false}], "strip": {"gain": 1, "pan": 0, "mute": false, "solo": false, "phaseInvert": false}, "sends": [], "output": {"kind": "master"}, "armed": false, "monitoring": "auto", "automation": []}}}
+command.apply {"command": {"type": "RestoreTrack", "index": 2, "track": {"id": 6, "name": "Delay", "kind": "audio", "color": {"red": 0.5, "green": 0.5, "blue": 0.5}, "clips": [], "takeFolders": [], "inserts": [{"id": 7, "kind": {"format": "builtin", "node": "delay"}, "params": [{"index": 0, "value": 10}, {"index": 1, "value": 0}, {"index": 2, "value": 5}, {"index": 3, "value": 0.5}, {"index": 4, "value": 3000}, {"index": 5, "value": 0}, {"index": 6, "value": 0.5}], "bypass": false}], "strip": {"gain": 1, "pan": 0, "mute": false, "solo": false, "phaseInvert": false}, "sends": [], "output": {"kind": "master"}, "armed": false, "monitoring": "auto", "automation": []}}}
+command.apply {"command": {"type": "RestoreTrack", "index": 3, "track": {"id": 8, "name": "Reverb", "kind": "audio", "color": {"red": 0.5, "green": 0.5, "blue": 0.5}, "clips": [], "takeFolders": [], "inserts": [{"id": 9, "kind": {"format": "builtin", "node": "reverb"}, "params": [{"index": 0, "value": 0.2}, {"index": 1, "value": 0.15}, {"index": 2, "value": 0.5}, {"index": 3, "value": 0}, {"index": 4, "value": 0.5}], "bypass": false}], "strip": {"gain": 1, "pan": 0, "mute": false, "solo": false, "phaseInvert": false}, "sends": [], "output": {"kind": "master"}, "armed": false, "monitoring": "auto", "automation": []}}}
+command.apply {"command": {"type": "RestoreTrack", "index": 4, "track": {"id": 10, "name": "NaN EQ", "kind": "audio", "color": {"red": 0.5, "green": 0.5, "blue": 0.5}, "clips": [], "takeFolders": [], "inserts": [{"id": 11, "kind": {"format": "builtin", "node": "eq"}, "params": [{"index": 0, "value": 1}, {"index": 1, "value": 60}, {"index": 2, "value": 1}, {"index": 3, "value": 0}, {"index": 7, "value": 1}, {"index": 8, "value": 200}, {"index": 9, "value": 12}, {"index": 10, "value": 4}, {"index": 11, "value": 0}, {"index": 15, "value": 0}, {"index": 19, "value": 0}], "bypass": false}], "strip": {"gain": 1, "pan": 0, "mute": false, "solo": false, "phaseInvert": false}, "sends": [], "output": {"kind": "master"}, "armed": false, "monitoring": "auto", "automation": []}}}
+command.apply {"command": {"type": "RestoreTrack", "index": 5, "track": {"id": 12, "name": "NaN Comp", "kind": "audio", "color": {"red": 0.5, "green": 0.5, "blue": 0.5}, "clips": [], "takeFolders": [], "inserts": [{"id": 13, "kind": {"format": "builtin", "node": "compressor"}, "params": [{"index": 0, "value": -40}, {"index": 1, "value": 8}, {"index": 2, "value": 1}, {"index": 3, "value": 50}, {"index": 4, "value": 6}, {"index": 5, "value": 6}, {"index": 6, "value": 0}], "bypass": false}], "strip": {"gain": 1, "pan": 0, "mute": false, "solo": false, "phaseInvert": false}, "sends": [], "output": {"kind": "master"}, "armed": false, "monitoring": "auto", "automation": []}}}
+command.apply {"command": {"type": "RestoreTrack", "index": 6, "track": {"id": 14, "name": "NaN Delay", "kind": "audio", "color": {"red": 0.5, "green": 0.5, "blue": 0.5}, "clips": [], "takeFolders": [], "inserts": [{"id": 15, "kind": {"format": "builtin", "node": "delay"}, "params": [{"index": 0, "value": 10}, {"index": 1, "value": 0}, {"index": 2, "value": 5}, {"index": 3, "value": 0.5}, {"index": 4, "value": 3000}, {"index": 5, "value": 0}, {"index": 6, "value": 0.5}], "bypass": false}], "strip": {"gain": 1, "pan": 0, "mute": false, "solo": false, "phaseInvert": false}, "sends": [], "output": {"kind": "master"}, "armed": false, "monitoring": "auto", "automation": []}}}
+command.apply {"command": {"type": "RestoreTrack", "index": 7, "track": {"id": 16, "name": "NaN Reverb", "kind": "audio", "color": {"red": 0.5, "green": 0.5, "blue": 0.5}, "clips": [], "takeFolders": [], "inserts": [{"id": 17, "kind": {"format": "builtin", "node": "reverb"}, "params": [{"index": 0, "value": 0.2}, {"index": 1, "value": 0.15}, {"index": 2, "value": 0.5}, {"index": 3, "value": 0}, {"index": 4, "value": 0.5}], "bypass": false}], "strip": {"gain": 1, "pan": 0, "mute": false, "solo": false, "phaseInvert": false}, "sends": [], "output": {"kind": "master"}, "armed": false, "monitoring": "auto", "automation": []}}}
+asset.import {"path": "assets/click_48k.wav"}
+command.apply {"command": {"type": "AddClip", "trackID": 2, "start": 0, "assetID": 18}}
+command.apply {"command": {"type": "AddClip", "trackID": 4, "start": 960, "assetID": 18}}
+command.apply {"command": {"type": "AddClip", "trackID": 6, "start": 1920, "assetID": 18}}
+command.apply {"command": {"type": "AddClip", "trackID": 8, "start": 2880, "assetID": 18}}
+render.offline {"from": 0, "to": 3840, "path": "effects_silence_nan_guard.wav", "tail": false}
