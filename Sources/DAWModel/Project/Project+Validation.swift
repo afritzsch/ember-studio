@@ -34,8 +34,8 @@ extension Project {
         }
     }
 
-    /// The loop region is a non-empty range of non-negative ticks. Its minimum length (DW-060) is
-    /// in samples, so a tempo edit can shrink it; `SetLoop` checks that, not this.
+    /// The loop region is a non-empty range of non-negative ticks. There is no minimum length
+    /// (T-088, DW-125: the transport plays loops shorter than a block).
     func validateLoop() throws(DAWError) {
         guard let loop else { return }
         guard loop.start.raw >= 0, loop.end > loop.start, loop.end <= Tick.timelineEnd else {
