@@ -1,5 +1,7 @@
 #include "time/Transport.h"
 
+#include <cmath>
+
 #include "time/TransportSegments.h"
 
 namespace daw {
@@ -22,6 +24,11 @@ TransportSegment makeSegment(const TempoMap& tempo, SamplePos start, uint32_t fr
         if (seg.endTick < wrapTick) seg.endTick = wrapTick;
     }
     return seg;
+}
+
+// DW-061: the length of tick `tick` in samples (exact, before rounding).
+double samplesPerTick(const TempoMap& tempo, Tick tick) DAW_RT {
+    return tempo.sampleRate() * 60.0 / (tempo.bpmAt(tick) * static_cast<double>(kPPQ));
 }
 
 } // namespace
@@ -72,6 +79,15 @@ TransportPlayhead Transport::playhead() const {
 // MARK: Audio thread
 
 const TransportBlock& Transport::advance(const TempoMap& tempo, uint32_t numFrames) DAW_RT {
+    beginBlock(tempo);
+    return layOutPass(tempo, numFrames);
+}
+
+void Transport::beginBlock(const TempoMap& tempo) DAW_RT {
+    // DW-061: first put the position back on its tick under this block's map (a no-op unless
+    // the map changed), so commands below and the playhead see the re-anchored position.
+    reanchor(tempo);
+
     // TIME-004: everything queued so far applies from this block's first frame. Bounded by the
     // queue's capacity (CONV-RT-04); anything pushed meanwhile waits for the next block.
     locatedWhilePlaying_ = false;
@@ -83,11 +99,47 @@ const TransportBlock& Transport::advance(const TempoMap& tempo, uint32_t numFram
     }
     if (applied != 0) commandsApplied_.fetch_add(applied, std::memory_order_relaxed);
 
-    // Before layOut(): the playhead shows this block's first frame, judged by the run it
+    // Before the layout: the playhead shows this block's first frame, judged by the run it
     // belongs to, not by a wrap later in the block.
     publishPlayhead(tempo);
-    layOut(tempo, numFrames);
-    return block_;
+}
+
+void Transport::reanchor(const TempoMap& tempo) DAW_RT {
+    if (!anchored_) return;
+    // DW-061: the same tick, and the same fraction of it. With an unchanged map (any graph
+    // rebuild that isn't a tempo edit) both terms are what anchor() computed, so the position
+    // stays on its sample exactly.
+    const SamplePos base = tempo.tickToSample(anchorTick_);
+    SamplePos offset = anchorOffset_;
+    const double perTick = samplesPerTick(tempo, anchorTick_);
+    if (offset > 0 && perTick != anchorSamplesPerTick_ && anchorSamplesPerTick_ > 0) {
+        offset = static_cast<SamplePos>(std::floor(static_cast<double>(offset) * perTick / anchorSamplesPerTick_));
+        // Rounding must not carry it into the next tick.
+        const SamplePos next = tempo.tickToSample(anchorTick_ + 1);
+        if (base + offset >= next) offset = next - base - 1;
+        if (offset < 0) offset = 0;
+    }
+    const SamplePos to = base + offset;
+    if (to == pos_) return;
+    // TIME-009 (display only): the current run's bounds move with the position.
+    if (runFromWrap_ && loopEnabled_) {
+        runStart_ = tempo.tickToSample(loopStart_);
+        runLoopEnd_ = tempo.tickToSample(loopEnd_);
+    } else {
+        runStart_ += to - pos_;
+    }
+    pos_ = to;
+}
+
+void Transport::anchor(const TempoMap& tempo) DAW_RT {
+    anchorTick_ = tempo.sampleToTick(pos_);
+    anchorOffset_ = pos_ - tempo.tickToSample(anchorTick_);
+    anchorSamplesPerTick_ = samplesPerTick(tempo, anchorTick_);
+    anchored_ = true;
+}
+
+void Transport::offsetLastPass(uint32_t offset) DAW_RT {
+    for (uint8_t i = 0; i < block_.numSegments && i < 2; ++i) block_.seg[i].frameOffset += offset;
 }
 
 void Transport::apply(const TransportCmd& cmd, const TempoMap& tempo) DAW_RT {
@@ -121,7 +173,7 @@ void Transport::apply(const TransportCmd& cmd, const TempoMap& tempo) DAW_RT {
     }
 }
 
-void Transport::layOut(const TempoMap& tempo, uint32_t numFrames) DAW_RT {
+const TransportBlock& Transport::layOutPass(const TempoMap& tempo, uint32_t maxFrames) DAW_RT {
     // TIME-005. seg[0] always carries the position, even when it isn't a segment.
     block_.playing = playing_;
     block_.recording = recording_;
@@ -129,7 +181,11 @@ void Transport::layOut(const TempoMap& tempo, uint32_t numFrames) DAW_RT {
     block_.numSegments = 0;
     block_.seg[0] = makeSegment(tempo, pos_, 0, 0, false);
     block_.seg[1] = block_.seg[0];
-    if (!playing_ || numFrames == 0) return;
+    passFrames_ = maxFrames;
+    if (!playing_ || maxFrames == 0) {
+        anchor(tempo);
+        return block_;
+    }
 
     const bool afterWrap = wrapPending_;
     wrapPending_ = false;
@@ -147,28 +203,31 @@ void Transport::layOut(const TempoMap& tempo, uint32_t numFrames) DAW_RT {
     // The loop wraps only when playback crosses its end from before it; a playhead already past
     // the end plays on. Reaching the end exactly on the last frame wraps too, so the next block
     // starts at the loop start.
-    const SamplePos end = pos_ + numFrames;
+    const SamplePos end = pos_ + maxFrames;
     if (!looping || pos_ >= loopEnd || end < loopEnd) {
-        block_.seg[0] = makeSegment(tempo, pos_, 0, numFrames, afterWrap, wrapTick_);
+        block_.seg[0] = makeSegment(tempo, pos_, 0, maxFrames, afterWrap, wrapTick_);
         block_.numSegments = 1;
         pos_ = end;
     } else {
         const auto first = static_cast<uint32_t>(loopEnd - pos_);
         block_.seg[0] = makeSegment(tempo, pos_, 0, first, afterWrap, wrapTick_);
         block_.numSegments = 1;
+        passFrames_ = first;
         // Ending exactly on the loop end: the wrap shows on the next block's first segment.
         pos_ = loopStart;
         wrapPending_ = true;
 
-        // Two segments at most (03 Interfaces): a loop shorter than the rest of the block plays
-        // once, and the frames after it are left out (a gap; the next block wraps again).
-        const uint32_t rest = numFrames - first;
+        // Two segments at most (03 Interfaces). DW-125: a loop shorter than the rest plays once
+        // here and the pass ends at the loop end; the next pass (layOutPass again) starts right
+        // after that wrap, so every pass of the loop is played and nothing is left out.
+        const uint32_t rest = maxFrames - first;
         if (rest > 0) {
             const SamplePos loopLength = loopEnd - loopStart;
             const uint32_t second =
                 rest < loopLength ? rest : static_cast<uint32_t>(loopLength);
             block_.seg[1] = makeSegment(tempo, loopStart, first, second, true, loopStart_);
             block_.numSegments = 2;
+            passFrames_ = first + second;
             pos_ = loopStart + second;
             wrapPending_ = pos_ == loopEnd;
             if (wrapPending_) pos_ = loopStart;
@@ -179,7 +238,8 @@ void Transport::layOut(const TempoMap& tempo, uint32_t numFrames) DAW_RT {
         runFromWrap_ = true;
         runLoopEnd_ = loopEnd;
     }
-
+    anchor(tempo);
+    return block_;
 }
 
 void Transport::publishPlayhead(const TempoMap& tempo) DAW_RT {

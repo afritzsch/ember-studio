@@ -25,7 +25,7 @@ CheckResult pdcDelayLinesCarryOver();
 
 // MIX-023: timeline nodes run graph-latency samples ahead with a pre-roll at every run start,
 // so output frame f is timeline position f from the first frame: play from 0, locate while
-// playing, a loop shorter than the latency.
+// playing, a loop shorter than the latency, and one shorter than the block (DW-125).
 CheckResult pdcSourcePreRoll();
 
 // MIX-023: a real AudioClipPlayer behind a latent master insert: an offline export from tick 0

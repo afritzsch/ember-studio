@@ -27,7 +27,8 @@
 // NaN or ±Inf, or whose output went non-finite, outputs silence and clears the filter state; it
 // is counted in nanBlocks() and, when the factory was given one, in Telemetry (DW-142).
 //
-// reset() keeps the filter state: an effect keeps running across a locate (TIME-008). A mono
+// The filter state keeps running across a locate (TIME-008: the engine never resets an effect
+// then); reset() clears it, which only offline renders do (DW-063). A mono
 // input feeds both channels; no input is silence and the filters ring on; channels beyond
 // stereo are silent. The same input and params give the same bits for any block sizes (ENG-004).
 
@@ -101,6 +102,10 @@ public:
         : firstParam_(firstParam), numParams_(numParams), telemetry_(telemetry) {}
 
     void prepare(const PrepareInfo& info) override;
+    // DW-063 (T-089): back to the state prepare() leaves (no tail, first block jumps to the
+    // slot values). Only offline renders reset every node; a live locate never resets an effect
+    // (TIME-008), so tails survive it.
+    void reset() DAW_RT override;
     void process(ProcessContext& ctx, NodeIO& io) DAW_RT override;
 
     // Blocks silenced by the NaN guard since construction. Any thread.

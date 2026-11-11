@@ -47,4 +47,9 @@ CheckResult midiClipPlayerAllNotesOffOnNewInstance();
 // new instance with the new notes.
 CheckResult midiClipPlayerThroughGraphBuilder();
 
+// DW-125 (T-089): a loop of 1000 frames in blocks of up to 4096, each block run in passes as
+// Engine::render does (Transport::layOutPass): every wrap ends the note hanging over the loop end
+// (DW-101) and chases the one spanning the loop start (DW-103), on the wrap frame, in every pass.
+CheckResult midiClipPlayerShortLoopPasses();
+
 } // namespace daw::testing

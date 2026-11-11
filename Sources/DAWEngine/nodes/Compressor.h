@@ -43,8 +43,9 @@
 // MeterReading::rms the factor at the block's last frame. The registered factory meters
 // (NodeKindInfo::meters), so the facade's meter(node) reads it like a strip's (DW-071).
 //
-// reset() keeps the envelope: an effect keeps running across a locate (TIME-008), like any
-// insert processing a continuous input.
+// The envelope keeps running across a locate (TIME-008: the engine never resets an effect then),
+// like any insert processing a continuous input; reset() clears it, which only offline renders do
+// (DW-063).
 
 #include <array>
 #include <atomic>
@@ -99,6 +100,10 @@ public:
         : firstParam_(firstParam), numParams_(numParams), meter_(meter), telemetry_(telemetry) {}
 
     void prepare(const PrepareInfo& info) override;
+    // DW-063 (T-089): back to the state prepare() leaves (no tail, first block jumps to the
+    // slot values). Only offline renders reset every node; a live locate never resets an effect
+    // (TIME-008), so tails survive it.
+    void reset() DAW_RT override;
     void process(ProcessContext& ctx, NodeIO& io) DAW_RT override;
 
     // The current gain reduction e in dB (≤ 0, makeup not included). For tests and meters.

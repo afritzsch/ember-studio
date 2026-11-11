@@ -199,14 +199,18 @@ CheckResult facadeSessionRateReconvertsAssets() {
     log.poll(facade);
     DAW_CHECK(log.reloads().empty() && facade.telemetry().sampleRate == 48000);
 
-    // IO-033: the change. The re-conversion runs on daw.loader; until it is done play() is refused.
+    // IO-033: the change. The re-conversion runs on daw.loader; until it is done play() is queued
+    // (T-089, a change of T-056: it used to be refused): the transport stays stopped and reports
+    // the pending play, and stop() cancels it (facadeQueuedPlayDuringReconversion has the rest).
     DAW_CHECK(facade.setSessionSampleRate(96000).ok());
     const TelemetryPOD during = facade.telemetry();
     DAW_CHECK(during.sampleRate == 96000);
     // 30 s of stereo at Mastering quality takes far longer than returning from the call.
     DAW_CHECK(during.assetsReloadPending == 1);
     facade.play();
-    DAW_CHECK(!facade.transport().playing);
+    DAW_CHECK(!facade.transport().playing && facade.transport().playPending);
+    facade.stop();
+    DAW_CHECK(!facade.transport().playing && !facade.transport().playPending);
     // An export asked for now waits for the new assets (it would otherwise render silence: a
     // clip player plays only assets at the session rate).
     ExportSpecPOD spec;
@@ -251,6 +255,67 @@ CheckResult facadeSessionRateReconvertsAssets() {
     // Playback works again once it's done.
     facade.play();
     DAW_CHECK(facade.transport().playing);
+    facade.stop();
+    DAW_CHECK(facade.telemetry().rtViolations == 0);
+    releaseFacade(created);
+    return checks;
+}
+
+CheckResult facadeQueuedPlayDuringReconversion() {
+    CheckResult checks;
+    TempDir dir;
+    EngineFacade* created = offlineFacade(48000);
+    DAW_CHECK(created != nullptr);
+    if (!created) return checks;
+    EngineFacade& facade = *created;
+    EventLog log;
+
+    // 30 s of stereo, so each re-conversion takes long enough to act during it.
+    const auto file = dir.path() / "tone.wav";
+    DAW_CHECK(writeTestFile(file, "wav-f32", kFileRate, tone(30, 2)).ok());
+    JobStatus loaded = waitJob(facade, facade.loadAsset(1, file.string()));
+    DAW_CHECK(loaded.state == JobState::succeeded);
+    const ParamID strip = facade.allocateParams(4);
+    facade.setParam(strip + 0, 1.0f);
+    DAW_CHECK(published(facade, facade.applyGraph(clipGraph(1, 2 * kPPQ, strip))));
+    log.poll(facade);
+    log.clear();
+
+    // IO-033 (T-089): play() during the pass is queued; stop() cancels it, so the pass finishing
+    // starts nothing.
+    DAW_CHECK(facade.setSessionSampleRate(96000).ok());
+    DAW_CHECK(facade.telemetry().assetsReloadPending == 1);
+    facade.play();
+    TransportPOD t = facade.transport();
+    DAW_CHECK(!t.playing && t.playPending);
+    facade.stop();
+    t = facade.transport();
+    DAW_CHECK(!t.playing && !t.playPending);
+    DAW_CHECK(log.waitFinished(facade));
+    t = facade.transport();
+    DAW_CHECK(!t.playing && !t.playPending);
+    log.clear();
+
+    // Queued again, and a locate meanwhile keeps it (it moves where playback will start): the
+    // transport starts when the pass finishes, from the located tick, on the new assets.
+    DAW_CHECK(facade.setSessionSampleRate(48000).ok());
+    DAW_CHECK(facade.telemetry().assetsReloadPending == 1);
+    facade.play();
+    facade.locate(3 * kPPQ);
+    t = facade.transport();
+    DAW_CHECK(!t.playing && t.playPending && t.tick == 3 * kPPQ);
+    DAW_CHECK(log.waitFinished(facade));
+    t = facade.transport();
+    DAW_CHECK(t.playing && !t.playPending);
+    DAW_CHECK(t.tick == 3 * kPPQ);  // offline: nothing renders until asked, so it stands there
+    DAW_CHECK(facade.telemetry().assetsReloadPending == 0 && facade.telemetry().sampleRate == 48000);
+    facade.stop();
+    DAW_CHECK(!facade.transport().playing && !facade.transport().playPending);
+
+    // Without a re-conversion running, play() starts at once and never shows as pending.
+    facade.play();
+    t = facade.transport();
+    DAW_CHECK(t.playing && !t.playPending);
     facade.stop();
     DAW_CHECK(facade.telemetry().rtViolations == 0);
     releaseFacade(created);

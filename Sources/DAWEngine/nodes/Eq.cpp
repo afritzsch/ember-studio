@@ -51,6 +51,13 @@ void Eq::prepare(const PrepareInfo& info) {
     primed_ = false;
 }
 
+void Eq::reset() DAW_RT {
+    // DW-063: prepare()'s state.
+    clearState();
+    coeffs_.fill(BiquadCoeffs{});
+    primed_ = false;
+}
+
 void Eq::clearState() DAW_RT {
     for (auto& channel : state_) channel.fill(BiquadState{});
 }

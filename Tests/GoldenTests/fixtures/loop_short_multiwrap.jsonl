@@ -1,0 +1,24 @@
+# loop_short_multiwrap (T-089, DW-125, TIME-005, TIME-006, DSP-001): a loop shorter than a block
+# wraps several times in it. The engine renders such a block in passes with at most one wrap each
+# (Engine.h), so every pass of the loop plays, sample-exact and crossfaded, with no gap.
+# As loop_wrap_midblock, but the loop is ticks [86, 126) = samples [2150, 3150), 1000 frames, in
+# 4096-frame blocks: ticks 0..960 (24000 frames) of playback from tick 0 with render.offline
+# {"loop": true}. SetLoop refuses a loop shorter than 4096 samples (DW-125's model side), so the
+# loop is set at 25 bpm (40 ticks = 4800 samples) and a tempo edit to 120 bpm then shrinks it to
+# 1000, exactly the case DW-125 is about. assets/tone_441_48k.wav (441 Hz at 0.5) is one clip from tick 0 on a
+# centre-panned track (× 0.5 through both strips).
+# Wraps at frames 3150, 4150, …, 23150 (21 wraps; four or five in each block after the first).
+# After a wrap at W, frame W + d plays the loop from 2150 + d; for d < 64 the new pass fades in at
+# (d + 1)/64 while the old pass goes on from 3150 + d at (63 - d)/64 (06 DSP-001, AudioClipPlayer).
+# TransportGoldenTests checks every sample.
+# @expect {"field": "frames", "value": 24000}
+# @expect {"field": "firstNonSilentSample", "value": 1}
+# @expect {"field": "peakDb", "value": -12.041, "tolerance": 0.01, "range": {"start": 0, "end": 3150}}
+project.new {"name": "loop_short_multiwrap", "sampleRate": 48000}
+command.apply {"command": {"type": "AddTrack", "name": "Tone", "kind": "audio"}}
+asset.import {"path": "assets/tone_441_48k.wav"}
+command.apply {"command": {"type": "AddClip", "trackID": 2, "start": 0, "assetID": 3}}
+command.apply {"command": {"type": "SetTempoEvent", "tick": 0, "bpm": 25}}
+transport.setLoop {"enabled": true, "start": 86, "end": 126}
+command.apply {"command": {"type": "SetTempoEvent", "tick": 0, "bpm": 120}}
+render.offline {"from": 0, "to": 960, "path": "loop_short_multiwrap.wav", "tail": false, "loop": true, "blockSize": 4096}

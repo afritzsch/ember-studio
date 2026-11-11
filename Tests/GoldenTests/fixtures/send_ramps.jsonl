@@ -1,33 +1,37 @@
-# send_ramps (M2, MIX-007, ENG-022, DW-093): a send's level and mute slots ramp over one block.
+# send_ramps (M2, MIX-007, ENG-022, DW-093): a send's level slot ramps over one block.
 # The source is a constant 1.0 on both channels (an ImpulseNode firing every frame, TEST-004).
 # Both tracks output to bus "Dry", which is muted, so only the sends are heard:
-#   "Level" (5): post-fader send (7) at level 0 → bus "FX-L" (2, pan -1, passes L only).
-#   "Mute"  (6): muted; pre-fader send (8) at level 1 → bus "FX-R" (3, pan +1, passes R only).
-# A first render primes the smoothers. Then the send level steps 0 → 1 and the track unmutes,
-# which the model writes into its send's mute slot (MIX-006/007). In the golden render the
-# first 512-frame block ramps linearly 0 → 1 on both sends, then holds:
+#   "Level" (5): post-fader send (7) → bus "FX-L" (2, pan -1, passes L only).
+#   "Pre"   (6): pre-fader send (8) → bus "FX-R" (3, pan +1, passes R only).
+# Both sends start at level 0. Their sendLevel lanes hold 0 until tick 512 and are unity from there
+# (normalized 5/6 on the 0…+12 dB range, automation/ParamMapping.h). Tick 512 is frame 12800, the
+# start of 512-frame block 25, so that block ramps linearly 0 → 1 on both sends, then holds:
 #   L = 1 · √½ (Level's centre pan) · 1 (FX-L) · √½ (master) · ramp = 0.5 · (i + 1) / 512
 #   R = 1 (pre-fader) · 1 (FX-R) · √½ (master) · ramp           = √½ · (i + 1) / 512
 # GoldenReferenceTests checks the samples too.
+# Until T-089 the steps were commands between two renders (a send level 0 → 1 and an unmute
+# written into a pre-fader send's mute slot); an offline render now resets every node first
+# (DW-063), so the step happens inside the render. The send's mute ramp has no automation target;
+# its evidence is the C++ SendTests "gainNodeLevel" (MIX-007, ENG-022: level and mute slots
+# ramped per block) and "mutedWithTrack" (unmute fades back, no click).
 # @node {"kind": "audioClipPlayer", "type": "impulse", "samples": 1, "level": 1}
 # @expect {"field": "frames", "value": 24000}
-# @expect {"field": "peakDb", "value": -12.041, "tolerance": 0.001, "channel": 0, "range": {"start": 255, "end": 256}}
-# @expect {"field": "peakDb", "value": -9.031, "tolerance": 0.001, "channel": 1, "range": {"start": 255, "end": 256}}
-# @expect {"field": "rmsDb", "value": -6.021, "tolerance": 0.001, "channel": 0, "range": {"start": 511, "end": 24000}}
-# @expect {"field": "rmsDb", "value": -3.010, "tolerance": 0.001, "channel": 1, "range": {"start": 511, "end": 24000}}
+# @expect {"field": "peakDb", "value": -240, "range": {"start": 0, "end": 12800}}
+# @expect {"field": "peakDb", "value": -12.041, "tolerance": 0.001, "channel": 0, "range": {"start": 13055, "end": 13056}}
+# @expect {"field": "peakDb", "value": -9.031, "tolerance": 0.001, "channel": 1, "range": {"start": 13055, "end": 13056}}
+# @expect {"field": "rmsDb", "value": -6.021, "tolerance": 0.001, "channel": 0, "range": {"start": 13311, "end": 24000}}
+# @expect {"field": "rmsDb", "value": -3.010, "tolerance": 0.001, "channel": 1, "range": {"start": 13311, "end": 24000}}
 project.new {"name": "send_ramps", "sampleRate": 48000}
 command.apply {"command": {"type": "AddBus", "name": "FX-L"}}
 command.apply {"command": {"type": "AddBus", "name": "FX-R"}}
 command.apply {"command": {"type": "AddBus", "name": "Dry"}}
 command.apply {"command": {"type": "AddTrack", "name": "Level", "kind": "audio", "output": {"kind": "bus", "id": 4}}}
-command.apply {"command": {"type": "AddTrack", "name": "Mute", "kind": "audio", "output": {"kind": "bus", "id": 4}}}
+command.apply {"command": {"type": "AddTrack", "name": "Pre", "kind": "audio", "output": {"kind": "bus", "id": 4}}}
 command.apply {"command": {"type": "AddSend", "channelID": 5, "busID": 2, "level": 0, "tap": "postFader"}}
-command.apply {"command": {"type": "AddSend", "channelID": 6, "busID": 3, "level": 1, "tap": "preFader"}}
+command.apply {"command": {"type": "AddSend", "channelID": 6, "busID": 3, "level": 0, "tap": "preFader"}}
 command.apply {"command": {"type": "SetParam", "target": {"kind": "strip", "channel": 2, "param": "pan"}, "value": -1}}
 command.apply {"command": {"type": "SetParam", "target": {"kind": "strip", "channel": 3, "param": "pan"}, "value": 1}}
 command.apply {"command": {"type": "SetParam", "target": {"kind": "strip", "channel": 4, "param": "mute"}, "value": 1}}
-command.apply {"command": {"type": "SetParam", "target": {"kind": "strip", "channel": 6, "param": "mute"}, "value": 1}}
-render.offline {"from": 0, "to": 96, "path": "primed.wav", "tail": false, "blockSize": 512}
-command.apply {"command": {"type": "SetSendLevel", "sendID": 7, "level": 1}}
-command.apply {"command": {"type": "SetParam", "target": {"kind": "strip", "channel": 6, "param": "mute"}, "value": 0}}
+command.apply {"command": {"type": "AddAutomationPoints", "target": {"kind": "sendLevel", "send": 7}, "points": [{"tick": 0, "value": 0, "curve": "hold"}, {"tick": 512, "value": 0.8333333333333334}]}}
+command.apply {"command": {"type": "AddAutomationPoints", "target": {"kind": "sendLevel", "send": 8}, "points": [{"tick": 0, "value": 0, "curve": "hold"}, {"tick": 512, "value": 0.8333333333333334}]}}
 render.offline {"from": 0, "to": 960, "path": "send_ramps.wav", "tail": false, "blockSize": 512}

@@ -1,9 +1,11 @@
 import DAWControl
+import DAWModel
 import Foundation
 import Testing
 
 // T-073: the reverb_determinism golden (DSP-033, IO-011). The fixture runs twice on fresh
-// engines and the renders must be the same bits (and null against the reference), and the
+// engines and the renders must be the same bits (and null against the reference); since T-089
+// (DW-063) also twice on one engine with a ringing tail in between; and the
 // reference is checked sample by sample against an oracle written from 06's reverb signal path
 // (nodes/Reverb.h), so a regenerated reference can't hide a wrong network, tap or level. The
 // input comes from the fixture's asset files.
@@ -93,6 +95,51 @@ struct ReverbGoldenTests {
         }
         // A reverb, not silence: the tail is there in both channels.
         for channel in renders[0].channels { #expect(channel[3000..<12000].contains { $0 != 0 }) }
+    }
+
+    /// DW-063 (T-089): an offline render resets every node first, so a reverb tail still ringing
+    /// from the render before can't reach the next one. On one engine: the fixture's render, a
+    /// render of ticks 480..<600 (cut while the kick's tail rings), then the fixture's range again,
+    /// which must be the first render's bits. (Live playback first: `offlineResetsEveryNode`.)
+    @Test("DW-063, IO-011: reverb_determinism renders the same bits twice on one engine, a ringing tail in between")
+    @MainActor func sameEngineRendersBitIdentical() async throws {
+        let fixture = try GoldenFixture(name: Self.name,
+                                        contentsOf: GoldenHarness.fixturesDirectory.appending(path: "\(Self.name).jsonl"))
+        let work = FileManager.default.temporaryDirectory
+            .appending(path: "golden-same-engine-\(UUID().uuidString)", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: work) }
+        try FileManager.default.createSymbolicLink(
+            at: work.appending(path: "assets"),
+            withDestinationURL: GoldenHarness.fixturesDirectory.appending(path: "assets", directoryHint: .isDirectory))
+        let dispatcher = Dispatcher(configuration: .init(
+            mode: .headless,
+            makeEngine: { rate throws(DAWError) in try GoldenEngine(sampleRate: rate, testNodes: []) },
+            workingDirectory: work,
+            fixtureDirectories: [GoldenHarness.fixturesDirectory]))
+        for line in fixture.script.lines {
+            let response = await dispatcher.handle(line.request)
+            #expect(response?.error == nil, "\(line.request.method)")
+        }
+        func render(_ from: Int64, _ to: Int64, _ path: String) async throws -> AudioData {
+            _ = try await dispatcher.call(ControlMethod.renderOffline.rawValue,
+                                          .object(["from": .int(from), "to": .int(to), "path": .string(path),
+                                                   "tail": .bool(false)]))
+            return try AudioData(contentsOf: work.appending(path: path))
+        }
+        let cut = try await render(480, 600, "cut.wav")
+        let again = try await render(0, 2400, "again.wav")
+        let first = try AudioData(contentsOf: work.appending(path: "\(Self.name).wav"))
+
+        // The cut render really stops with the reverb ringing, so a carried-over tail would show.
+        for channel in cut.channels { #expect(channel.suffix(256).contains { abs($0) > 1e-4 }) }
+        #expect(first.frameCount == Self.frames && again.frameCount == Self.frames)
+        #expect(first.channels.count == 2 && again.channels.count == 2)
+        for (a, b) in zip(first.channels, again.channels) {
+            #expect(a.map(\.bitPattern) == b.map(\.bitPattern))
+        }
+        let telemetry = try await dispatcher.call(ControlMethod.engineTelemetry.rawValue)
+        #expect(telemetry["rtViolations"]?.int64Value == 0)
     }
 
     @Test("DSP-033: reverb_determinism is 0.5 × the FDN oracle of click + kick, sample by sample")

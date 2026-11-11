@@ -1,27 +1,31 @@
-# locate_reset (M3, TIME-008, DW-073): a locate while playing resets the clip players and
-# nothing else.
+# locate_reset (M3, TIME-008, DW-073, DW-063): the start of a render is a locate while playing,
+# which resets the clip player; and since T-089 (DW-063, user decision: offline renders reset
+# every node) it resets every other node too, so the render doesn't depend on what played before.
 # Fixtures can't locate in the middle of a render: render.offline turns the loop off and starts
-# with play() then locate(from), which is a locate while playing (OfflineDriver). So the locate
-# here is the start of a second render that doesn't continue the first one.
+# with play() then locate(from) (OfflineDriver). So the locate here is the start of a second
+# render that doesn't continue the first one. Live, a locate resets only the timeline nodes and
+# effects keep their state (TIME-008); that is checked in C++: TransportTests "locateFlagsReset"
+# (locateWhilePlayingFlagsReset) and OfflineResetTests "resetsEveryNode" (offlineResetsEveryNode:
+# a live locate keeps the reverb and delay tails).
 # Two tracks, IDs written out (RestoreTrack places the insert): master 1, Clip 2, Effect 3
 # (insert 4), tone asset 5.
 #   L: "Clip" (pan -1) plays assets/tone_441_48k.wav (441 Hz at 0.5) from tick 0.
 #   R: "Effect" (pan +1) has no clips; its `eq` insert is a SineNode (TEST-004, 1100 Hz at 0.5),
-#      an effect whose state is a frame counter: it isn't a timeline node, so a locate must not
-#      reset it (TIME-008 "effects keep their tails"). No built-in effect with a tail exists yet
+#      an effect whose state is a frame counter: it isn't a timeline node, so a live locate doesn't
+#      reset it (TIME-008), but a render does (DW-063). No built-in effect with a tail exists yet
 #      (DW-135), and with no latency there is no pre-roll (MIX-023) to refill one either.
 # The first render plays ticks 0..480 (12000 frames, 24 blocks of 512: 12288 rendered). The
 # golden render is ticks 1000..1240 (samples 25000..31000):
 #   L = √½ · tone[25000 + f] from frame 0, at full level. Without the reset the clip player would
 #       treat the jump as a loop wrap and crossfade over 64 frames from where the first render
 #       stopped (sample 12288), so frame 0 would play the new pass at 1/64.
-#   R = √½ · 0.5 · sin(2π · 1100 · (12288 + f) / 48000): the sine goes on from the first render.
-#       Reset, it would restart at sin(0) = 0.
+#   R = √½ · 0.5 · sin(2π · 1100 · f / 48000): the render reset the effect, so its sine restarts at
+#       sin(0) = 0 instead of going on from frame 12288 of the first render (as before T-089).
 # M3GoldenTests checks every sample.
 # @node {"kind": "eq", "type": "sine", "frequency": 1100, "level": 0.5}
 # @expect {"field": "frames", "value": 6000}
 # @expect {"field": "peakDb", "value": -9.719, "tolerance": 0.001, "channel": 0, "range": {"start": 0, "end": 1}}
-# @expect {"field": "peakDb", "value": -13.647, "tolerance": 0.001, "channel": 1, "range": {"start": 0, "end": 1}}
+# @expect {"field": "peakDb", "value": -240, "channel": 1, "range": {"start": 0, "end": 1}}
 # @expect {"field": "rmsDb", "value": -12.041, "tolerance": 0.01, "channel": 0}
 # @expect {"field": "rmsDb", "value": -12.041, "tolerance": 0.01, "channel": 1}
 project.new {"name": "locate_reset", "sampleRate": 48000}

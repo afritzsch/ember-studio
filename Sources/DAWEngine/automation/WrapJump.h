@@ -13,6 +13,12 @@ namespace daw {
 // segments, at the second one's first frame, and only if automation registered a value after the
 // wrap for this block (ParamSlotTable::afterWrap). Nodes on the transport's block (not the MIX-023
 // look-ahead block) see the wrap where automation evaluated it.
+//
+// Several wraps in one block (DW-125, T-089): Engine::render splits such a block into passes with
+// at most one wrap each and evaluates automation per pass (ParamSlotTable::beginBlock per pass),
+// so the side channel always holds the value after the pass's single wrap, the lane at the loop
+// start, and `ctx` here is the pass. Within a loop shorter than a block every pass after the
+// first starts at the loop start, so the loop-start value holds from the first wrap on.
 inline WrapJump wrapJump(const ProcessContext& ctx, ParamID id) DAW_RT {
     WrapJump jump;
     if (ctx.transport.numSegments != 2) return jump;

@@ -166,7 +166,7 @@ JobID loadAsset(uint64_t assetID, const std::string& path, const std::string& pe
 - `assetsReloaded` keeps its `EngineEventType` case; every session-rate change raises `started`, one `progress` per asset (`subject` = assetID, `count` = done) and `finished` (`error = io` if some asset failed to load again). A change during a pass abandons it without a `finished`; the new `started` supersedes it. No new `EngineEventType` case, so Swift switches over `EngineEvent.Kind` stay exhaustive.
 - `setSessionSampleRate`: invalidArgument for another rate, no-op for the current one, unsupported during an export. Offline (or realtime without a driver) it stops the transport and changes the rate (rebuild at it, IO-033 pass). Realtime with a driver it is `setDevice` with the running config at that rate, so a device that can't run it is unsupported and nothing changes.
 - `loadAsset` keeps each asset's path and peak-cache directory for IO-033 (DW-118); the three-argument form computes IO-034's peaks through `<peakCacheDir>/<assetID>.peaks` (DW-077). The two-argument form is the three-argument one with no directory.
-- While a pass runs `play()` is refused and `renderOffline` waits for it (IO-033).
+- While a pass runs `play()` is refused and `renderOffline` waits for it (IO-033). *Changed by T-089:* `play()` is queued, see "Contract delta (T-089)".
 
 Swift (`EngineProtocol.swift`, in its own block at the end): `AssetsReload`, `EngineEvent.reload`, `EngineTelemetry.assetsReloadPending`, and the requirements `setSessionSampleRate(_:)` and `loadAsset(_:path:peakCacheDirectory:)`, both with defaults in a protocol extension (refused / plain load), so other conformers compile unchanged. `FakeEngine` implements them (`refuseSessionRate`, `simulateEngineRateChange` test hooks).
 
@@ -289,6 +289,20 @@ Additive; the automation contract itself is 11 Interfaces and 11 "Contract delta
 - **`GraphDescription.automation`** (`include/daw/GraphDescription.h`): `std::vector<AutomationDesc> automation{}`, a defaulted last member, with 11's `AutomationPointDesc`/`AutomationDesc` declared next to it. Existing aggregate initializations keep compiling and mean "no lanes".
 - **`GraphDescriptionBuilder`** gains `addAutomation(laneID, target, enabled)` and `addAutomationPoint(tick, value, curve, shape)`. A point goes to the lane added last.
 - **Swift:** `EngineGraph.automation: [EngineGraph.Automation]` (`laneID`, `target`, `points: [Point{tick, value, curve, shape}]`, `enabled`), default `[]`. `EngineClient` converts it both ways, and `FakeEngine` records it with the rest of the graph. A lane edit is structural (MODEL-021): the graph changes and is re-applied. Param values still travel only through `setParam`.
+
+### Contract delta (T-089), accepted (autobuild, see docs/autobuild/DECISIONS.md "T-089 queued play", "T-089 reset"; pre-accepted in T-089's briefing)
+Additive.
+```cpp
+// TransportPOD gains:
+bool playPending = false;  // IO-033: play() came while assets re-convert; starts when they are done
+```
+- **`play()` during a re-conversion is queued** (IO-033, user decision 2026-11-10; T-056 refused it). The facade remembers it (`playPending`), and when the pass finishes (assets swapped, graph rebuilt) it prepares recording (REC-001) and starts the transport, from wherever the playhead is then (a `locate()` meanwhile moves it and keeps the pending play). `stop()` cancels it, as does the IO-021 stop on a device change. `transport()` reports `playPending`; `playing` stays false until the transport really starts. Without a pass running, `play()` is unchanged and `playPending` is never set.
+- **Offline renders reset every node** (DW-063, IO-011 clarified in 04). `renderOffline` is unchanged at the facade; the OfflineDriver asks the engine to reset the whole graph before the first block. Live `locate()` is unchanged (TIME-008).
+- **Tempo edits keep the playhead's tick** (DW-061, 03 "Tempo edits, short loops"): `transport()` after an `applyGraph` with a new tempo shows the same `tick` (and a new `sample`), stopped or playing. No API change.
+
+Swift: `TransportState.playPending: Bool` (default false), filled by `EngineClient.transport()`. `FakeEngine` never sets it (it has no re-conversion).
+
+Affected: T-089 only. `ui.state`/toolbar (T-034, App) may show the pending state later; the control protocol carries it (13 "Contract delta (T-089)").
 
 ## Status
 | ID | status | test |

@@ -32,7 +32,7 @@ CheckResult transportLoopWrapAtBlockBoundary();
 CheckResult transportRandomBlockSizes();
 
 // TIME-005: a playhead past the loop end plays on; an empty loop is off; a loop shorter than the
-// block plays once and leaves a gap.
+// block is laid out in passes with no gap (DW-125).
 CheckResult transportLoopEdgeCases();
 
 // TIME-006: a test-only timeline node built on TransportSegments.h, rendered through the Engine
@@ -63,5 +63,19 @@ CheckResult playheadLatencyCompensation();
 
 // TIME-009: a reader thread never sees a torn playhead while the audio thread publishes.
 CheckResult playheadIsConsistentAcrossThreads();
+
+// DW-125 (T-089): loops shorter than a block (down to one sample), random block sizes: the block
+// is laid out in passes of at most two segments with at most one wrap inside, which together
+// play every frame exactly as a frame-by-frame model of the timeline does.
+CheckResult transportShortLoopPasses();
+
+// DW-125 (T-089): through the Engine, a timeline node puts every event of a loop shorter than
+// the block (1000 and 25 samples in 4096-frame blocks) on the right frame of every pass.
+CheckResult engineShortLoopTimelineNode();
+
+// DW-061 (T-089): a tempo edit (or a session-rate change) keeps the playhead's tick, stopped and
+// while playing (re-anchored at the next block boundary); the loop follows its ticks; an
+// unchanged map moves nothing.
+CheckResult tempoEditKeepsTick();
 
 } // namespace daw::testing

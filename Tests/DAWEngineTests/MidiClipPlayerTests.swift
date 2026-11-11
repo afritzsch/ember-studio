@@ -18,6 +18,9 @@ struct MidiClipPlayerTests {
     @Test("DSP-003, TIME-006, DW-103: a note hanging over the loop end ends at the wrap frame; one under the loop start is chased")
     func loopWrap() { expectPasses(daw.testing.midiClipPlayerLoopWrap()) }
 
+    @Test("DW-125, DW-101/103: a loop shorter than the block, in passes: note-offs and chases on every wrap")
+    func shortLoopPasses() { expectPasses(daw.testing.midiClipPlayerShortLoopPasses()) }
+
     @Test("DSP-003, TIME-008, DW-103: locate while playing and stop release held notes; playback inside a note chases it")
     func locateAndStop() { expectPasses(daw.testing.midiClipPlayerLocateAndStop()) }
 

@@ -14,9 +14,11 @@
 // transport state) and after (to apply the restore); these aren't audio blocks and aren't
 // counted in `blocks`. ExportSpec::followLoop (T-036) keeps the loop on instead, so the export
 // is the range's length of playback wrapping at the loop end (TIME-005 goldens); the per-block
-// playhead check then follows the wrap. Effects keep their state
-// across a locate (TIME-008), so an effect's tail still ringing from an earlier render or
-// playback carries into the next export.
+// playhead check then follows the wrap, as often as it comes (DW-125: a loop shorter than a block
+// wraps several times in it). Before the first block the engine resets every node of the graph
+// (DW-063, Engine::resetAllNodesBeforeNextBlock), so an effect's tail still ringing from an
+// earlier render or live playback doesn't carry into the export; live locates keep tails
+// (TIME-008).
 //
 // IO-013: Engine::render runs in its RtScope as always, so the RT trap stays active offline.
 // The driver also counts each render call in its own RtScope and reports the sum: the render

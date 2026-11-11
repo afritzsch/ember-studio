@@ -24,7 +24,7 @@ CheckResult reverbResponse();
 
 // DSP-040, ENG-004, TIME-008: block-size fuzz (random sizes 0 … 4096 match one fixed size bit for
 // bit), silence in → exactly 0 out after the tail (no denormals), NaN/Inf guard, the tail rings
-// on without an input and across reset().
+// on without an input; reset() clears it (DW-063).
 CheckResult reverbRobustness();
 
 // DSP-033, IO-011, TIME-008: NodeKind::reverb through registerBuiltinNodes, GraphBuilder and the

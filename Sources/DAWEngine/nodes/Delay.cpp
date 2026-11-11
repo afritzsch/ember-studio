@@ -78,6 +78,16 @@ void Delay::prepare(const PrepareInfo& info) {
     primed_ = false;
 }
 
+void Delay::reset() DAW_RT {
+    // DW-063: prepare()'s state without allocating (the line keeps its size).
+    std::fill(line_.begin(), line_.end(), 0.0f);
+    write_ = 0;
+    lp_.fill(0.0f);
+    delay_ = target_ = xfadeTo_ = 1;
+    xfadePos_ = 0;
+    primed_ = false;
+}
+
 bool Delay::isSilent() const {
     return std::all_of(line_.begin(), line_.end(), [](float x) { return x == 0.0f; }) && lp_[0] == 0.0f &&
            lp_[1] == 0.0f;

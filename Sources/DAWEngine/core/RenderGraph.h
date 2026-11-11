@@ -92,6 +92,8 @@ public:
     // Requires delay <= maxDelay(), numFrames <= maxBlock(), and `in` not aliasing `out`.
     void process(const AudioBufferView& in, const AudioBufferView& out, uint32_t delay,
                  bool add, uint32_t numFrames) DAW_RT;
+    // DW-063: forgets the history (all zeros, like a new line). RT, the render thread.
+    void clear() DAW_RT;
 
 private:
     uint32_t numChannels_;
@@ -134,6 +136,9 @@ public:
     // the events due in this block's `numFrames` frames, in order, with frame offsets into this
     // block. The span is valid until the next process().
     MidiEventSpan process(MidiEventSpan in, uint32_t delay, uint32_t numFrames) DAW_RT;
+    // DW-063: drops every queued event and held note/pedal, like a new line (the nodes after it
+    // are reset too, so no note is left hanging). RT, the render thread.
+    void clear() DAW_RT;
 
     // Events the overflow policy dropped so far (any thread).
     uint64_t dropped() const { return dropped_.load(std::memory_order_relaxed); }
@@ -273,6 +278,11 @@ public:
     // call (audio thread) after a locate while playing, before processing the block; never on a
     // loop wrap (DW-062).
     void resetTimelineNodes() const DAW_RT;
+    // DW-063 (T-089): calls reset() on every step's node, in step order, and clears the graph's
+    // PDC delay lines (audio and MIDI) and monitor crossfades, so the next block renders as if
+    // from a fresh start. For Engine to call (audio thread) before an offline render's first
+    // block; live playback never does (TIME-008: effects keep their tails across a locate).
+    void resetAllNodes() const DAW_RT;
 
     // ENG-041, the per-node part of a block: for each step in order, process, then feed its
     // output (through any PDC delay, MIX-021) to its consumers. Steps flagged `timeline` get

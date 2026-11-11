@@ -291,6 +291,9 @@ public struct TransportState: Hashable, Sendable, Codable {
     public var punchEnabled: Bool = false
     public var punchIn: Tick = Tick(0)
     public var punchOut: Tick = Tick(0)
+    /// IO-033 (T-089): `play()` came while assets re-convert after a session-rate change; the
+    /// transport starts when they are done unless `stop()` cancels it. `playing` is false until then.
+    public var playPending: Bool = false
 
     public init(sample: SamplePos = 0, tick: Tick = 0, playing: Bool = false, recording: Bool = false,
                 loopEnabled: Bool = false, loopStart: Tick = 0, loopEnd: Tick = 0) {

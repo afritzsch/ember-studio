@@ -267,6 +267,14 @@ void Sampler::prepare(const PrepareInfo& info) {
     noteCounter_ = 0;
 }
 
+void Sampler::reset() DAW_RT {
+    // DW-063: prepare()'s voice state: no voice sounds, no pedal, no bend.
+    for (Voice& v : voices_) v = Voice{};
+    pedal_.fill(false);
+    bend_.fill(0.0f);
+    noteCounter_ = 0;
+}
+
 // MARK: Voices (DSP-022)
 
 uint32_t Sampler::soundingVoices() const DAW_RT {

@@ -541,8 +541,9 @@ CheckResult reverbRobustness() {
         violations += rig.violations + fresh.violations;
     }
 
-    // The tail rings on without an input (no channels) and across reset() (TIME-008: a locate
-    // keeps effect tails), exactly as with a silent input.
+    // The tail rings on without an input (no channels), exactly as with a silent input. DW-063
+    // (T-089): reset() clears it. Only offline renders call it, before their first block; a live
+    // locate never resets an effect, so tails survive it (TIME-008, OfflineResetChecks).
     {
         const Signal in = bursts(4800, 81), quiet(48000, 0.0f);
         RevRig silent, none, reset;
@@ -555,7 +556,11 @@ CheckResult reverbRobustness() {
         }
         DAW_CHECK(!allZero(silent.left, 4800));
         DAW_CHECK(none.left == silent.left && none.right == silent.right);
-        DAW_CHECK(reset.left == silent.left && reset.right == silent.right);
+        // Reset before every quiet block: the burst as before, then exact silence.
+        DAW_CHECK(reset.left.size() == silent.left.size());
+        DAW_CHECK(std::equal(reset.left.begin(), reset.left.begin() + 4800, silent.left.begin()) &&
+                  std::equal(reset.right.begin(), reset.right.begin() + 4800, silent.right.begin()));
+        DAW_CHECK(allZero(reset.left, 4800) && allZero(reset.right, 4800));
         violations += silent.violations + none.violations + reset.violations;
     }
     DAW_CHECK(violations == 0);

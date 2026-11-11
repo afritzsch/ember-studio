@@ -112,6 +112,43 @@ public:
         frame_ += n;
         lastFrames_ = n;
     }
+    // DW-125: one block the way Engine::render runs it when the loop wraps more than once in
+    // it: beginBlock, then one process() per pass (Transport::layOutPass), each pass a block of
+    // its own to the node. Events land at the pass's frame in the block.
+    void renderPasses(uint32_t n) {
+        {
+            RtScope scope;
+            transport_.beginBlock(tempo_);
+            if (transport_.locatedWhilePlaying()) player_->reset();  // TIME-008
+            violations_ += scope.violations();
+        }
+        uint32_t done = 0;
+        do {
+            NodeIO io;
+            io.midiOut = MidiEventWriter(storage_.data(), static_cast<uint32_t>(storage_.size()));
+            uint32_t frames = 0;
+            {
+                RtScope scope;
+                const TransportBlock& block = transport_.layOutPass(tempo_, n - done);
+                frames = transport_.passFrames();
+                ProcessContext ctx{frames, kRate, block, params_};
+                player_->process(ctx, io);
+                violations_ += scope.violations();
+            }
+            ++passes_;
+            uint32_t last = 0;
+            for (const MidiEvent& e : io.midiOut.written()) {
+                if (e.frameOffset >= frames || e.frameOffset < last || e.size != 3) ++badEvents_;
+                last = e.frameOffset;
+                events_.push_back({frame_ + done + e.frameOffset, e.data[0], e.data[1], e.data[2]});
+            }
+            done += frames;
+        } while (done < n);
+        frame_ += n;
+        lastFrames_ = n;
+    }
+    uint64_t passes() const { return passes_; }
+
     void renderFrames(int64_t total, uint32_t blockSize) {
         for (int64_t done = 0; done < total; done += blockSize)
             render(static_cast<uint32_t>(std::min<int64_t>(blockSize, total - done)));
@@ -136,6 +173,7 @@ private:
     int64_t frame_ = 0;
     uint32_t lastFrames_ = 0;
     uint64_t violations_ = 0;
+    uint64_t passes_ = 0;
     int badEvents_ = 0;
 };
 
@@ -264,6 +302,46 @@ CheckResult midiClipPlayerLoopWrap() {
         Keys keys;
         keys.apply(d.events());
         DAW_CHECK(keys.strays() == 0 && keys.held(0, 62) == 1 && keys.total() == 1);
+        DAW_CHECK(d.badEvents() == 0);
+        DAW_CHECK(d.violations() == 0);
+    }
+    return checks;
+}
+
+CheckResult midiClipPlayerShortLoopPasses() {
+    CheckResult checks;
+    // DW-125: loop [1920, 1960) = samples [48000, 49000), 1000 frames, in blocks of up to 4096:
+    // several wraps per block, each its own pass. From 47000 (tick 1880):
+    //   A: ticks [1900, 1940) = [47500, 48500): spans the loop start, so every wrap chases it
+    //      (DW-103) and it ends 500 frames into each pass;
+    //   B: ticks [1950, 1970) = [48750, 49250): hangs over the loop end, so every wrap ends it
+    //      with a note-off on the wrap frame (DW-101) and it starts again 750 frames in.
+    // Wraps at output frames 2000, 3000, …
+    const std::vector<NoteDesc> notes = {note(1900, 40, 60), note(1950, 20, 64)};
+    constexpr int64_t kTotal = 23000;
+    std::vector<Ev> expected = {on(500, 60, 100), off(1500, 60), on(1750, 64, 100)};
+    for (int64_t w = 2000; w < kTotal; w += 1000) {
+        expected.push_back(off(w, 64));
+        expected.push_back(on(w, 60, 100));
+        expected.push_back(off(w + 500, 60));
+        expected.push_back(on(w + 750, 64, 100));
+    }
+    for (uint32_t blockSize : {4096u, 2500u, 0u}) {  // 0: random sizes up to 4096
+        Driver d(notes, makeTempo());
+        DAW_CHECK(d.transport().setLoop(true, 1920, 1960) && d.transport().locate(1880) && d.transport().play());
+        std::mt19937 rng(blockSize + 11);
+        std::uniform_int_distribution<uint32_t> size(0, kMaxBlock);
+        uint64_t blocks = 0;
+        while (d.frame() < kTotal) {
+            const auto left = static_cast<uint32_t>(kTotal - d.frame());
+            d.renderPasses(std::min(blockSize ? blockSize : size(rng), left));
+            ++blocks;
+        }
+        DAW_CHECK(notesOnly(d.events()) == expected);
+        DAW_CHECK(d.passes() > blocks);  // some blocks really were split
+        Keys keys;
+        keys.apply(d.events());
+        DAW_CHECK(keys.strays() == 0 && keys.held(0, 64) == 1 && keys.total() == 1);
         DAW_CHECK(d.badEvents() == 0);
         DAW_CHECK(d.violations() == 0);
     }

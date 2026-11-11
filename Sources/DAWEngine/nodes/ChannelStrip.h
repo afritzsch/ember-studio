@@ -69,6 +69,10 @@ public:
     explicit ChannelStrip(ParamID firstParam, MeterTarget meter = {});
 
     void prepare(const PrepareInfo& info) override;
+    // DW-063 (T-089): back to the state prepare() leaves (no tail, first block jumps to the
+    // slot values). Only offline renders reset every node; a live locate never resets an effect
+    // (TIME-008), so tails survive it.
+    void reset() DAW_RT override;
     void process(ProcessContext& ctx, NodeIO& io) DAW_RT override;
 
 private:

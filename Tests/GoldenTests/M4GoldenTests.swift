@@ -220,10 +220,12 @@ struct M4GoldenReferenceTests {
     static let firstRenderFrames = 12000
     static let firstRenderBlocks = (firstRenderFrames + 511) / 512
 
-    /// DSP-003: the locate ends the held Z (A4) on frame 0 of the second render, which releases it
-    /// over 9600 frames from where its voice was; DW-103 chases V (A5) there. After V's release
-    /// the render is silent: no note is left stuck.
-    @Test("DSP-003, DW-103: midi_locate_no_stuck_notes releases the held note and chases the next one at the locate; nothing rings after")
+    /// DSP-003, DW-063 (T-089): the second render starts with every node reset, so the held Z
+    /// (A4) from the first render is gone (before T-089 it released from frame 0); DW-103 chases
+    /// V (A5) there. After V's release the render is silent: no note is left stuck. The live
+    /// locate (note-off and release of a held note) is checked in C++: MidiClipPlayerTests
+    /// "locateAndStop" and "noStuckNotesFuzz".
+    @Test("DSP-003, DW-103, DW-063: midi_locate_no_stuck_notes leaves nothing of the held note and chases the next one at the render start; nothing rings after")
     func locateNoStuckNotesSamples() throws {
         let audio = try AudioData(contentsOf: GoldenHarness.reference("midi_locate_no_stuck_notes"))
         let tone = try Self.a440()
@@ -231,22 +233,20 @@ struct M4GoldenReferenceTests {
         #expect(Self.frame(2160) - Self.frame(2000) == 4000 && Self.frame(2640) - Self.frame(2000) == 16000)
         let before = Self.firstRenderBlocks * 512
         #expect(before == 12288)
-        let voices = [Voice(on: -before, off: 0, key: 69), Voice(on: 0, off: 4000, key: 81)]
+        let voices = [Voice(on: 0, off: 4000, key: 81)]
         let expected = Self.render(voices, frames: 16000, asset: tone)
         Self.expectMatches(audio, expected, "midi_locate_no_stuck_notes")
         guard let l = audio.channels.first, l.count == 16000 else { return }
 
-        // A stuck Z would go on at 0.25 × the 440 Hz sine; the render is silent after both
-        // releases (Z's ends at 9600, V's at 4000 + 9600).
+        // A stuck Z would go on at 0.25 × the 440 Hz sine; the render is silent after V's
+        // release (4000 + 9600).
         #expect(l[13600...].allSatisfy { $0 == 0 })
         #expect(l[13500..<13600].contains { $0 != 0 })
-        // Frame 0 is Z one release step down from 1, at source frame 12288, plus V's first
-        // attack step on source frame 0 (0).
+        // Frame 0 is V's first attack step on source frame 0 (0): nothing of Z, which a held or
+        // releasing voice would put there (one release step down from 1 at source frame 12288).
         let z0 = Self.centre * Double(1 - 1 / Envelope.releaseFrames) * Double(tone[before])
-        #expect(abs(Double(l[0]) - z0) < Self.tolerance)
-        // From 9600 on, only V is left: 0.5 × every second source frame, released from 4000.
-        let vOnly = Self.render([voices[1]], frames: 16000, asset: tone)
-        #expect((9600..<16000).allSatisfy { abs(Double(l[$0]) - vOnly[$0]) < Self.tolerance })
+        #expect(abs(Double(l[0])) < Self.tolerance)
+        #expect(abs(z0) > 0.01)
     }
 
     /// The fixture really renders twice, and the first render is what the second one's numbers

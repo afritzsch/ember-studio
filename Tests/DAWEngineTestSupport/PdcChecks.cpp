@@ -674,6 +674,25 @@ CheckResult pdcSourcePreRoll() {
     out.renderBlocks(engine, 10, 256);
     DAW_CHECK(expect(mark, stoppedAt, 10 * 256, true, 25000, 26000));
 
+    // DW-125: a loop shorter than the block (and the latency): [1000, 1010) ticks = 250 samples
+    // in 512-frame blocks. The engine splits each block where the transport's or the look-ahead
+    // block would wrap a second time, so every frame is still the heard position.
+    DAW_CHECK(transport.setLoop(true, 1000, 1010));
+    DAW_CHECK(transport.locate(995));
+    mark = out.left.size();
+    out.renderBlocks(engine, 20, 512);
+    DAW_CHECK(expect(mark, 24875, 20 * 512, true, 25000, 25250));
+    // And with random block sizes (ENG-004).
+    {
+        std::mt19937 rng(1251);
+        std::uniform_int_distribution<uint32_t> size(0, 512);
+        DAW_CHECK(transport.locate(1003));
+        mark = out.left.size();
+        for (int i = 0; i < 40; ++i) out.render(engine, size(rng));
+        DAW_CHECK(expect(mark, 25075, out.left.size() - mark, true, 25000, 25250));
+    }
+    DAW_CHECK(transport.setLoop(true, 1000, 1040));
+
     // Without latency nothing runs ahead: a probe straight to the master is position + 1.
     DAW_CHECK(transport.setLoop(false, 0, 0));
     DAW_CHECK(transport.locate(0));

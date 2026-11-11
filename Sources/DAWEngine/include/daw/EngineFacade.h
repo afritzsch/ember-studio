@@ -99,6 +99,10 @@ struct TransportPOD {
     bool punchEnabled = false;
     Tick punchIn = 0;
     Tick punchOut = 0;
+    // IO-033 (T-089): play() came while assets re-convert after a session-rate change; the
+    // transport starts when they are done, unless stop() cancels it first. `playing` stays false
+    // until then.
+    bool playPending = false;
 };
 
 // MARK: Jobs (BRIDGE-002)
@@ -521,6 +525,8 @@ public:
 
     // MARK: Transport (TIME-004/009)
 
+    // IO-033 (T-089): play() while assets re-convert is queued (TransportPOD::playPending) and
+    // starts the transport when they are done; stop() cancels it.
     void play();
     void stop();
     void locate(Tick tick);

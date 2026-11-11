@@ -555,7 +555,9 @@ CheckResult transportLoopEdgeCases() {
         DAW_CHECK(b.seg[1].startSample == 0 && b.seg[1].afterWrap);
     }
     {
-        // A loop shorter than the block plays once, then a gap; the next block wraps again.
+        // DW-125: a loop shorter than the block. advance() lays out the first pass, which ends
+        // where the loop would wrap a second time; layOutPass() lays out the rest, one pass per
+        // two loop lengths at most, so every frame of the block plays (no gap).
         Transport t;
         DAW_CHECK(t.setLoop(true, 0, 40) && t.locate(20) && t.play());  // samples 0..1000
         const TransportBlock& b = advance(t, map, 4096);
@@ -563,11 +565,26 @@ CheckResult transportLoopEdgeCases() {
         DAW_CHECK(b.seg[0].startSample == 500 && b.seg[0].numFrames == 500);
         DAW_CHECK(b.seg[1].startSample == 0 && b.seg[1].frameOffset == 500);
         DAW_CHECK(b.seg[1].numFrames == 1000 && b.seg[1].endTick == 40);
-        DAW_CHECK(segmentFrames(b) == 1500);
+        DAW_CHECK(segmentFrames(b) == 1500 && t.passFrames() == 1500);
         DAW_CHECK(t.samplePos() == 0);
+        {
+            RtScope scope;
+            const TransportBlock& p2 = t.layOutPass(map, 4096 - 1500);
+            DAW_CHECK(t.passFrames() == 2000 && p2.numSegments == 2);
+            DAW_CHECK(p2.seg[0].startSample == 0 && p2.seg[0].afterWrap && p2.seg[0].frameOffset == 0);
+            DAW_CHECK(p2.seg[0].numFrames == 1000 && p2.seg[0].startTick == 0 && p2.seg[0].endTick == 40);
+            DAW_CHECK(p2.seg[1].startSample == 0 && p2.seg[1].afterWrap && p2.seg[1].frameOffset == 1000);
+            DAW_CHECK(p2.seg[1].numFrames == 1000);
+            const TransportBlock& p3 = t.layOutPass(map, 4096 - 3500);
+            DAW_CHECK(t.passFrames() == 596 && p3.numSegments == 1);
+            DAW_CHECK(p3.seg[0].startSample == 0 && p3.seg[0].afterWrap && p3.seg[0].numFrames == 596);
+            DAW_CHECK(scope.violations() == 0);
+        }
+        DAW_CHECK(t.samplePos() == 596);
+        // The next block continues the pass where it ended.
         const TransportBlock& next = advance(t, map, 4096);
-        DAW_CHECK(next.numSegments == 2 && next.seg[0].startSample == 0 && next.seg[0].afterWrap);
-        DAW_CHECK(next.seg[0].numFrames == 1000 && next.seg[1].numFrames == 1000);
+        DAW_CHECK(next.numSegments == 2 && next.seg[0].startSample == 596 && !next.seg[0].afterWrap);
+        DAW_CHECK(next.seg[0].numFrames == 404 && next.seg[1].numFrames == 1000 && t.passFrames() == 1404);
     }
     {
         // A tick shorter than a sample (1 kHz, 1000 bpm: 16 ticks per sample). Ticks that round
@@ -691,11 +708,11 @@ CheckResult tempoMapPerBlock() {
     DAW_CHECK(a.tempo == &slow && a.seg[0].startSample == 5000);  // locate through `slow`
     DAW_CHECK(tempoAtStart(a) == 60.0);
 
-    // A tempo edit is a new snapshot with a new map: the next block uses it. The position stays
-    // put in samples; the ticks under it change.
+    // A tempo edit is a new snapshot with a new map: the next block uses it. DW-061: the
+    // position keeps its tick (120, at 6000 under `slow`), so it moves to 120 * 25 in samples.
     const TransportBlock& b = advance(t, fast, 1000);
-    DAW_CHECK(b.tempo == &fast && b.seg[0].startSample == 6000);
-    DAW_CHECK(b.seg[0].startTick == 240 && blockStartTick(b) == 240);
+    DAW_CHECK(b.tempo == &fast && b.seg[0].startSample == 3000);
+    DAW_CHECK(b.seg[0].startTick == 120 && blockStartTick(b) == 120);
     DAW_CHECK(tempoAtStart(b) == 120.0);
 
     // The loop resolves through the current map: its end is at 1920 * 25 = 48000 now, not
@@ -736,15 +753,15 @@ CheckResult engineHandsNodesTheTransportBlock() {
     DAW_CHECK(engine.transport().playhead().sample == 48000);
     DAW_CHECK(engine.transport().playhead().tick == 960);
 
-    // TIME-003: a tempo edit is a new snapshot; the next block uses its map. The position keeps
-    // its sample; the tick under it follows the new map.
+    // TIME-003: a tempo edit is a new snapshot; the next block uses its map. DW-061: the position
+    // keeps its tick: 48256 is tick 965 + 6 samples at 50 per tick, so 24125 + 3 at 25 per tick.
     auto second = makeGraph({{probe}}, fast);
     const TempoMap* secondMap = &second->tempoMap();
     engine.publish(std::move(second));
     violations += renderCounted(engine, out.target, 128);
     DAW_CHECK(probe->tempo == secondMap && probe->bpm == 120.0);
-    DAW_CHECK(probe->startSample == 48256);
-    DAW_CHECK(engine.transport().playhead().tick == fast.sampleToTick(48256));
+    DAW_CHECK(probe->startSample == 24128);
+    DAW_CHECK(engine.transport().playhead().tick == 965);
     DAW_CHECK(engine.transport().locate(960));
     violations += renderCounted(engine, out.target, 128);
     DAW_CHECK(probe->startSample == 24000);
@@ -962,6 +979,230 @@ CheckResult playheadIsConsistentAcrossThreads() {
     DAW_CHECK(reads >= 20000 && torn == 0);
     DAW_CHECK(t.playhead().playing);
     DAW_CHECK(rtViolations.load() == 0);
+    return checks;
+}
+
+// MARK: DW-125 (T-089): loops shorter than a block
+
+CheckResult transportShortLoopPasses() {
+    CheckResult checks;
+    std::mt19937 rng(1250);
+    std::uniform_int_distribution<uint32_t> blockSize(0, kMaxBlock);
+    uint64_t violations = 0;
+
+    struct Case {
+        TempoMap map;
+        Tick loopStart, loopEnd, start;
+    };
+    std::vector<Case> cases;
+    // 25 samples per tick: loops of 1000 samples (from before and inside the loop), 25 and 50.
+    cases.push_back({TempoMap(), 3840, 3880, 0});
+    cases.push_back({TempoMap(), 3840, 3880, 3850});
+    cases.push_back({TempoMap(), 100, 101, 90});
+    cases.push_back({TempoMap(), 100, 102, 101});
+    // 1 kHz, 1000 bpm: 16 ticks per sample, so a loop of a single sample (ticks 1601..1616).
+    cases.push_back({makeMap({{0, 1000.0}}, {{0, 4, 4}}, 1000.0), 1601, 1616, 1000});
+    // 44.1 kHz, 97 bpm: a non-integer number of samples per tick, a loop of 300 ticks.
+    cases.push_back({makeMap({{0, 97.0}}, {{0, 7, 8}}, 44100.0), 4000, 4300, 3500});
+
+    for (const Case& c : cases) {
+        Transport t;
+        DAW_CHECK(t.setLoop(true, c.loopStart, c.loopEnd) && t.locate(c.start) && t.play());
+        const SamplePos ls = c.map.tickToSample(c.loopStart);
+        const SamplePos le = c.map.tickToSample(c.loopEnd);
+        DAW_CHECK(le > ls);
+        TimelineModel model(c.map.tickToSample(c.start), true, ls, le);
+        int wraps = 0;
+        for (int block = 0; block < 200; ++block) {
+            const uint32_t n = blockSize(rng);
+            RtScope scope;
+            t.beginBlock(c.map);
+            uint32_t done = 0;
+            int passes = 0;
+            do {
+                const TransportBlock& b = t.layOutPass(c.map, n - done);
+                const uint32_t frames = t.passFrames();
+                ++passes;
+                DAW_CHECK(b.playing && b.tempo == &c.map && b.numSegments <= 2);
+                DAW_CHECK(n == 0 || frames > 0);
+                DAW_CHECK(segmentFrames(b) == frames || n == 0);
+                // At most one wrap inside a pass (a second segment), plus one at its start.
+                uint32_t frame = 0;
+                for (uint8_t i = 0; i < b.numSegments; ++i) {
+                    const TransportSegment& s = b.seg[i];
+                    DAW_CHECK(s.numFrames > 0 && s.frameOffset == frame);
+                    DAW_CHECK(i == 0 || s.afterWrap);
+                    for (uint32_t f = 0; f < s.numFrames; ++f) {
+                        bool wrapped = false;
+                        const SamplePos expected = model.next(wrapped);
+                        if (expected != s.startSample + f || wrapped != (f == 0 && s.afterWrap)) {
+                            DAW_CHECK(expected == s.startSample + f);
+                            DAW_CHECK(wrapped == (f == 0 && s.afterWrap));
+                            return checks;
+                        }
+                        wraps += wrapped ? 1 : 0;
+                    }
+                    checkSegmentTicks(checks, c.map, s, c.loopStart);
+                    frame += s.numFrames;
+                }
+                done += frames;
+            } while (done < n);
+            DAW_CHECK(done == n);
+            DAW_CHECK(passes <= static_cast<int>(n) + 1);
+            violations += scope.violations();
+        }
+        DAW_CHECK(wraps >= 10);
+    }
+    DAW_CHECK(violations == 0);
+    return checks;
+}
+
+CheckResult engineShortLoopTimelineNode() {
+    CheckResult checks;
+    // A loop of 1000 samples ([3840, 3880) ticks at 25 samples per tick) in 4096-frame blocks,
+    // and one of 25 samples (a single tick): every event plays on every pass, exactly once.
+    struct Case {
+        Tick loopStart, loopEnd, start;
+        uint32_t blockFrames;
+    };
+    for (const Case& c : {Case{3840, 3880, 3800, 4096}, Case{3840, 3880, 3850, 4096},
+                          Case{1000, 1001, 990, 4096}, Case{3840, 3880, 3800, 1500}}) {
+        Engine engine;
+        const TempoMap map;
+        std::vector<Tick> events{c.loopStart, c.loopEnd, c.loopEnd - 1};
+        for (Tick tick = c.loopStart - 200; tick < c.loopEnd + 200; tick += 7) events.push_back(tick);
+        std::vector<SamplePos> eventSamples;
+        for (Tick tick : events) eventSamples.push_back(map.tickToSample(tick));
+        std::sort(eventSamples.begin(), eventSamples.end());
+        auto node = put(engine, 1, std::make_unique<TickImpulseNode>(events));
+        engine.publish(makeGraph({{node, true}}, map));
+        DAW_CHECK(engine.transport().setLoop(true, c.loopStart, c.loopEnd));
+        DAW_CHECK(engine.transport().locate(c.start) && engine.transport().play());
+
+        TimelineModel model(map.tickToSample(c.start), true, map.tickToSample(c.loopStart),
+                            map.tickToSample(c.loopEnd));
+        Target out(kMaxBlock);
+        uint64_t violations = 0;
+        int impulses = 0, wraps = 0;
+        for (int block = 0; block < 12; ++block) {
+            violations += renderCounted(engine, out.target, c.blockFrames);
+            for (uint32_t f = 0; f < c.blockFrames; ++f) {
+                bool wrapped = false;
+                const SamplePos sample = model.next(wrapped);
+                wraps += wrapped ? 1 : 0;
+                const auto range = std::equal_range(eventSamples.begin(), eventSamples.end(), sample);
+                const auto count = range.second - range.first;
+                if (out.data[0][f] != static_cast<float>(count) || out.data[1][f] != out.data[0][f]) {
+                    DAW_CHECK(out.data[0][f] == static_cast<float>(count));
+                    return checks;
+                }
+                impulses += static_cast<int>(count);
+            }
+        }
+        DAW_CHECK(wraps >= 12);
+        DAW_CHECK(impulses >= 2 * wraps);
+        DAW_CHECK(violations == 0);
+        // After the block, the transport's block() is its last pass in the block's own frames.
+        const TransportBlock& last = engine.transport().block();
+        DAW_CHECK(last.numSegments >= 1);
+        const TransportSegment& tail = last.seg[last.numSegments - 1];
+        DAW_CHECK(tail.frameOffset + tail.numFrames == c.blockFrames);
+    }
+    return checks;
+}
+
+// MARK: DW-061 (T-089): a tempo edit keeps the playhead's tick
+
+CheckResult tempoEditKeepsTick() {
+    CheckResult checks;
+    RtAdvance advance;
+    // 120 bpm (25 samples per tick) → 90 bpm from tick 1920 (33.33… samples per tick there).
+    const TempoMap before = makeMap({{0, 120.0}});
+    const TempoMap after = makeMap({{0, 120.0}, {1920, 90.0}});
+    const TempoMap same = makeMap({{0, 120.0}});  // an identical map in another snapshot
+    {
+        // Stopped at tick 3000 (sample 75000): the edit moves it to tick 3000 under `after`.
+        Transport t;
+        DAW_CHECK(t.locate(3000));
+        advance(t, before, 0);
+        DAW_CHECK(t.samplePos() == 75000 && t.playhead().tick == 3000);
+        advance(t, same, 0);
+        DAW_CHECK(t.samplePos() == 75000);  // an unchanged map moves nothing
+        advance(t, after, 0);
+        DAW_CHECK(t.samplePos() == after.tickToSample(3000));
+        DAW_CHECK(t.playhead().tick == 3000 && t.playhead().sample == after.tickToSample(3000));
+        // And back.
+        advance(t, before, 0);
+        DAW_CHECK(t.samplePos() == 75000 && t.playhead().tick == 3000);
+    }
+    {
+        // Between two ticks: the same fraction of the tick. Sample 75010 is 10/25 into tick
+        // 3000; under `after` a tick there is 100/3 samples, so 10 · (100/3) / 25 = 13.3 → 13.
+        Transport t;
+        DAW_CHECK(t.locate(3000));
+        advance(t, before, 0);
+        DAW_CHECK(t.play());
+        advance(t, before, 10);
+        DAW_CHECK(t.samplePos() == 75010);
+        DAW_CHECK(t.stop());
+        advance(t, before, 0);
+        advance(t, after, 0);
+        DAW_CHECK(t.samplePos() == after.tickToSample(3000) + 13);
+        DAW_CHECK(after.sampleToTick(t.samplePos()) == 3000);
+    }
+    {
+        // Playing: re-anchored at the next block boundary, at the same tick; the block after
+        // the edit starts there and plays on under the new map.
+        Transport t;
+        DAW_CHECK(t.locate(2000) && t.play());
+        // Copies: advance() hands out the transport's one block, which the next call overwrites.
+        const TransportBlock a = advance(t, before, 1000);  // 50000 ..< 51000 = ticks 2000 ..< 2040
+        DAW_CHECK(a.seg[0].startSample == 50000 && a.seg[0].endTick == 2040);
+        const TransportBlock b = advance(t, after, 1000);
+        DAW_CHECK(b.playing && b.numSegments == 1);
+        DAW_CHECK(b.seg[0].startSample == after.tickToSample(2040) && b.seg[0].startTick == 2040);
+        DAW_CHECK(blockStartTick(b) == 2040);
+        const TransportBlock c = advance(t, after, 1000);
+        DAW_CHECK(c.seg[0].startSample == after.tickToSample(2040) + 1000);  // contiguous
+        DAW_CHECK(c.seg[0].startTick == b.seg[0].endTick);
+    }
+    {
+        // The loop follows its ticks too: a loop [1920, 2880) in ticks is [48000, 72000) under
+        // `before` and [48000, 80000) under `after`. Playing inside it at tick 2400, the edit
+        // keeps tick 2400 and the next wrap comes at the loop end's new sample.
+        Transport t;
+        DAW_CHECK(t.setLoop(true, 1920, 2880) && t.locate(2400) && t.play());
+        advance(t, before, 0);
+        DAW_CHECK(t.samplePos() == 60000);
+        const TransportBlock& b = advance(t, after, 4096);
+        DAW_CHECK(b.seg[0].startSample == after.tickToSample(2400) && b.seg[0].startTick == 2400);
+        const SamplePos loopEnd = after.tickToSample(2880);
+        DAW_CHECK(loopEnd == 80000);
+        SamplePos pos = after.tickToSample(2400) + 4096;
+        bool wrapped = false;
+        for (int i = 0; i < 10 && !wrapped; ++i) {
+            const TransportBlock& n = advance(t, after, 4096);
+            if (n.numSegments == 2) {
+                wrapped = true;
+                DAW_CHECK(n.seg[0].startSample + n.seg[0].numFrames == loopEnd);
+                DAW_CHECK(n.seg[1].startSample == 48000 && n.seg[1].startTick == 1920);
+            } else {
+                DAW_CHECK(n.seg[0].startSample == pos);
+            }
+            pos += 4096;
+        }
+        DAW_CHECK(wrapped);
+    }
+    {
+        // A session-rate change (a new map at another rate, IO-033) keeps the tick as well.
+        const TempoMap at96 = makeMap({{0, 120.0}}, {{0, 4, 4}}, 96000.0);
+        Transport t;
+        DAW_CHECK(t.locate(3000));
+        advance(t, before, 0);
+        advance(t, at96, 0);
+        DAW_CHECK(t.samplePos() == 150000 && t.playhead().tick == 3000);
+    }
+    DAW_CHECK(advance.violations == 0);
     return checks;
 }
 

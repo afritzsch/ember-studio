@@ -36,7 +36,9 @@ struct GoldenRenderTests {
 @Suite("Golden references (ENG-022, MIX-004/005/007/021/023)")
 struct GoldenReferenceTests {
     /// The reference itself shows the spec's ramp, so a regenerated reference can't hide a
-    /// broken smoother: block 0 is 0.5 · (i + 1) / 512, everything after is 0.5.
+    /// broken smoother: silence before block 25 (frame 12800, where the lane steps to unity),
+    /// block 25 is 0.5 · (i + 1) / 512, everything after is 0.5. (T-089: the step is inside the
+    /// render now; DW-063 resets every node before a render.)
     @Test("ENG-022: gain_ramp_smoothing's gain step 0 → 1 is a linear ramp over one block")
     func gainRampIsLinearOverOneBlock() throws {
         let audio = try AudioData(contentsOf: GoldenHarness.reference("gain_ramp_smoothing"))
@@ -46,11 +48,19 @@ struct GoldenReferenceTests {
         for channel in audio.channels {
             var worst = 0.0
             for (i, x) in channel.enumerated() {
-                let expected = i < 512 ? 0.5 * Double(i + 1) / 512 : 0.5
+                let expected = Self.stepRamp(i, full: 0.5)
                 worst = max(worst, abs(Double(x) - expected))
             }
             #expect(worst < 1e-6)
         }
+    }
+
+    /// gain_ramp_smoothing and send_ramps: 0 before block 25 (frames 12800..<13312), a linear
+    /// ramp to `full` over it, `full` after.
+    static func stepRamp(_ i: Int, full: Double) -> Double {
+        let start = 25 * 512
+        if i < start { return 0 }
+        return i < start + 512 ? full * Double(i - start + 1) / 512 : full
     }
 
     /// MIX-005 constant power: whatever the pan, L² + R² of the tone through both strips is
@@ -85,9 +95,10 @@ struct GoldenReferenceTests {
         try expectToneSegments("bus_send_sum", [(0.25, 0), (0.25, 0.25), (0.5, 0.25), (0, 0)])
     }
 
-    /// MIX-007/ENG-022: a send level step 0 → 1 (L) and an unmute written into a pre-fader
-    /// send's mute slot (R) both ramp linearly over block 0, then hold.
-    @Test("MIX-007: send_ramps' send level and send mute changes ramp linearly over one block")
+    /// MIX-007/ENG-022: a send level step 0 → 1 on a post-fader (L) and a pre-fader send (R)
+    /// ramps linearly over block 25, then holds. (T-089: automation steps inside the render;
+    /// the send-mute ramp is checked by the C++ SendTests.)
+    @Test("MIX-007: send_ramps' send level steps ramp linearly over one block")
     func sendRampsAreLinearOverOneBlock() throws {
         let audio = try AudioData(contentsOf: GoldenHarness.reference("send_ramps"))
         #expect(audio.channels.count == 2)
@@ -96,7 +107,7 @@ struct GoldenReferenceTests {
         for (channel, full) in zip(audio.channels, [0.5, 0.5.squareRoot()]) {
             var worst = 0.0
             for (i, x) in channel.enumerated() {
-                let expected = i < 512 ? full * Double(i + 1) / 512 : full
+                let expected = Self.stepRamp(i, full: full)
                 worst = max(worst, abs(Double(x) - expected))
             }
             #expect(worst < 1e-6)

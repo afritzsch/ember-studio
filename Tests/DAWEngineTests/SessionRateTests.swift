@@ -11,8 +11,11 @@ struct SessionRateTests {
     @Test("IO-033: a pass covers every loaded asset in ID order; stale passes and superseded assets are ignored")
     func reloaderBookkeeping() { expectPasses(daw.testing.assetReloaderBookkeeping()) }
 
-    @Test("IO-033, DW-044: setSessionSampleRate re-converts from the file in the background (started/progress/finished); play refused meanwhile; an export waits and plays the clip at the right pitch and position")
+    @Test("IO-033, DW-044: setSessionSampleRate re-converts from the file in the background (started/progress/finished); play queued meanwhile; an export waits and plays the clip at the right pitch and position")
     func reconvertsAssets() { expectPasses(daw.testing.facadeSessionRateReconvertsAssets()) }
+
+    @Test("IO-033 (T-089): play() during a re-conversion is queued (playPending), stop() cancels it, it starts when the pass finishes")
+    func queuedPlay() { expectPasses(daw.testing.facadeQueuedPlayDuringReconversion()) }
 
     @Test("IO-033: a missing file fails its asset (assetLoadFailed, finished with io); DW-077: the peak cache is written and rewritten at the new rate")
     func failureAndPeakCache() { expectPasses(daw.testing.facadeSessionRateFailureAndPeakCache()) }

@@ -52,6 +52,13 @@ NodeKindInfo Compressor::kindInfo(Telemetry* telemetry) {
     return info;
 }
 
+void Compressor::reset() DAW_RT {
+    // DW-063: prepare()'s state.
+    env_ = 0.0;
+    ms_ = 0.0;
+    primed_ = false;
+}
+
 void Compressor::prepare(const PrepareInfo& info) {
     sampleRate_ = info.sampleRate > 0.0 ? info.sampleRate : 48000.0;
     rmsCoeff_ = onePole(kRmsMs, sampleRate_);

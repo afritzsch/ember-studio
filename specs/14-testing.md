@@ -28,17 +28,18 @@
 |---|---|---|
 | `sine_through_graph` | M1 | Engine skeleton, master output |
 | `wav_playback_resampled` | M1 | 44.1k asset in a 48k session |
-| `gain_ramp_smoothing` | M1 | ENG-022 |
+| `gain_ramp_smoothing` | M1 | ENG-022 (the step is an automation hold step inside the render since T-089, DW-063) |
 | `pan_law` | M2 | MIX-005 |
 | `bus_send_sum` | M2 | MIX-004/007 |
 | `pdc_alignment_null` | M2 | MIX-021/023 (with FakeLatencyNode) |
-| `send_ramps` | M2 | MIX-007, ENG-022 (send level/mute ramps) |
+| `send_ramps` | M2 | MIX-007, ENG-022 (send level ramps, automation hold steps inside the render; the send-mute ramp is in `SendTests` "gainNodeLevel"/"mutedWithTrack" since T-089) |
 | `clips_fades_tempo_change` | M3 | TIME-001, DSP-001 |
 | `loop_wrap_midblock` | M3 | TIME-005 |
-| `locate_reset` | M3 | TIME-008 |
+| `loop_short_multiwrap` | M3 | TIME-005, DW-125 (loop shorter than a block, several wraps per block) |
+| `locate_reset` | M3 | TIME-008 (clip player reset at a render start), DW-063 (the render resets the effect too). Live locate keeping effect state: `TransportTests` "locateFlagsReset", `OfflineResetTests` "resetsEveryNode" |
 | `metronome_click` | M2 | TIME-010, DSP-011 |
 | `sampler_pitch` | M4 | DSP-021 |
-| `midi_locate_no_stuck_notes` | M4 | DSP-003 |
+| `midi_locate_no_stuck_notes` | M4 | DSP-003, DW-103 (chase at a render start), DW-063 (no held note survives a render start). Live locate note-off and release: `MidiClipPlayerTests` "locateAndStop", "noStuckNotesFuzz" |
 | `midi_loop_wrap` | M4 | DSP-003 (loop-wrap note-offs, chase at the loop start: DW-101, DW-103) |
 | `record_loopback_alignment` | M5 | REC-003 |
 | `comp_crossfade` | M8 | REC-032 |

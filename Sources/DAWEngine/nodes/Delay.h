@@ -55,8 +55,8 @@
 // in Telemetry when the factory was given one (DW-142).
 //
 // Delay memory (kMaxSeconds per channel) is allocated in prepare() at the session rate; process()
-// never allocates. Latency 0. reset() keeps the echoes: an effect keeps running across a locate
-// (TIME-008), like the compressor and the reverb.
+// never allocates. Latency 0. The echoes keep running across a locate (TIME-008: the engine never
+// resets an effect then); reset() clears them, which only offline renders do (DW-063).
 
 #include <array>
 #include <atomic>
@@ -139,6 +139,10 @@ public:
         : firstParam_(firstParam), numParams_(numParams), telemetry_(telemetry) {}
 
     void prepare(const PrepareInfo& info) override;
+    // DW-063 (T-089): back to the state prepare() leaves (no tail, first block jumps to the
+    // slot values). Only offline renders reset every node; a live locate never resets an effect
+    // (TIME-008), so tails survive it.
+    void reset() DAW_RT override;
     void process(ProcessContext& ctx, NodeIO& io) DAW_RT override;
 
     // Blocks silenced by the NaN guard since construction. Any thread.
