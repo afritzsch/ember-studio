@@ -51,8 +51,11 @@ final class LiveTestApp {
     }
 }
 
-private func asset(_ id: ModelID) -> AssetRef {
-    AssetRef(id: id, path: "/tmp/t090-\(id).wav", channels: 2, originalSampleRate: 48_000, frames: 48_000)
+/// An asset whose file exists (engine sync loads readable files only).
+private func asset(_ id: ModelID, in dir: TempDir) throws -> AssetRef {
+    let file = dir.file("t090-\(id).wav")
+    try Data([0]).write(to: file)
+    return AssetRef(id: id, path: file.path, channels: 2, originalSampleRate: 48_000, frames: 48_000)
 }
 
 @MainActor
@@ -93,16 +96,19 @@ struct LiveEngineTests {
     @Test("DW-156: switching windows stops the transport and moves the live engine with the project's graph, params and assets")
     func switchingHandsOver() async throws {
         let t = LiveTestApp()
+        let dir = try TempDir()
         let a = t.app.newProject()
         a.addTrack(.audio)
-        try a.store.perform(ImportAsset(asset: asset(11)))
+        try a.store.perform(ImportAsset(asset: asset(11, in: dir)))
         _ = await a.store.loadAssets()
         let b = t.app.newProject()
         b.addTrack(.audio)
         b.addTrack(.midi)
-        try b.store.perform(ImportAsset(asset: asset(22)))
+        try b.store.perform(ImportAsset(asset: asset(22, in: dir)))
         _ = await b.store.loadAssets()
         let live = t.live[0]
+        b.store.engineSync?.flush()  // structural changes are debounced (MODEL-021)
+        #expect(live.calls.contains(.loadAsset(11, path: dir.file("t090-11.wav").path)), "A's asset loaded while A was front")
         #expect(live.appliedGraphs.last?.nodes.contains { $0.id == b.project.tracks[1].id } == true)
 
         live.play()
@@ -120,7 +126,7 @@ struct LiveEngineTests {
         let bOffline = try #require(b.engine as? FakeEngine)
         #expect(bOffline.appliedGraphs.last?.nodes.contains { $0.id == b.project.tracks[1].id } == true)
         // B's assets load into its offline engine (peaks, export); the live engine had A's already.
-        #expect(bOffline.calls.contains(.loadAsset(22, path: "/tmp/t090-22.wav")))
+        #expect(bOffline.calls.contains(.loadAsset(22, path: dir.file("t090-22.wav").path)))
         #expect(!live.calls.contains { if case .loadAsset(11, _) = $0 { true } else { false } }, "A's asset was loaded before")
 
         // Strip params go to the live engine's slots for A: a mute reaches it at once.
@@ -271,6 +277,7 @@ struct LiveEngineTests {
         t.checkOneLiveEngine()
         #expect(b.engine === t.live[0] && a.engine === t.offline[0])
         _ = try await t.app.dispatcher.call(.commandApply, ["command": ["type": "AddTrack", "name": "x", "kind": "audio"]])
+        b.store.engineSync?.flush()
         #expect(t.live[0].appliedGraphs.last?.nodes.contains { $0.id == b.project.tracks[0].id } == true)
         await t.app.quit()
     }
