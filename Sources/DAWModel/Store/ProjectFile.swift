@@ -44,10 +44,12 @@ public enum ProjectFile {
         return (try decodeProject(json.encoded()), original)
     }
 
-    /// DW-111: checks every invariant (MODEL-032). The only repairs are orderings, which are
-    /// safe because the order is a function of the data: clips by (start, id) (DW-110) and notes
-    /// by (start, id). Anything else is reported as an error and the file isn't opened. Returns
-    /// one line per repair.
+    /// DW-111: checks every invariant (MODEL-032). The repairs are orderings, which are safe
+    /// because the order is a function of the data: clips by (start, id) (DW-110) and notes by
+    /// (start, id); and, since T-088 (DW-150, user decision), a note velocity of 0 becomes 1 (a
+    /// note-on with velocity 0 would be a note-off; the clip player already played it as 1).
+    /// Anything else is reported as an error and the file isn't opened. Returns one line per
+    /// repair.
     public static func validateOrRepair(_ project: inout Project) throws(DAWError) -> [String] {
         let failure: DAWError
         do {
@@ -62,6 +64,12 @@ public enum ProjectFile {
             let track = repaired.tracks[t].id
             for c in repaired.tracks[t].clips.indices {
                 guard case .midi(var clip) = repaired.tracks[t].clips[c] else { continue }
+                // DW-150
+                for n in clip.notes.indices where clip.notes[n].velocity == 0 {
+                    clip.notes[n].velocity = 1
+                    repaired.tracks[t].clips[c] = .midi(clip)
+                    repairs.append("set the velocity of note \(clip.notes[n].id) from 0 to 1 (DW-150)")
+                }
                 let sorted = clip.notes.sorted(by: Note.clipOrder)
                 guard sorted.map(\.id) != clip.notes.map(\.id) else { continue }
                 clip.notes = sorted

@@ -1,0 +1,196 @@
+{
+  "assets" : [
+
+  ],
+  "buses" : [
+
+  ],
+  "formatVersion" : 1,
+  "id" : "00000000-0000-0000-0000-000000000016",
+  "ids" : {
+    "next" : 12
+  },
+  "master" : {
+    "automation" : [
+
+    ],
+    "id" : 1,
+    "inserts" : [
+
+    ],
+    "strip" : {
+      "gain" : 1,
+      "mute" : false,
+      "pan" : 0,
+      "phaseInvert" : false,
+      "solo" : false
+    }
+  },
+  "name" : "midi_tempo",
+  "sessionSampleRate" : 48000,
+  "tempoMap" : {
+    "tempoEvents" : [
+      {
+        "bpm" : 120,
+        "tick" : 0
+      },
+      {
+        "bpm" : 90,
+        "tick" : 7680
+      }
+    ],
+    "timeSignatures" : [
+      {
+        "denominator" : 4,
+        "numerator" : 4,
+        "tick" : 0
+      },
+      {
+        "denominator" : 4,
+        "numerator" : 3,
+        "tick" : 7680
+      }
+    ]
+  },
+  "tracks" : [
+    {
+      "armed" : false,
+      "automation" : [
+
+      ],
+      "clips" : [
+        {
+          "id" : 5,
+          "kind" : "midi",
+          "length" : 1920,
+          "notes" : [
+            {
+              "channel" : 0,
+              "id" : 6,
+              "length" : 480,
+              "pitch" : 60,
+              "start" : 0,
+              "velocity" : 100
+            },
+            {
+              "channel" : 1,
+              "id" : 7,
+              "length" : 480,
+              "pitch" : 64,
+              "start" : 480,
+              "velocity" : 0
+            },
+            {
+              "channel" : 0,
+              "id" : 8,
+              "length" : 960,
+              "pitch" : 67,
+              "start" : 1680,
+              "velocity" : 100
+            },
+            {
+              "channel" : 0,
+              "id" : 9,
+              "length" : 100,
+              "pitch" : 72,
+              "start" : 2000,
+              "velocity" : 100
+            }
+          ],
+          "start" : 3840
+        }
+      ],
+      "color" : {
+        "blue" : 0.5,
+        "green" : 0.5,
+        "red" : 0.5
+      },
+      "id" : 2,
+      "inserts" : [
+
+      ],
+      "instrument" : {
+        "bypass" : false,
+        "id" : 4,
+        "kind" : {
+          "format" : "builtin",
+          "node" : "sampler"
+        },
+        "params" : [
+
+        ]
+      },
+      "kind" : "midi",
+      "monitoring" : "auto",
+      "name" : "Keys",
+      "output" : {
+        "kind" : "master"
+      },
+      "sends" : [
+
+      ],
+      "strip" : {
+        "gain" : 1,
+        "mute" : false,
+        "pan" : 0,
+        "phaseInvert" : false,
+        "solo" : false
+      },
+      "takeFolders" : [
+
+      ]
+    },
+    {
+      "armed" : false,
+      "automation" : [
+
+      ],
+      "clips" : [
+        {
+          "id" : 10,
+          "kind" : "midi",
+          "length" : 960,
+          "notes" : [
+            {
+              "channel" : 0,
+              "id" : 11,
+              "length" : 960,
+              "pitch" : 40,
+              "start" : 0,
+              "velocity" : 0
+            }
+          ],
+          "start" : 0
+        }
+      ],
+      "color" : {
+        "blue" : 0.5,
+        "green" : 0.5,
+        "red" : 0.5
+      },
+      "id" : 3,
+      "inserts" : [
+
+      ],
+      "kind" : "midi",
+      "monitoring" : "auto",
+      "name" : "No instrument",
+      "output" : {
+        "kind" : "master"
+      },
+      "sends" : [
+
+      ],
+      "strip" : {
+        "gain" : 1,
+        "mute" : false,
+        "pan" : 0,
+        "phaseInvert" : false,
+        "solo" : false
+      },
+      "takeFolders" : [
+
+      ]
+    }
+  ]
+}

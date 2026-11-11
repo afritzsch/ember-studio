@@ -188,10 +188,10 @@ struct DispatcherMethodTests {
         _ = try await dispatcher.ok(.undo)
         #expect(dispatcher.store?.project.loop == LoopRange(start: 960, end: 4800, isEnabled: false))
 
-        // SetLoop's own checks apply (MODEL-005: at least 4096 samples), and a refused loop never
-        // reaches the engine.
+        // SetLoop's own checks apply (MODEL-031: a non-empty range; no minimum length since T-088,
+        // DW-125), and a refused loop never reaches the engine.
         let calls = box.last.calls.count
-        #expect(await dispatcher.failure(.transportSetLoop, ["enabled": true, "start": 0, "end": 10])?.dawError == "invalidArgument")
+        #expect(await dispatcher.failure(.transportSetLoop, ["enabled": true, "start": 10, "end": 10])?.dawError == "invalidArgument")
         #expect(await dispatcher.failure(.transportSetLoop, ["enabled": true])?.dawError == "invalidParams")
         #expect(box.last.calls.count == calls)
     }

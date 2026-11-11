@@ -2,9 +2,12 @@
 ///
 /// Where lanes live: on the channel that owns their target (a strip's channel, a send's or a
 /// device slot's channel), in `automation`, sorted by lane ID, so a lane removed and put back
-/// returns to its place and undo restores the project exactly. Lanes are never removed with their
-/// target: a lane whose send or device is gone stays where it was and is left out of the graph
-/// (so undoing the removal brings the automation back). One lane per target in the project.
+/// returns to its place and undo restores the project exactly. One lane per target in the project.
+///
+/// DW-234 (T-088, user decision): a command that removes a send or a device slot removes the lanes
+/// driving it in the same undo step, and its inverse puts them back with their points and mode
+/// (`removeAutomationLanes`). A lane whose target is missing anyway (a file from before T-088, or
+/// `SetAutomationLane` on a missing target) stays valid and is left out of the graph.
 extension Project {
     /// AUTO-008: the targets a lane may drive. Solo has no slot (MIX-006) and phase isn't
     /// automatable (ChannelStrip ParamInfo); device params are checked against the kind's
@@ -136,5 +139,47 @@ extension AutomationPoint {
                 throw .invalidArgument("exponential shape \(shape) is outside ±\(Self.maxShape)")
             }
         }
+    }
+}
+
+extension Project {
+    /// DW-234 (T-088): removes every lane whose target matches, wherever it sits, and returns the
+    /// `SetAutomationLane` commands that put them back exactly, in lane order. A removal command
+    /// appends them to its inverse after the command that restores the target.
+    mutating func removeAutomationLanes(where matches: (ParamTarget) -> Bool) throws(DAWError) -> [any Command] {
+        var removed: [(channel: NodeIDValue, lane: AutomationLane)] = []
+        forEachAutomationLane { lane, channel in
+            if matches(lane.target) { removed.append((channel, lane)) }
+        }
+        for (channel, lane) in removed {
+            try updateAutomation(of: channel) { lanes in lanes.removeAll { $0.id == lane.id } }
+        }
+        return removed.map { SetAutomationLane(channel: $0.channel, target: $0.lane.target, lane: $0.lane) }
+    }
+
+    /// DW-234 (T-088): the inverse of a command that brings a send or device back: `remove`, whose
+    /// cascade also takes the lanes driving it. Lanes that drove it before it came back (lanes
+    /// outlive a target removed before T-088) are put back after it, so undo stays exact. Call it
+    /// before the command changes the project.
+    func inverseRestoringLanes(_ remove: any Command, label: String, where matches: (ParamTarget) -> Bool) -> any Command {
+        var keep: [any Command] = []
+        forEachAutomationLane { lane, channel in
+            if matches(lane.target) { keep.append(SetAutomationLane(channel: channel, target: lane.target, lane: lane)) }
+        }
+        return keep.isEmpty ? remove : CompositeCommand(label, [remove] + keep)
+    }
+}
+
+extension ParamTarget {
+    /// The device slot the target drives, if it is a device param.
+    var drivenSlot: NodeIDValue? {
+        if case .device(let slot, _) = self { return slot }
+        return nil
+    }
+
+    /// The send whose level the target drives, if any.
+    var drivenSend: ModelID? {
+        if case .sendLevel(let send) = self { return send }
+        return nil
     }
 }

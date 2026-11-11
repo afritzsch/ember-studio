@@ -89,6 +89,13 @@ struct CommandRegistryTests {
         SetAutomationLane(channel: 2, target: .strip(channel: 2, param: .gain),
                           lane: AutomationLane(id: 9, target: .strip(channel: 2, param: .gain), points: [AutomationPoint(tick: 0, value: 1)])),
         SetAutomationLane(channel: 2, target: .strip(channel: 2, param: .gain), lane: nil),
+        // T-088 (MODEL-005 insert chains, DW-149)
+        InsertDevice(channel: 2, index: 0, device: .builtin(.eq), params: [ParamValue(index: 1, value: 0.5)]),
+        InsertDevice(channel: 1, device: .au(AUDescriptor(identifier: "aufx:dely:appl", name: "AUDelay")),
+                     pluginState: Data([1, 2, 3]), sidechainSource: SidechainRef(source: 3, tap: .preFader)),
+        RemoveDevice(slotID: 4),
+        RestoreDevice(channel: 2, index: 1, slot: DeviceSlot(id: 4, kind: .builtin(.compressor), bypass: true)),
+        MoveDevice(slotID: 4, index: 0),
     ]
 
     @Test("MODEL-006: built-in type strings are stable and unique")
@@ -109,6 +116,7 @@ struct CommandRegistryTests {
             "SetDeviceBypass",
             "AddAutomationPoint", "AddAutomationPoints", "RemoveAutomationPoints", "MoveAutomationPoints",
             "SetAutomationMode", "SetAutomationLane",
+            "InsertDevice", "RemoveDevice", "RestoreDevice", "MoveDevice",
         ])
         let all = CommandRegistry.registered.map { $0.type }
         #expect(Set(all).count == all.count)

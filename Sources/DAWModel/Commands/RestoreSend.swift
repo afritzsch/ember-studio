@@ -23,8 +23,12 @@ public struct RestoreSend: Command {
         guard project.busIndex(send.target) != nil else { throw .notFound(kind: "bus", id: send.target) }
         try checkSendLevel(send.level)
         try project.checkNewRoute(from: channelID, to: send.target)
+        // DW-234: RemoveSend takes the send's lanes, so lanes it had before coming back are kept.
+        let inverse = project.inverseRestoringLanes(RemoveSend(sendID: send.id), label: "Remove Send") {
+            $0.drivenSend == send.id
+        }
         try project.claimIDs { body in body(send.id, "send") }
         try project.updateSends(of: channelID) { $0.insert(send, at: index) }
-        return RemoveSend(sendID: send.id)
+        return inverse
     }
 }

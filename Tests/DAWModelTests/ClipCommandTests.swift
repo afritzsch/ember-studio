@@ -286,19 +286,22 @@ struct ClipCommandTests {
         #expect(SetLoop(loop: nil).label == "Set Loop")
     }
 
-    @Test("DW-060: an enabled loop shorter than the engine's largest block is rejected; undo never is")
-    func loopMinimumLength() throws {
-        // 120 bpm at 48 kHz: 25 samples a tick, so 4096 samples are 163.84 ticks.
+    @Test("DW-125 (T-088): any non-empty loop is accepted, short ones included (the transport plays loops shorter than a block); tempo edits and undo never fail")
+    func loopShortLoops() throws {
+        // 120 bpm at 48 kHz: 25 samples a tick. One tick (25 samples) is far below a block.
+        try expectApplyRoundTrip(SetLoop(start: 0, end: 1), on: p)
+        try expectApplyRoundTrip(SetLoop(start: 0, end: 163), on: p)  // 4075 samples, refused before DW-125
+        try expectApplyRoundTrip(SetLoop(start: 0, end: 10, isEnabled: false), on: p)
         var q = p
-        #expect(throws: DAWError.invalidArgument("loop [0, 163) is 4075 samples, shorter than 4096")) {
-            _ = try SetLoop(start: 0, end: 163).applyChecked(to: &q)
+        #expect(throws: DAWError.invalidArgument("loop [10, 10) is empty or off the timeline"), "still non-empty") {
+            _ = try SetLoop(start: 10, end: 10).applyChecked(to: &q)
+        }
+        #expect(throws: DAWError.invalidArgument("loop [-1, 10) is empty or off the timeline"), "still non-negative") {
+            _ = try SetLoop(start: -1, end: 10).applyChecked(to: &q)
         }
         #expect(q == p)
-        try expectApplyRoundTrip(SetLoop(start: 0, end: 164), on: p)
-        try expectApplyRoundTrip(SetLoop(start: 0, end: 10, isEnabled: false), on: p)
 
-        // A tempo edit may shrink a loop below the minimum. Undoing a later SetLoop puts it back
-        // anyway (RestoreLoop), so the history stays usable.
+        // A tempo edit shrinks a loop; re-setting and undoing it work at any length.
         var project = p
         var stack = UndoStack()
         try stack.perform(SetLoop(start: 0, end: 200), on: &project)  // 5000 samples
@@ -311,10 +314,9 @@ struct ClipCommandTests {
         #expect(project == p)
         while try stack.redo(&project) != nil {}
         #expect(project == final)
-        #expect(throws: DAWError.invalidArgument("loop [0, 200) is 2500 samples, shorter than 4096"), "re-enabling it is checked") {
-            var r = final
-            _ = try SetLoop(start: 0, end: 200).applyChecked(to: &r)
-        }
+        var r = final
+        _ = try SetLoop(start: 0, end: 200).applyChecked(to: &r)
+        #expect(r.loop == LoopRange(start: 0, end: 200))
     }
 
     // MARK: MODEL-031

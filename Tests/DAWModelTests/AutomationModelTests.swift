@@ -186,9 +186,12 @@ struct AutomationModelTests {
             let lane = AutomationLane(id: r.ids.allocate(), target: .device(slot: r.tracks[0].inserts[0].id, index: 0))
             r.tracks[0].automation.insert(lane, at: 0)  // the newer ID first
         })
-        // A lane whose target is gone (send removed) stays valid and is left out of the graph.
+        // A lane whose target is gone stays valid and is left out of the graph. Since T-088
+        // (DW-234) RemoveSend takes the lane with it, so the send is cut directly, as a file from
+        // before T-088 could have it.
         var r = try withLane(.sendLevel(send: vox.sends[0].id), [AutomationPoint(tick: 0, value: 1)])
-        _ = try RemoveSend(sendID: vox.sends[0].id).applyChecked(to: &r)
+        r.tracks[0].sends.removeAll()
+        #expect(r.tracks[0].automation.count == 1)
         try r.validate()
         #expect(GraphDescriptionBuilder.build(r, runtime: RuntimeIDs.sequential(for: r)).automation == [])
     }

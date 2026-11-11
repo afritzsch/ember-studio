@@ -69,6 +69,11 @@ public enum CommandRegistry {
         MoveAutomationPoints.self,
         SetAutomationMode.self,
         SetAutomationLane.self,
+        // T-088: insert chains of tracks, buses and the master (MODEL-005, DW-149)
+        InsertDevice.self,
+        RemoveDevice.self,
+        RestoreDevice.self,
+        MoveDevice.self,
     ]
 
     private static let table = Mutex<[String: any Command.Type]>(
