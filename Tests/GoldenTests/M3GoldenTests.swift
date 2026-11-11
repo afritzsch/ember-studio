@@ -134,8 +134,10 @@ struct M3GoldenReferenceTests {
 
     /// TIME-008: L is the clip from tick 1000 (sample 25000) at full level from frame 0: the
     /// locate reset the clip player, so no 64-frame wrap crossfade from where the first render
-    /// stopped. R is the effect's sine going on from frame 12288: the effect wasn't reset.
-    @Test("TIME-008: locate_reset restarts the clip player cleanly and leaves the effect running")
+    /// stopped. DW-063 (T-089): R is the effect's sine from phase 0, since a render resets every
+    /// node; a live locate keeping effect state is checked in C++ (TransportTests
+    /// "locateFlagsReset", OfflineResetTests "resetsEveryNode").
+    @Test("TIME-008, DW-063: locate_reset restarts the clip player cleanly, and the render resets the effect too")
     func locateResetSamples() throws {
         let audio = try AudioData(contentsOf: GoldenHarness.reference("locate_reset"))
         let tone = try Self.asset("tone_441_48k.wav")
@@ -150,7 +152,7 @@ struct M3GoldenReferenceTests {
         var worst = (left: 0.0, right: 0.0)
         for f in 0..<6000 {
             let left = half * Double(tone[start + f])
-            let right = half * 0.5 * sin(2 * Double.pi * 1100 * Double(Self.effectFramesBefore + f) / 48000)
+            let right = half * 0.5 * sin(2 * Double.pi * 1100 * Double(f) / 48000)
             worst.left = max(worst.left, abs(Double(audio.channels[0][f]) - left))
             worst.right = max(worst.right, abs(Double(audio.channels[1][f]) - right))
         }
@@ -158,12 +160,15 @@ struct M3GoldenReferenceTests {
         #expect(worst.right < Self.tolerance)
 
         // What a missing reset would look like: frame 0 of a crossfade plays the new pass at 1/64
-        // plus 63/64 of the old pass at sample 12288; a reset effect would start at sin(0) = 0.
+        // plus 63/64 of the old pass at sample 12288; an effect left running would be at its
+        // frame 12288, about 0.21, instead of sin(0) = 0.
         let l0 = Double(audio.channels[0][0]), r0 = Double(audio.channels[1][0])
         #expect(abs(l0 - half * Double(tone[start])) < Self.tolerance)
         let crossfaded = half * (Double(tone[start]) / 64 + 63.0 / 64 * Double(tone[Self.effectFramesBefore]))
         #expect(abs(l0 - crossfaded) > 0.1)
-        #expect(abs(r0) > 0.2)
+        #expect(abs(r0) < Self.tolerance)
+        let running = half * 0.5 * sin(2 * Double.pi * 1100 * Double(Self.effectFramesBefore) / 48000)
+        #expect(abs(running) > 0.2)
     }
 
     /// The fixture really renders twice, and the first render is what the second one's numbers
