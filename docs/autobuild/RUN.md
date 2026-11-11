@@ -114,6 +114,8 @@ Unattended phases started by `/autobuild` (see `.claude/skills/autobuild/SKILL.m
 ### Phase 8 (2026-11-10)
 - New run (the conductor numbered it 8). Start: week 43%, five 4%. WEEK_STOP 50 is near, so this is likely the run's last phase.
 - Wave: T-088 insert-chain commands + lane cascade + velocity repair (M), T-089 transport/export follow-ups (E+B), T-090 app follow-ups (U), T-077 M7 goldens (D). T-088..T-090 are new tasks from the user's 2026-11-10 answers (DECISIONS.md → User review); pre-decisions logged in DECISIONS.md (phase 8 rows).
+- Week crossed 50% during the phase (52% at the first report): last phase of this run, the wave finishes. T-089 asked about four goldens that used a second render as a locate stand-in → reworked under DW-063 (DECISIONS "T-089 goldens").
+- 5-hour pause at five=85 (epoch 1794348534), all four workers paused; resumed at 1794363726 (~4.2 h).
 
 ## Summary for the user
 
