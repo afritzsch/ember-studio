@@ -290,6 +290,22 @@ Additive; the automation contract itself is 11 Interfaces and 11 "Contract delta
 - **`GraphDescriptionBuilder`** gains `addAutomation(laneID, target, enabled)` and `addAutomationPoint(tick, value, curve, shape)`. A point goes to the lane added last.
 - **Swift:** `EngineGraph.automation: [EngineGraph.Automation]` (`laneID`, `target`, `points: [Point{tick, value, curve, shape}]`, `enabled`), default `[]`. `EngineClient` converts it both ways, and `FakeEngine` records it with the rest of the graph. A lane edit is structural (MODEL-021): the graph changes and is re-applied. Param values still travel only through `setParam`.
 
+### Contract delta (T-090), accepted (autobuild, see docs/autobuild/DECISIONS.md "T-090 feedback guard")
+DW-230's monitoring feedback guard (12 *Monitoring feedback guard*) has to tell the Mac's own microphone and speakers apart from everything else, and the speakers from headphones on the same output. The change is **additive and defaulted**:
+```cpp
+struct DeviceInfoPOD {
+  /* … */
+  bool isBuiltIn = false;           // kAudioDevicePropertyTransportType == kAudioDeviceTransportTypeBuiltIn
+  bool outputIsHeadphones = false;  // output data source (kAudioDevicePropertyDataSource, output scope) == 'hdpn'
+  bool isDefaultInput = false;      // kAudioHardwarePropertyDefaultInputDevice: what inputDevice 0 records from
+};
+```
+- **CoreAudio** (`CoreAudioDriverAdapter::devices`): fills the three fields from `CoreAudioDevice::isBuiltIn()`/`dataSource(direction)` (04 delta T-090). A device with no data source property, or one that isn't 'hdpn', counts as not headphones.
+- **Fake driver**: never built-in or headphones. `isDefaultInput` is set on the default output when it has inputs, because the fake driver records from the running device.
+- **Swift**: `AudioDeviceInfo.isBuiltIn/outputIsHeadphones/isDefaultInput`, default `false`, decoded with `decodeIfPresent` so older `device.list` JSON still decodes. `EngineClient.devices()` passes them through. `FakeEngine` gains `setDevices(_:)` (`devices()` returns it, empty by default) and `setRunningDevice(_:)` (`telemetry().outputDeviceID`/`deviceRunning`).
+
+Affected: T-090 only. Tests: `FeedbackGuardTests` (`deviceInfoFields`: the defaults decode, and the real engine on the fake driver).
+
 ## Status
 | ID | status | test |
 |---|---|---|
