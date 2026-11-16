@@ -88,22 +88,41 @@ public struct TakeFolder: Identifiable, Hashable, Sendable, Codable {
     }
 
     /// REC-032: what the comp plays, segment by segment: the take's clip, cut to the segment. An
-    /// audio clip keeps its audio in place (its offset moves with its start, through `tempo`);
-    /// a MIDI clip keeps its notes (starts relative to the cut clip). `extendAudio` lets each
-    /// audio segment but the last run on past its end by up to that many ticks, never past the
-    /// next segment's end, so the next segment's clip starts over it and DSP-002 crossfades the
-    /// boundary (the take's audio exists there: the file runs on). A segment whose take doesn't
+    /// audio clip keeps its audio in place (its offset moves with its start, through `tempo`); a
+    /// MIDI clip keeps its notes (starts relative to the cut clip). A segment whose take doesn't
     /// cover all of it plays only the part the take covers.
-    public func flattened(tempo: TempoMap, extendAudio: (CompSegment) -> Tick = { _ in Tick(0) }) -> [Clip] {
-        var out: [Clip] = []
-        for (i, segment) in comp.enumerated() {
-            guard let take = take(segment.take) else { continue }
-            var to = segment.end
-            if case .audio = take.clip, i + 1 < comp.count {
-                to = Tick(min(segment.end.raw + extendAudio(segment).raw, comp[i + 1].end.raw))
+    ///
+    /// Crossfades (audio, `crossfadeSamples` > 0). DSP-002 crossfades only where a later clip starts
+    /// over an earlier one, so at each boundary b the two audio clips overlap by up to
+    /// `crossfadeSamples`: the earlier segment's clip runs on past b if its take has audio there
+    /// (the file runs on; never past the next segment's end); otherwise the next segment's clip
+    /// starts that much before b if its take has audio there (never at or before the earlier
+    /// segment's start). The later clip wins, so the boundary fades over the overlap with DSP-002's
+    /// equal-power curve. Where neither take has audio across b the cut is hard.
+    public func flattened(tempo: TempoMap, crossfadeSamples: Int64 = 0) -> [Clip] {
+        var ranges = comp.map { (start: $0.start.raw, end: $0.end.raw) }
+        if crossfadeSamples > 0 {
+            for k in comp.indices.dropLast() {
+                guard let earlier = take(comp[k].take)?.clip, let later = take(comp[k + 1].take)?.clip,
+                      case .audio = earlier, case .audio = later else { continue }
+                let b = comp[k].end.raw
+                let bSample = tempo.tickToSample(comp[k].end)
+                let after = tempo.sampleToTick(bSample + crossfadeSamples - 1).raw + 1  // ≥ crossfade past b
+                let forward = min(after, comp[k + 1].end.raw, earlier.end.raw)
+                if forward > b {
+                    ranges[k].end = forward
+                    continue
+                }
+                let before = tempo.sampleToTick(bSample - crossfadeSamples).raw  // ≥ crossfade before b
+                let back = max(before, comp[k].start.raw + 1, later.start.raw)
+                if back < b { ranges[k + 1].start = back }
             }
-            let from = max(segment.start, take.clip.start)
-            let until = min(to, take.clip.end)
+        }
+        var out: [Clip] = []
+        for (segment, range) in zip(comp, ranges) {
+            guard let take = take(segment.take) else { continue }
+            let from = Tick(max(range.start, take.clip.start.raw))
+            let until = Tick(min(range.end, take.clip.end.raw))
             guard until > from else { continue }
             switch take.clip {
             case .audio(var clip):
@@ -117,6 +136,9 @@ public struct TakeFolder: Identifiable, Hashable, Sendable, Codable {
                 clip.fadeOut = Tick(min(clip.fadeOut.raw, clip.length.raw))
                 out.append(.audio(clip))
             case .midi(var clip):
+                // MIDI comps don't overlap: notes of the segment's take only.
+                let from = max(segment.start, take.clip.start), until = min(segment.end, take.clip.end)
+                guard until > from else { continue }
                 let shift = from.raw - clip.start.raw
                 clip.notes = clip.notes.map { note in
                     var note = note
@@ -250,10 +272,15 @@ extension Project {
 
     /// Whether any take of any folder uses the asset.
     public func takesUse(asset: ModelID) -> Bool {
-        tracks.contains { track in
-            track.takeFolders.contains { folder in
-                folder.takes.contains { if case .audio(let clip) = $0.clip { clip.assetID == asset } else { false } }
-            }
+        tracks.contains { $0.takeFoldersUse(asset: asset) }
+    }
+}
+
+extension Track {
+    /// Whether a take of one of the track's folders uses the asset (T-080).
+    public func takeFoldersUse(asset: ModelID) -> Bool {
+        takeFolders.contains { folder in
+            folder.takes.contains { if case .audio(let clip) = $0.clip { clip.assetID == asset } else { false } }
         }
     }
 }

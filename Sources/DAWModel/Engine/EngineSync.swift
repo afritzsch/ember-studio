@@ -205,6 +205,11 @@ public final class EngineSync {
                 runtime.configVersions[GraphNodeID.source(of: track.id), default: 0] &+= 1
                 bumped = true
             }
+            // REC-032 (T-080): a comp flattens takes into the player's clips; their assets count too.
+            for track in project.tracks where track.kind == .audio && track.takeFoldersUse(asset: event.subject) {
+                runtime.configVersions[GraphNodeID.source(of: track.id), default: 0] &+= 1
+                bumped = true
+            }
             // DW-140: a sampler resolves its zones' assets when it is created, too.
             for slot in project.allDeviceSlots where slot.zones.contains(where: { $0.assetID == event.subject }) {
                 runtime.configVersions[slot.id, default: 0] &+= 1
