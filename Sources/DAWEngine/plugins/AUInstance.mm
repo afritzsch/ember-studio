@@ -229,6 +229,7 @@ struct AUInstance::EditState {
     static void observe(const std::shared_ptr<EditState>& self, uint64_t address, float value,
                         AUParameterAutomationEventType type) {
         std::lock_guard lock(self->mutex);
+        fprintf(stderr, "DBG observe addr %llu value %f type %d count %zu\n", (unsigned long long)address, value, (int)type, self->count);
         const auto it = self->indexOf.find(address);
         if (it == self->indexOf.end()) return;
         const uint32_t i = it->second;
@@ -440,6 +441,7 @@ Result<std::shared_ptr<AUInstance>> AUInstance::instantiate(const AUComponentID&
             impl.editToken = [unit.parameterTree tokenByAddingParameterAutomationObserver:^(
                                                      NSInteger count, const AUParameterAutomationEvent* events) {
                 auto state = weak.lock();
+                fprintf(stderr, "DBG block n=%ld state=%p\n", (long)count, (void*)state.get());
                 if (!state) return;
                 for (NSInteger e = 0; e < count; ++e)
                     EditState::observe(state, events[e].address, events[e].value, events[e].eventType);

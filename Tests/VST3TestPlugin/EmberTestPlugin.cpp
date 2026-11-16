@@ -7,6 +7,9 @@
 // "Ember Test Synth": no audio input, stereo out; writes velocity at each note-on's frame.
 // Both report whatever latency ember_test_set_latency last set; the setter (or, when requested,
 // process() on the audio thread) calls IComponentHandler::restartComponent(kLatencyChanged).
+// T-063 (PLUG-017, DW-208): the controller has an editor of its own (EmberTestView.mm, a plain
+// NSView), and ember_test_edit makes the controller edit a parameter the way an editor's knob
+// does (beginEdit / performEdit / endEdit, DW-204).
 
 #include <algorithm>
 #include <atomic>
@@ -27,6 +30,10 @@
 
 using namespace Steinberg;
 using namespace Steinberg::Vst;
+
+// EmberTestView.mm (T-063).
+IPlugView* emberCreateEditorView(EditController* controller);
+void emberRedrawEditor();
 
 namespace {
 
@@ -110,6 +117,17 @@ public:
 
     void restart() {
         if (componentHandler) componentHandler->restartComponent(kLatencyChanged);
+    }
+
+    // T-063 (PLUG-017): the editor.
+    IPlugView* PLUGIN_API createView(FIDString name) SMTG_OVERRIDE {
+        return FIDStringsEqual(name, ViewType::kEditor) ? emberCreateEditorView(this) : nullptr;
+    }
+    // A host writing a value (VST3 hosts keep the controller in step) shows in the editor.
+    tresult PLUGIN_API setParamNormalized(ParamID tag, ParamValue value) SMTG_OVERRIDE {
+        const tresult r = EditController::setParamNormalized(tag, value);
+        emberRedrawEditor();
+        return r;
     }
 };
 
@@ -303,6 +321,26 @@ __attribute__((visibility("default"))) void ember_test_set_controller_value(floa
 __attribute__((visibility("default"))) int32_t ember_test_live_processors() { return gLiveProcessors.load(); }
 
 __attribute__((visibility("default"))) void ember_test_set_emit_nan(int32_t on) { gEmitNaN.store(on != 0); }  // T-064
+
+// T-063 (DW-204): the newest controller edits parameter `id` as an editor's knob would: phase 0
+// beginEdit, 1 setParamNormalized + performEdit, 2 endEdit. Returns the handler's answer.
+__attribute__((visibility("default"))) int32_t ember_test_edit(uint32_t id, double value, int32_t phase) {
+    EmberController* c = gLastController.load(std::memory_order_acquire);
+    if (c == nullptr) return kResultFalse;
+    switch (phase) {
+    case 0: return c->beginEdit(id);
+    case 1:
+        c->setParamNormalized(id, value);
+        return c->performEdit(id, value);
+    default: return c->endEdit(id);
+    }
+}
+
+// T-063: the newest controller's normalized value of parameter `id` (what its editor shows).
+__attribute__((visibility("default"))) double ember_test_controller_param(uint32_t id) {
+    EmberController* c = gLastController.load(std::memory_order_acquire);
+    return c != nullptr ? c->getParamNormalized(id) : -1;
+}
 
 } // extern "C"
 

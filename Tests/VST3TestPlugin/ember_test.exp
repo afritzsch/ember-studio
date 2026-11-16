@@ -9,3 +9,7 @@ _ember_test_controller_stats
 _ember_test_set_controller_value
 _ember_test_live_processors
 _ember_test_set_emit_nan
+_ember_test_edit
+_ember_test_controller_param
+_ember_test_view_info
+_ember_test_view_request_resize

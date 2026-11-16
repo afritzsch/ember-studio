@@ -197,6 +197,10 @@ public final class EngineClient: EngineProtocol {
 
     /// PLUG-010/015 (T-061).
     public func pluginInfoJSON(slot: NodeIDValue) -> String { String(facade.pluginInfoJSON(slot)) }
+    // PLUG-017 (T-063): main thread (the facade refuses elsewhere).
+    public func createPluginView(slot: NodeIDValue) -> UnsafeMutableRawPointer? { facade.__createPluginViewUnsafe(slot) }
+    public func destroyPluginView(slot: NodeIDValue) { facade.destroyPluginView(slot) }
+    public func pluginViewJSON(slot: NodeIDValue) -> String { String(facade.pluginViewJSON(slot)) }
 
     // MARK: Offline
 
@@ -421,6 +425,7 @@ public final class EngineClient: EngineProtocol {
         case .graphRejected: .graphRejected
         case .jobFinished: .jobFinished
         case .pluginMisbehaved: .pluginMisbehaved  // T-064
+        case .pluginParamEdited: .pluginParamEdited  // T-063
         default: .deviceChanged
         }
         // T-056 (IO-033, DW-044): the re-conversion's progress.
@@ -451,6 +456,15 @@ public final class EngineClient: EngineProtocol {
         }
         var event = EngineEvent(kind: kind, subject: e.subject, job: e.job, count: e.count, error: error(e.error),
                                 device: device, reload: reload)
+        // T-063 (DW-204): the plugin's own edit.
+        if kind == .pluginParamEdited {
+            let phase: PluginParamEdit.Phase = switch e.pluginEdit.phase {
+            case .begin: .begin
+            case .end: .end
+            default: .value
+            }
+            event.pluginEdit = PluginParamEdit(index: Int(e.pluginEdit.index), value: e.pluginEdit.value, phase: phase)
+        }
         // T-052 (REC-004): the finished take.
         if kind == .recordingFinalized {
             let r = e.recording
