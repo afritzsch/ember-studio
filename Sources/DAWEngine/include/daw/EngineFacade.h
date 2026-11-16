@@ -103,6 +103,8 @@ struct TransportPOD {
     // transport starts when they are done, unless stop() cancels it first. `playing` stays false
     // until then.
     bool playPending = false;
+    // REC-034 (T-080): the record option (setRecordOptions).
+    bool midiLoopTakes = false;
 };
 
 // MARK: Jobs (BRIDGE-002)
@@ -334,8 +336,11 @@ struct RecordedNotePOD {
     uint8_t pitch = 0;
     uint8_t velocity = 0;
     uint8_t channel = 0;
+    int32_t pass = 0;  // REC-034 (T-080): the loop pass its note-on was heard in (0 without a wrap)
 };
 using RecordedNoteVector = std::vector<RecordedNotePOD>;
+// REC-030 (T-080): a take's loop pass starts (RecordingPOD::passStarts).
+using PassStartVector = std::vector<int64_t>;
 
 // REC-004 (T-052): a finished recording, one event per track. `startSample` is where the file's
 // first frame belongs on the timeline, at the session rate, already compensated for input +
@@ -359,6 +364,18 @@ struct RecordingPOD {
     bool midi = false;
     int64_t endSample = 0;
     RecordedNoteVector notes;
+    // REC-030/034 (T-080, Contract delta in 09 and here): the loop passes of the take. `passes`
+    // is how many it spans (1: the transport never wrapped in it). loopStart/loopEnd are the
+    // loop's timeline samples (0 for one pass). Audio: passStarts[i] is the file frame where
+    // pass i starts, [0] == 0 and pass i ≥ 1 holds the loop start at that frame (latency
+    // included); empty for one pass. MIDI: each note's `pass`; pass 0 starts at startSample, the
+    // others at loopStart, and the last ends at endSample. `midiLoopTakes` is the record option
+    // (setRecordOptions) when the MIDI take ended: the model makes each pass a take.
+    uint32_t passes = 1;
+    int64_t loopStart = 0;
+    int64_t loopEnd = 0;
+    PassStartVector passStarts;
+    bool midiLoopTakes = false;
 };
 
 struct EngineEventPOD {
@@ -597,6 +614,11 @@ public:
     // Disabling keeps the range (or stores [in, out) for later when in < out). An enabled request
     // with in < 0 or in >= out is ignored, leaving punch as it was.
     void setPunch(bool enabled, Tick in, Tick out);
+    // REC-034 (T-080, Contract delta in 08): record options. Not persisted and not in undo (the
+    // model keeps no copy). `midiLoopTakes`: a MIDI loop recording reports its passes for the
+    // model to make takes of (the event's `midiLoopTakes`); off, it merges into one clip (the
+    // default). Takes effect for takes that end after the call; transport() reads it back.
+    void setRecordOptions(bool midiLoopTakes);
 
     // MARK: Input monitoring (09, T-054; accepted (autobuild, see docs/autobuild/DECISIONS.md "T-054 contract"))
     //

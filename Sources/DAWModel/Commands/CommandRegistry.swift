@@ -74,6 +74,12 @@ public enum CommandRegistry {
         RemoveDevice.self,
         RestoreDevice.self,
         MoveDevice.self,
+        // T-080: take folders and comping (MODEL-005, REC-030..033)
+        CreateTakeFolder.self,
+        RemoveTakeFolder.self,
+        RestoreTakeFolder.self,
+        SetCompSelection.self,
+        RestoreComp.self,
     ]
 
     private static let table = Mutex<[String: any Command.Type]>(

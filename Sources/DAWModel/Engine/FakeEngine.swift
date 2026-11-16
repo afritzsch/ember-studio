@@ -38,6 +38,8 @@ public final class FakeEngine: EngineProtocol {
         case injectMidi(atSample: Int64, relativeToNow: Bool, status: UInt8, data1: UInt8, data2: UInt8)
         /// T-054 (DW-067 extension).
         case setMonitorInput(Bool)
+        /// T-080 (REC-034).
+        case setRecordOptions(midiLoopTakes: Bool)
     }
 
     private struct State {
@@ -292,6 +294,14 @@ public final class FakeEngine: EngineProtocol {
     public var recordingDirectory: String { state.withLock { $0.recordingDirectory } }
 
     /// T-052 (REC-005): like the facade, an enabled empty range is ignored.
+    /// T-080 (REC-034): recorded, and read back by `transport()`.
+    public func setRecordOptions(midiLoopTakes: Bool) {
+        state.withLock { s in
+            s.calls.append(.setRecordOptions(midiLoopTakes: midiLoopTakes))
+            s.transport.midiLoopTakes = midiLoopTakes
+        }
+    }
+
     public func setPunch(enabled: Bool, start: Tick, end: Tick) {
         state.withLock { s in
             s.calls.append(.setPunch(enabled: enabled, start: start, end: end))

@@ -64,6 +64,7 @@ struct RecordedMidiNote {
     int64_t start = 0;
     int64_t end = 0;
     uint8_t pitch = 0, velocity = 0, channel = 0;
+    int32_t pass = 0;  // REC-034 (T-080): the loop pass its note-on was heard in (0 without a wrap)
 };
 
 // REC-012: what finalize() reports for one armed track.
@@ -74,6 +75,12 @@ struct FinalizedMidiTake {
     double sampleRate = 0;
     uint64_t droppedEvents = 0;  // the record buffer was full
     std::vector<RecordedMidiNote> notes;
+    // REC-034 (T-080): the loop passes the take spans (1 without a wrap). Pass 0 starts at
+    // startSample, every later one at loopStart (timeline samples, as heard), and the last one
+    // ends at endSample. loopStart/loopEnd are 0 without a wrap.
+    uint32_t passes = 1;
+    int64_t loopStart = 0;
+    int64_t loopEnd = 0;
 };
 
 class MidiInputRouter final : public LiveMidiInput {
@@ -262,6 +269,7 @@ private:
     int64_t recStartHeard_ = 0;
     int64_t recEndHeard_ = 0;
     int32_t recLastPass_ = 0;
+    int64_t recLoopStart_ = 0;  // REC-034 (T-080)
     int64_t recLoopEnd_ = 0;
     int32_t pass_ = 0;
     int64_t prevEnd_ = 0;
