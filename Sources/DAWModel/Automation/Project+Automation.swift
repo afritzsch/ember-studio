@@ -183,3 +183,25 @@ extension ParamTarget {
         return nil
     }
 }
+
+extension Project {
+    /// DW-236 (T-075): a command that would create a lane refuses a built-in device param whose
+    /// ParamInfo row isn't `automatable` (`ParamCatalog.builtin`; the engine would leave the lane
+    /// out). Existing lanes and `validate()` stay lenient, so older files still open.
+    func checkLaneCreatable(_ target: ParamTarget, catalog: ParamCatalog = .builtin) throws(DAWError) {
+        guard case .device(let slotID, let index) = target, let slot = findDeviceSlot(slotID),
+              case .builtin(let kind) = slot.kind, !catalog.isAutomatable(kind, index)
+        else { return }
+        let name = catalog.info(kind, index)?.name ?? "param \(index)"
+        throw .invalidArgument("\(kind.rawValue) \(name) can't be automated")
+    }
+
+    /// The device slot `id` wherever it sits (instrument or insert), nil if there is none.
+    func findDeviceSlot(_ id: NodeIDValue) -> DeviceSlot? {
+        var found: DeviceSlot?
+        forEachDeviceSlot { slot, _ in
+            if found == nil, slot.id == id { found = slot }
+        }
+        return found
+    }
+}

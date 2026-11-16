@@ -63,6 +63,8 @@ public final class FakeEngine: EngineProtocol {
         var midiInputs: [MidiInputInfo] = []
         var exportSpecs: [ExportSpec] = []  // T-082
         var failNextRender: DAWError?  // T-082
+        var suspendedLanes: Set<ModelID> = []  // T-075 (AUTO-006)
+        var suspensionLog: [(lane: ModelID, suspended: Bool)] = []  // T-075
     }
 
     private let state = Mutex(State())
@@ -436,4 +438,24 @@ public final class FakeEngine: EngineProtocol {
             post(.finished, done: total)
         }
     }
+}
+
+// MARK: T-075 (AUTO-006)
+
+extension FakeEngine {
+    /// Records the call; the lane's slot is then left to `setParam` (nothing here plays lanes).
+    public func setAutomationSuspended(laneID: ModelID, _ suspended: Bool) {
+        state.withLock { s in
+            s.suspensionLog.append((laneID, suspended))
+            if suspended { s.suspendedLanes.insert(laneID) } else { s.suspendedLanes.remove(laneID) }
+        }
+    }
+
+    /// The lanes suspended now.
+    public var suspendedLanes: Set<ModelID> { state.withLock { $0.suspendedLanes } }
+    /// Every `setAutomationSuspended` call, oldest first.
+    public var suspensionLog: [(lane: ModelID, suspended: Bool)] { state.withLock { $0.suspensionLog } }
+
+    /// Test seam: moves the fake transport's playhead without a `locate` call (as playback does).
+    public func setPlayhead(_ tick: Tick) { state.withLock { $0.transport.tick = tick } }
 }

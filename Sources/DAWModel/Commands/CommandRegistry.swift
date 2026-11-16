@@ -74,6 +74,8 @@ public enum CommandRegistry {
         RemoveDevice.self,
         RestoreDevice.self,
         MoveDevice.self,
+        // T-075: automation recording (AUTO-006, 07/11 "Contract delta (T-075)")
+        RecordAutomation.self,
     ]
 
     private static let table = Mutex<[String: any Command.Type]>(
