@@ -188,6 +188,7 @@ private:
     // several passes knows where it began.
     SamplePos prevEnd_ = 0;
     bool hasPrevEnd_ = false;
+    bool prevEndedOnLoopEnd_ = false;  // ...exactly on the loop end (see captureBlock)
 
     // Control side.
     std::map<NodeID, uint32_t> armed_;  // track → input pair

@@ -371,9 +371,12 @@ void Recorder::capture(Session& session, const AudioBufferView& input, uint32_t 
 }
 
 void Recorder::captureBlock(const Transport& transport, const AudioBufferView& input, uint32_t numFrames) DAW_RT {
-    // The transport didn't advance (no graph published): this block was laid out already.
+    // The transport didn't advance (no graph published, or an oversize block): this block was
+    // laid out already. DW-243: a block of whole passes of a short loop that ends on the loop end
+    // leaves the position where it was, too; after a block that ended there, a block counts as new
+    // (a stale one then would be recorded twice; Transport has no block counter to tell).
     const SamplePos pos = transport.samplePos();
-    const bool advanced = !hasLastPos_ || pos != lastPos_;
+    const bool advanced = !hasLastPos_ || pos != lastPos_ || prevEndedOnLoopEnd_;
     const bool hadLastPos = hasLastPos_;
     const SamplePos prevPos = lastPos_;
     lastPos_ = pos;
@@ -389,6 +392,8 @@ void Recorder::captureBlock(const Transport& transport, const AudioBufferView& i
         const TransportSegment& last = block.seg[std::min<uint8_t>(block.numSegments, 2) - 1];
         prevEnd_ = last.startSample + SamplePos{last.numFrames};
     }
+    prevEndedOnLoopEnd_ = hasPrevEnd_ && block.tempo != nullptr && transport.loopEnabled() &&
+                          prevEnd_ == block.tempo->tickToSample(transport.loopEnd());
     if (numFrames == 0 || !block.playing || !block.recording || block.numSegments == 0 || block.tempo == nullptr)
         return;
 
@@ -418,36 +423,49 @@ void Recorder::captureBlock(const Transport& transport, const AudioBufferView& i
     const SamplePos loopLength = loopEnd - loopStart;
 
     // DW-243: block() is the block's last pass (in the block's frames). The frames before it were
-    // passes of a loop shorter than the block; with the loop on nothing is punched, so they are
-    // all captured, and their wraps repeat every loop length back from the last pass's start (a
-    // wrap). The first wrap is where the previous block left off, if that fits; else the block
-    // is taken to begin inside the loop.
+    // earlier passes (a loop shorter than the block, or the MIX-023 look-ahead's limit); with the
+    // loop on nothing is punched, so they are all captured. Playback is continuous inside a block,
+    // so their positions run up to the last pass's start position q, wrapping every loop length.
+    // They begin where the previous block left off when that leads to q; else the block is taken
+    // to have run inside the loop all along (e.g. after a tempo edit moved the samples).
     const uint32_t lastPass = std::min(block.seg[0].frameOffset, numFrames);
     if (lastPass > 0) {
-        SamplePos first = block.seg[0].startSample - SamplePos{lastPass};  // no loop: can't happen
-        SamplePos firstWrap = SamplePos{lastPass};                          // none before the last pass
+        const SamplePos frames = SamplePos{lastPass};
+        const SamplePos q = block.seg[0].startSample;
+        SamplePos first = q - frames;  // no wrap before the last pass
+        SamplePos firstWrap = frames;  // the first wrap frame before it (none: frames)
         if (loopOn && loopLength > 0) {
+            // Where frame `frames` lands from a start at `from` (`wrapAt0`: frame 0 is a wrap).
+            auto land = [&](SamplePos from, bool wrapAt0, SamplePos& wrap) {
+                if (!wrapAt0 && from >= loopEnd) {
+                    wrap = frames;
+                    return from + frames;
+                }
+                wrap = wrapAt0 ? 0 : loopEnd - from;
+                return wrap > frames ? from + frames : loopStart + (frames - wrap) % loopLength;
+            };
             bool fits = false;
-            if (hadPrevEnd && prevEnd == loopEnd) {  // the block before ended on the loop end
-                first = loopStart;
-                firstWrap = 0;
-                fits = lastPass % loopLength == 0;
-            } else if (const SamplePos from = hadPrevEnd ? prevEnd : prevPos; (hadPrevEnd || hadLastPos) && from < loopEnd) {
-                first = from;
-                firstWrap = loopEnd - from;
-                fits = firstWrap <= SamplePos{lastPass} && (SamplePos{lastPass} - firstWrap) % loopLength == 0;
+            if (hadPrevEnd || hadLastPos) {
+                const bool wrapAt0 = hadPrevEnd && prevEnd == loopEnd;  // the block before ended on the loop end
+                const SamplePos from = wrapAt0 ? loopStart : hadPrevEnd ? prevEnd : prevPos;
+                SamplePos wrap = 0;
+                if (land(from, wrapAt0, wrap) == q) {
+                    fits = true;
+                    first = from;
+                    firstWrap = wrap;
+                }
             }
-            if (!fits) {
-                const SamplePos rest = SamplePos{lastPass} % loopLength;
-                first = rest > 0 ? loopEnd - rest : loopStart;
-                firstWrap = rest > 0 ? rest : loopLength;
+            if (!fits && q >= loopStart && q - loopStart <= frames) {
+                firstWrap = (frames - (q - loopStart)) % loopLength;
+                first = firstWrap > 0 ? loopEnd - firstWrap : loopStart;
             }
         }
         const int64_t base = session->rtFrames;
         capture(*session, input, 0, lastPass, first - latency, latency, dropped_);
-        // CONV-RT-04: at most lastPass / loopLength + 1 wraps.
-        for (SamplePos w = firstWrap; loopLength > 0 && w < SamplePos{lastPass}; w += loopLength)
-            if (base + w > 0) logWrap(*session, base + w, loopStart, loopEnd);  // frame 0 of a take isn't one
+        // CONV-RT-04: at most lastPass / loopLength + 1 wraps. A wrap at the last pass's own
+        // start is its segment's (below); frame 0 of a take starts its first pass.
+        for (SamplePos w = firstWrap; loopLength > 0 && w < frames; w += loopLength)
+            if (base + w > 0) logWrap(*session, base + w, loopStart, loopEnd);
     }
 
     // CONV-RT-04: two segments at most, takes ≤ kMaxTracks.
