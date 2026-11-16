@@ -527,6 +527,12 @@ public:
     // ENG-021/023: writes the slot only; nothing is rebuilt. Out-of-range IDs are ignored.
     void setParam(ParamID id, float value);
     float getParam(ParamID id) const;
+    // AUTO-006 (T-075, 08 "Contract delta (T-075)"): suspends or resumes the automation lane
+    // `laneID` (every engine lane with that ID, e.g. a strip mute lane and its sends' mutes). A
+    // suspended lane neither plays nor writes while stopped, so setParam on its slot stands while
+    // the user records a gesture. Lock-free for the audio thread, no graph rebuild; survives graph
+    // swaps. Non-RT, any thread. False if 64 lanes are suspended already (the lane keeps playing).
+    bool setAutomationSuspended(uint64_t laneID, bool suspended);
 
     // MARK: Transport (TIME-004/009)
 

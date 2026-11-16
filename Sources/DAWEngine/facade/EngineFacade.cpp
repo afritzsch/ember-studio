@@ -1223,6 +1223,15 @@ float EngineFacade::getParam(ParamID id) const {
     return id < params.capacity() ? params.get(id) : 0.0f;
 }
 
+bool EngineFacade::setAutomationSuspended(uint64_t laneID, bool suspended) {
+    AutomationSuspension& table = impl_->engine.automationSuspension();
+    if (!suspended) {
+        table.resume(laneID);
+        return true;
+    }
+    return table.suspend(laneID);
+}
+
 // MARK: Transport
 
 void EngineFacade::play() {

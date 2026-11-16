@@ -220,7 +220,7 @@ void Engine::renderGraph(const RenderGraph& graph, RenderTarget& target, uint32_
         // not the MIX-023 look-ahead: automation isn't latency compensated (AUTO-010, MIX-025).
         // A pass has at most one wrap, so the after-wrap side channel holds that wrap's value.
         params_.beginBlock();
-        if (AutomationSet* automation = graph.automation()) automation->apply(block, params_);
+        if (AutomationSet* automation = graph.automation()) automation->apply(block, params_, &automationSuspension_);
 
         if (done == 0) {
             if (!block.playing || located) runPrerolled_ = false;
