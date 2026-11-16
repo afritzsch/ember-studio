@@ -28,7 +28,12 @@
 // and calls setComponentState and setState on the controller. Both run off the RT thread.
 //
 // T-063 seam: editController() hands out the controller for createPluginView (IPlugView, PLUG-017).
-// The plugin → model direction of PLUG-015 (performEdit etc., DW-204) is a safe no-op here.
+//
+// DW-204 (T-063), the plugin → model direction of PLUG-015: the controller's
+// beginEdit/performEdit/endEdit go to the PluginEditQueue setEditSink names (as edits of the
+// parameter's index). The model's answer comes back as a slot push; syncController (params(true),
+// state(), syncEditor) doesn't write it into the controller while the plugin's editor is ahead of
+// it: during a gesture, and until the model's value matches the plugin's newest one (at most 1 s).
 
 #include <atomic>
 #include <cstdint>
@@ -40,6 +45,7 @@
 #include "core/Realtime.h"
 #include "core/Result.h"
 #include "graph/LatencyReporter.h"
+#include "plugins/PluginEditQueue.h"
 #include "plugins/VST3PluginConfig.h"
 #include "time/TransportBlock.h"
 
@@ -119,6 +125,13 @@ public:
     // T-063 seam (non-RT): the controller, for IEditController::createView. Null if the plugin has
     // none.
     Steinberg::Vst::IEditController* editController() const;
+
+    // DW-204 (T-063), non-RT: where the plugin's own edits go, as edits of `slot` (null: dropped).
+    // The host sets it whenever it gives the instance to a slot.
+    void setEditSink(std::shared_ptr<PluginEditQueue> queue, NodeID slot);
+    // PLUG-017 / DW-204 (T-063), main thread: writes the model's current values (the last slot
+    // pushes) into the controller, so an open editor shows undo, automation and other controls.
+    void syncEditor();
 
     struct Impl;  // SDK side (VST3Instance.cpp)
 

@@ -17,8 +17,11 @@
 #include <cmath>
 #include <atomic>
 #include <cstring>
+#include <limits>
 #include <mutex>
+#include <unordered_map>
 
+#include "plugins/PluginEditQueue.h"
 #include "time/TempoMap.h"
 
 // The host blocks below are nonblocking (the SDK's block types say so, and their bodies only copy
@@ -136,6 +139,133 @@ struct AUInstance::LatencyState {
 
 namespace daw {
 
+// DW-204 (T-063): the plugin's own parameter edits (its editor's Touch/Value/Release automation
+// events) and what keeps the model's echo from fighting them. Shared with the parameter observer
+// block and the hold timers, which may outlive the instance.
+//
+// Echoes. Every value the host pushes (scheduleParam, audio thread) lands in `recent`; the V2
+// bridge (DW-214) reports it back to observers a little later as a Value event outside a gesture,
+// which matches one of them and is ignored. A Value outside a gesture that matches no recent push
+// is the plugin's own (a menu, a preset) and goes to the model ungestured.
+//
+// Holds. While a gesture is open the node doesn't push the parameter (`gesture`): the model is a
+// poll behind the knob, and pushing its older value would make the knob jump back. After a release
+// (or an ungestured edit) `hold` keeps the plugin's value until the model's value matches it (that
+// push is skipped: the plugin has it) or kHoldSeconds pass.
+struct AUInstance::EditState {
+    static constexpr uint32_t kRecent = 16;
+    static constexpr double kHoldSeconds = 0.3;
+
+    std::mutex mutex;  // queue, slot, open, lastValue (observer side; never the audio thread)
+    std::shared_ptr<PluginEditQueue> queue;
+    NodeID slot = 0;
+    std::unordered_map<uint64_t, uint32_t> indexOf;  // address → index
+    std::vector<uint32_t> open;                       // Touch nesting per index
+    std::vector<float> lastValue;
+    std::vector<float> tolerance;                     // per index: what counts as the same value
+
+    // Shared with the audio thread (atomics only, sized once).
+    std::size_t count = 0;
+    std::unique_ptr<std::atomic<bool>[]> gesture;
+    std::unique_ptr<std::atomic<float>[]> hold;
+    std::unique_ptr<std::atomic<float>[]> recent;     // kRecent per index
+    std::unique_ptr<std::atomic<uint32_t>[]> recentPos;
+
+    void size(const std::vector<AUParamInfo>& params) {
+        count = params.size();
+        open.assign(count, 0);
+        lastValue.assign(count, std::numeric_limits<float>::quiet_NaN());
+        tolerance.resize(count);
+        gesture = std::make_unique<std::atomic<bool>[]>(count);
+        hold = std::make_unique<std::atomic<float>[]>(count);
+        recent = std::make_unique<std::atomic<float>[]>(count * kRecent);
+        recentPos = std::make_unique<std::atomic<uint32_t>[]>(count);
+        for (std::size_t i = 0; i < count; ++i) {
+            indexOf.emplace(params[i].address, static_cast<uint32_t>(i));
+            tolerance[i] = 1e-5f * std::fabs(params[i].max - params[i].min) + 1e-7f;
+            gesture[i].store(false, std::memory_order_relaxed);
+            hold[i].store(std::numeric_limits<float>::quiet_NaN(), std::memory_order_relaxed);
+            recentPos[i].store(0, std::memory_order_relaxed);
+        }
+        for (std::size_t i = 0; i < count * kRecent; ++i)
+            recent[i].store(std::numeric_limits<float>::quiet_NaN(), std::memory_order_relaxed);
+    }
+
+    // RT (scheduleParam).
+    void pushed(uint32_t index, float value) DAW_RT {
+        if (index >= count) return;
+        const uint32_t at = recentPos[index].fetch_add(1, std::memory_order_relaxed) % kRecent;
+        recent[std::size_t{index} * kRecent + at].store(value, std::memory_order_relaxed);
+    }
+
+    bool isEcho(uint32_t index, float value) const {
+        for (uint32_t k = 0; k < kRecent; ++k) {
+            const float r = recent[std::size_t{index} * kRecent + k].load(std::memory_order_relaxed);
+            if (std::fabs(r - value) <= tolerance[index]) return true;
+        }
+        return false;
+    }
+
+    // Caller holds `mutex`.
+    void push(uint32_t index, float value, PluginEditKind phase) {
+        if (queue) queue->push(PluginParamEdit{slot, index, value, phase});
+    }
+
+    // The plugin holds `value` until the model echoes it or kHoldSeconds pass.
+    static void holdValue(const std::shared_ptr<EditState>& self, uint32_t index, float value) {
+        self->hold[index].store(value, std::memory_order_release);
+        std::weak_ptr<EditState> weak = self;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, static_cast<int64_t>(kHoldSeconds * NSEC_PER_SEC)),
+                       dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+                           auto state = weak.lock();
+                           if (!state) return;
+                           float expected = value;
+                           state->hold[index].compare_exchange_strong(expected, std::numeric_limits<float>::quiet_NaN(),
+                                                                      std::memory_order_acq_rel);
+                       });
+    }
+
+    // From the parameter tree's automation observer (an internal queue; non-RT).
+    static void observe(const std::shared_ptr<EditState>& self, uint64_t address, float value,
+                        AUParameterAutomationEventType type) {
+        std::lock_guard lock(self->mutex);
+        const auto it = self->indexOf.find(address);
+        if (it == self->indexOf.end()) return;
+        const uint32_t i = it->second;
+        switch (type) {
+        case AUParameterAutomationEventTypeTouch:
+            if (self->open[i]++ == 0) {
+                self->gesture[i].store(true, std::memory_order_release);
+                self->push(i, value, PluginEditKind::begin);
+            }
+            break;
+        case AUParameterAutomationEventTypeRelease:
+            if (self->open[i] == 0 || --self->open[i] > 0) break;
+            if (!std::isnan(self->lastValue[i])) holdValue(self, i, self->lastValue[i]);
+            self->gesture[i].store(false, std::memory_order_release);
+            self->push(i, value, PluginEditKind::end);
+            break;
+        default:  // Value
+            if (self->open[i] == 0 && self->isEcho(i, value)) break;
+            self->lastValue[i] = value;
+            if (self->open[i] == 0) holdValue(self, i, value);
+            self->push(i, value, PluginEditKind::value);
+            break;
+        }
+    }
+
+    // RT (AUPluginNode): whether the host may push `value` to parameter `index` now.
+    AUInstance::PushDecision decide(uint32_t index, float value) DAW_RT {
+        if (index >= count) return PushDecision::push;
+        if (gesture[index].load(std::memory_order_acquire)) return PushDecision::defer;
+        float held = hold[index].load(std::memory_order_acquire);
+        if (held != held) return PushDecision::push;  // NaN: nothing held
+        if (std::fabs(held - value) > tolerance[index]) return PushDecision::defer;
+        hold[index].compare_exchange_strong(held, std::numeric_limits<float>::quiet_NaN(), std::memory_order_acq_rel);
+        return PushDecision::skip;  // the model caught up with the plugin, which has the value
+    }
+};
+
 // What the host transport blocks report (written by setTransport on the audio thread, read by the
 // AU from the same thread during render).
 struct HostTransport {
@@ -171,10 +301,12 @@ struct AUInstance::Impl {
     bool hadTransport = false;
     Tick lastEndTick = 0;
     std::vector<uint64_t> addresses;               // params_[i].address
+    AUParameterObserverToken editToken = nullptr;  // DW-204: on unit.parameterTree
 
     ~Impl() {
         if (unit != nil) {
             if (observer != nil) [unit removeObserver:observer forKeyPath:@"latency"];
+            if (editToken != nullptr) [unit.parameterTree removeParameterObserver:editToken];  // DW-204
             std::lock_guard lifecycle(gLifecycleMutex);  // DW-214
             if (unit.renderResourcesAllocated) [unit deallocateRenderResources];
             // The host blocks point at this Impl, which is going away (the unit may outlive it).
@@ -226,7 +358,8 @@ struct AUInstance::Impl {
 };
 
 AUInstance::AUInstance(const AUComponentID& component)
-    : component_(component), impl_(new Impl), latency_(std::make_shared<LatencyState>()) {}
+    : component_(component), impl_(new Impl), latency_(std::make_shared<LatencyState>()),
+      edits_(std::make_shared<EditState>()) {}
 
 AUInstance::~AUInstance() {
     @autoreleasepool {
@@ -300,6 +433,18 @@ Result<std::shared_ptr<AUInstance>> AUInstance::instantiate(const AUComponentID&
             impl.addresses.push_back(p.address);
         }
 
+        // DW-204 (T-063): the plugin's own edits (its editor's gestures), from now on.
+        instance->edits_->size(instance->params_);
+        {
+            std::weak_ptr<EditState> weak = instance->edits_;
+            impl.editToken = [unit.parameterTree tokenByAddingParameterAutomationObserver:^(
+                                                     NSInteger count, const AUParameterAutomationEvent* events) {
+                auto state = weak.lock();
+                if (!state) return;
+                for (NSInteger e = 0; e < count; ++e)
+                    EditState::observe(state, events[e].address, events[e].value, events[e].eventType);
+            }];
+        }
         // PLUG-013: observe latency changes from now on.
         impl.observer = [[DAWAULatencyObserver alloc] init];
         impl.observer->state = new std::shared_ptr<LatencyState>(instance->latency_);
@@ -339,6 +484,16 @@ double AUInstance::tailSeconds() const {
 }
 
 uint32_t AUInstance::pendingV2Releases() { return gPendingV2Releases.load(std::memory_order_relaxed); }
+
+// DW-204 (T-063).
+void AUInstance::setEditSink(std::shared_ptr<PluginEditQueue> queue, NodeID slot) {
+    std::lock_guard lock(edits_->mutex);
+    edits_->queue = std::move(queue);
+    edits_->slot = slot;
+}
+
+// PLUG-017 (T-063): the unit, for its view controller (main thread).
+void* AUInstance::audioUnit() const { return (__bridge void*)impl_->unit; }
 
 uint32_t AUInstance::latencySamples() const { return latency_->samples.load(std::memory_order_acquire); }
 
@@ -504,7 +659,12 @@ Result<void> AUInstance::setFullState(const std::vector<uint8_t>& state) {
 void AUInstance::scheduleParam(uint32_t index, float value, uint32_t rampFrames) DAW_RT {
     Impl& impl = *impl_;
     if (impl.paramBlock == nil || index >= impl.addresses.size()) return;
+    edits_->pushed(index, value);  // DW-204: its echo isn't a plugin edit
     impl.paramBlock(AUEventSampleTimeImmediate, rampFrames, impl.addresses[index], value);
+}
+
+AUInstance::PushDecision AUInstance::pushDecision(uint32_t index, float value) DAW_RT {
+    return edits_->decide(index, value);
 }
 
 void AUInstance::scheduleMIDI(const MidiEvent& event, uint32_t numFrames) DAW_RT {

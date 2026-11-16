@@ -6,12 +6,15 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <limits>
 #include <mutex>
+#include <unordered_map>
 
 #include "core/Realtime.h"
+#include "plugins/PluginEditQueue.h"
 #include "time/TempoMap.h"
 
 #include "pluginterfaces/base/funknownimpl.h"
@@ -64,13 +67,63 @@ public:
     }
 };
 
-// PLUG-013 / PLUG-015: the plugin's controller reports here. The plugin → model direction
-// (DW-204) is T-063: until then edits are accepted and dropped.
+// PLUG-015 second half, DW-204 (T-063): what the plugin's own editor did to its parameters. The
+// controller calls beginEdit/performEdit/endEdit on its UI thread; they go to the slot's
+// PluginEditQueue (→ pluginParamEdited events → one SetParam gesture in the model). The model's
+// value comes back as a slot push; `editValue` keeps syncController from writing an older model
+// value into the controller while the plugin is ahead of the model (a drag between polls), which
+// would make the knob jump back.
+struct EditState {
+    std::mutex mutex;
+    std::shared_ptr<PluginEditQueue> queue;  // null: edits are dropped (no facade, tests)
+    NodeID slot = 0;
+    std::unordered_map<ParamID, uint32_t> indexOf;
+    std::vector<uint32_t> open;    // per index: beginEdit nesting
+    std::vector<float> editValue;  // the plugin's newest value not yet seen back from the model (NaN)
+    std::vector<std::chrono::steady_clock::time_point> editTime;
+
+    // How long a plugin-made value waits for the model's echo before the model wins again.
+    static constexpr auto kEchoWait = std::chrono::seconds(1);
+
+    void push(uint32_t index, float value, PluginEditKind phase) {
+        if (queue) queue->push(PluginParamEdit{slot, index, value, phase});
+    }
+};
+
+// PLUG-013 / PLUG-015: the plugin's controller reports here.
 class ComponentHandler final : public U::Implements<U::Directly<IComponentHandler>> {
 public:
-    tresult PLUGIN_API beginEdit(ParamID) override { return kResultOk; }
-    tresult PLUGIN_API performEdit(ParamID, ParamValue) override { return kResultOk; }
-    tresult PLUGIN_API endEdit(ParamID) override { return kResultOk; }
+    explicit ComponentHandler(std::shared_ptr<EditState> edits) : edits_(std::move(edits)) {}
+
+    // DW-204: a gesture on one parameter. Nested begins of one parameter count once.
+    tresult PLUGIN_API beginEdit(ParamID id) override {
+        std::lock_guard lock(edits_->mutex);
+        const auto it = edits_->indexOf.find(id);
+        if (it == edits_->indexOf.end()) return kInvalidArgument;
+        if (edits_->open[it->second]++ == 0)
+            edits_->push(it->second, std::numeric_limits<float>::quiet_NaN(), PluginEditKind::begin);
+        return kResultOk;
+    }
+    // DW-204: inside a gesture a step of it; outside one an ungestured edit (the model groups those).
+    tresult PLUGIN_API performEdit(ParamID id, ParamValue normalized) override {
+        std::lock_guard lock(edits_->mutex);
+        const auto it = edits_->indexOf.find(id);
+        if (it == edits_->indexOf.end()) return kInvalidArgument;
+        const float value = static_cast<float>(std::clamp(normalized, 0.0, 1.0));
+        edits_->editValue[it->second] = value;
+        edits_->editTime[it->second] = std::chrono::steady_clock::now();
+        edits_->push(it->second, value, PluginEditKind::value);
+        return kResultOk;
+    }
+    tresult PLUGIN_API endEdit(ParamID id) override {
+        std::lock_guard lock(edits_->mutex);
+        const auto it = edits_->indexOf.find(id);
+        if (it == edits_->indexOf.end()) return kInvalidArgument;
+        uint32_t& open = edits_->open[it->second];
+        if (open == 0) return kResultFalse;  // an end without a begin
+        if (--open == 0) edits_->push(it->second, std::numeric_limits<float>::quiet_NaN(), PluginEditKind::end);
+        return kResultOk;
+    }
     tresult PLUGIN_API restartComponent(int32 flags) override {
         // Any thread, the audio thread included: only an atomic (the timer does the rest).
         if (flags & kLatencyChanged) latencyDirty.store(true, std::memory_order_release);
@@ -78,6 +131,9 @@ public:
     }
 
     std::atomic<bool> latencyDirty{false};
+
+private:
+    std::shared_ptr<EditState> edits_;
 };
 
 // The owner (Impl) keeps these alive, so reference counting is a no-op and nothing allocates.
@@ -227,6 +283,7 @@ struct VST3Instance::Impl {
     bool separateController = false;
     IPtr<IConnectionPoint> componentPoint, controllerPoint;
     IPtr<ComponentHandler> handler;
+    std::shared_ptr<EditState> edits = std::make_shared<EditState>();  // DW-204
 
     mutable std::mutex mutex;              // non-RT calls
     bool processing = false;
@@ -293,11 +350,31 @@ struct VST3Instance::Impl {
     // Non-RT, caller holds `mutex`. Slot pushes reach the processor through process(); a host keeps
     // the controller in step on a non-RT thread. Without this a controller whose getState or
     // params read its own (edit-side) value would be stale.
+    //
+    // DW-204 (T-063): a parameter the plugin's editor is changing (a gesture is open, or its newest
+    // value hasn't come back from the model yet, for up to EditState::kEchoWait) keeps the
+    // controller's value, so the editor's knob never jumps back to an older model value.
     void syncController() {
         if (!controller) return;
+        const auto now = std::chrono::steady_clock::now();
         for (std::size_t i = 0; i < paramIDs.size(); ++i) {
             const float value = pushed[i].load(std::memory_order_relaxed);
             if (std::isnan(value) || value == syncedToController[i]) continue;
+            {
+                std::lock_guard lock(edits->mutex);
+                if (edits->open[i] > 0) continue;
+                const float edited = edits->editValue[i];
+                if (!std::isnan(edited)) {
+                    if (std::fabs(value - edited) <= 1e-6f) {
+                        // The model caught up: the controller already holds it.
+                        edits->editValue[i] = std::numeric_limits<float>::quiet_NaN();
+                        syncedToController[i] = value;
+                        continue;
+                    }
+                    if (now - edits->editTime[i] < EditState::kEchoWait) continue;
+                    edits->editValue[i] = std::numeric_limits<float>::quiet_NaN();
+                }
+            }
             controller->setParamNormalized(paramIDs[i], value);
             syncedToController[i] = value;
         }
@@ -413,7 +490,7 @@ Result<std::shared_ptr<VST3Instance>> VST3Instance::instantiate(const VST3Plugin
         }
     }
 
-    impl->handler = owned(new ComponentHandler());
+    impl->handler = owned(new ComponentHandler(impl->edits));
     if (impl->controller) impl->controller->setComponentHandler(impl->handler);
 
     if (impl->separateController) {
@@ -467,6 +544,14 @@ Result<std::shared_ptr<VST3Instance>> VST3Instance::instantiate(const VST3Plugin
         }
     }
     const std::size_t params = instance->params_.size();
+    {
+        // DW-204: performEdit names a ParamID; the model knows the parameter by its index.
+        std::lock_guard lock(impl->edits->mutex);
+        for (std::size_t i = 0; i < params; ++i) impl->edits->indexOf.emplace(impl->paramIDs[i], static_cast<uint32_t>(i));
+        impl->edits->open.assign(params, 0);
+        impl->edits->editValue.assign(params, std::numeric_limits<float>::quiet_NaN());
+        impl->edits->editTime.assign(params, {});
+    }
     impl->pushed = std::make_unique<std::atomic<float>[]>(params);
     impl->syncedToController.assign(params, std::numeric_limits<float>::quiet_NaN());
     for (std::size_t i = 0; i < params; ++i)
@@ -483,6 +568,19 @@ double VST3Instance::tailSeconds() const {
     return rate_ > 0 ? impl_->tailSamples / rate_ : 0.0;
 }
 Steinberg::Vst::IEditController* VST3Instance::editController() const { return impl_->controller; }
+
+// DW-204 (T-063).
+void VST3Instance::setEditSink(std::shared_ptr<PluginEditQueue> queue, NodeID slot) {
+    std::lock_guard lock(impl_->edits->mutex);
+    impl_->edits->queue = std::move(queue);
+    impl_->edits->slot = slot;
+}
+
+// PLUG-017 / DW-204 (T-063): model values (undo, automation, another control) reach an open editor.
+void VST3Instance::syncEditor() {
+    std::lock_guard lock(impl_->mutex);
+    impl_->syncController();
+}
 
 void VST3Instance::setLatencyReporter(LatencyReporter reporter) {
     std::lock_guard lock(impl_->reporterMutex);

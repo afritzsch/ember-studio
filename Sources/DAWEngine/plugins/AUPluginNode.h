@@ -91,6 +91,7 @@ private:
     uint32_t tracked_ = 0;
     std::vector<uint32_t> lastGeneration_;
     std::vector<float> lastPushed_;  // NaN: nothing pushed yet
+    std::vector<uint8_t> retry_;     // DW-204: deferred by AUInstance::pushDecision, try again next block
     std::vector<float> minValue_, maxValue_;
     std::vector<uint8_t> canRamp_;
     bool primed_ = false;

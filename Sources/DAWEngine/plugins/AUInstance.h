@@ -47,6 +47,7 @@
 #include "core/Result.h"
 #include "graph/LatencyReporter.h"
 #include "plugins/AUIdentifier.h"
+#include "plugins/PluginEditQueue.h"
 #include "time/TransportBlock.h"
 
 namespace daw {
@@ -122,8 +123,23 @@ public:
     // DW-214: bridged units whose deferred release hasn't happened yet (process-wide, any thread).
     static uint32_t pendingV2Releases();
 
+    // DW-204 (T-063), the plugin → model half of PLUG-015. The parameter tree's automation events
+    // (an editor's Touch/Value/Release) go to `queue` as edits of `slot` (null: dropped); the host
+    // sets it whenever it gives the instance to a slot. Echoes of the host's own pushes are not
+    // edits (see EditState in AUInstance.mm).
+    void setEditSink(std::shared_ptr<PluginEditQueue> queue, NodeID slot);
+    // RT, for the node before scheduleParam: `push` it; `skip` it (the plugin already has the value:
+    // the model caught up with an edit made in the plugin); or `defer` it to a later block (a
+    // gesture in the plugin's editor is open, or the model hasn't caught up with its last edit yet).
+    enum class PushDecision : uint8_t { push, skip, defer };
+    PushDecision pushDecision(uint32_t index, float value) DAW_RT;
+
+    // PLUG-017 (T-063): the AUAudioUnit (unretained), for its view controller. Main thread.
+    void* audioUnit() const;
+
     // Shared with the KVO observer and its dispatched reports, which may outlive the instance.
     struct LatencyState;
+    struct EditState;  // DW-204
     struct Impl;  // Objective-C side (AUInstance.mm)
 
 private:
@@ -132,6 +148,7 @@ private:
     AUComponentID component_;
     Impl* impl_ = nullptr;
     std::shared_ptr<LatencyState> latency_;
+    std::shared_ptr<EditState> edits_;  // DW-204
     std::vector<AUParamInfo> params_;
     std::atomic<bool> prepared_{false};
     double rate_ = 0;
