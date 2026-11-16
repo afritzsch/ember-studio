@@ -99,7 +99,7 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 | T-060 | P | PluginScanner + cache + blocklist | PLUG-001..004 | T-001 | done |
 | T-061 | P | AU hosting node (FX + instrument), params, state, latency | PLUG-010, 012..016 (AU) | T-021, T-014 | done |
 | T-062 | P | VST3 hosting node + build SDK `again` test plugin | PLUG-011..016 (VST3) | T-021, T-014 | done |
-| T-063 | P+U | Plugin editor windows (AU view controller, VST3 IPlugView) | PLUG-017 | T-061, T-062, T-032 | ready |
+| T-063 | P+U | Plugin editor windows (AU view controller, VST3 IPlugView) | PLUG-017 | T-061, T-062, T-032 | wip(t-063-plugin-editors) |
 | T-064 | P | Host bypass, NaN guard, crash marker + safe-mode open | PLUG-018, 020..022 | T-061 | done |
 | T-065 | U | Device chain view (generic UI from ParamInfo), plugin manager | UI-032, UI-041 | T-063 | todo |
 
@@ -113,18 +113,18 @@ DSP effects (T-070..073) depend only on the Node API and can be **pulled forward
 | T-072 | D | Delay (tempo sync) | DSP-032, 040, 041 | T-008 | done |
 | T-073 | D | Reverb (FDN, deterministic) | DSP-033, 040, 041 | T-004, T-005 | done |
 | T-074 | E+M | Automation lanes model + AutomationPlayer + plugin param path | AUTO-001..005, 008..010 | T-030, T-061/T-062 (for AUTO-009) | done |
-| T-075 | U+M | Automation recording (touch/latch/write) + lane UI | AUTO-006, 007, UI-015 | T-074, T-033 | ready |
+| T-075 | U+M | Automation recording (touch/latch/write) + lane UI | AUTO-006, 007, UI-015 | T-074, T-033 | wip(t-075-automation-recording) |
 | T-076 | U | Mixer view + meters + routing pickers | UI-030, 031, 033 | T-022, T-032 | done |
 | T-077 | D | M7 goldens | TEST (M7 set) | T-071, T-073, T-074 | done |
 
 ### M8 — Comping, export, hardening
 | Task | Lane | Title | Requirements | Depends on | Status |
 |---|---|---|---|---|---|
-| T-080 | E+M | Loop recording takes, TakeFolder, comp model, flattening | REC-030..034 | T-052, T-035 | ready |
+| T-080 | E+M | Loop recording takes, TakeFolder, comp model, flattening | REC-030..034 | T-052, T-035 | wip(t-080-loop-takes) |
 | T-081 | U | Take folder / comp editing UI | UI-016 | T-080, T-033 | todo |
 | T-082 | U | Export dialog | UI-042 | T-009, T-032 | done |
 | T-083 | U | Crash recovery dialog | UI-043 | T-031, T-064 | ready |
-| T-084 | E | Sanitizer CI jobs, perf smoke, GitHub Actions | TEST-007, 008, BUILD-009 | T-077 | ready |
+| T-084 | E | Sanitizer CI jobs, perf smoke, GitHub Actions | TEST-007, 008, BUILD-009 | T-077 | wip(t-084-ci) |
 
 ### Follow-ups from the user review (2026-11-10, see docs/autobuild/DECISIONS.md → User review)
 | Task | Lane | Title | Requirements | Depends on | Status |

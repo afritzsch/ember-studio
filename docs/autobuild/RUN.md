@@ -122,6 +122,11 @@ Unattended phases started by `/autobuild` (see `.claude/skills/autobuild/SKILL.m
 - Lead housekeeping (user-delegated): DW-004, 008, 012, 069, 080, 116, 122, 135 applied; DW-015, 066, 153, 196, 207 decided and scheduled.
 - End: 4/4 merged, main green, week 61%, five-hour window 46%, no worker session left open. Run stopped: week ≥ 50.
 
+### Phase 9 (2026-11-16)
+- New run (week reset). Wave: T-075 automation recording + lane UI (U+M, completes M7), T-063 plugin editors (P+U, M6), T-080 loop takes/comping (E+M, M8), T-084 CI/sanitizers/perf (E). T-083 waits for phase 10. Pre-decisions in DECISIONS.md (phase 9 rows).
+- Start: week 0%, five-hour window 1%.
+- Repo check: `gh` reports `afritzsch/ember-studio` as PUBLIC (the handover said private).
+
 ## Summary for the user
 
 This run (the third) had one phase, 8 (2026-11-10 → 2026-11-11). The week went 43% → 61%. It stopped because the week passed the 50% limit during the phase. The wave was finished anyway.
