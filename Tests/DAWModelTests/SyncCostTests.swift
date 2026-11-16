@@ -110,6 +110,11 @@ struct SyncCostTests {
             DW-032: flush (bump + applyGraph)     \(String(format: "%.3f", flush)) ms
             DW-032: attach (alloc + write + apply) \(String(format: "%.3f", attach)) ms
             """)
-        #expect(paramStep < 250 && structuralStep < 500 && syncParam < 100, "an accidental blow-up, not a tuning target")
+        // DW-241 (T-084): wall-clock bounds. The strict ones hold on an idle machine; the perf job
+        // asserts them (DAW_PERF_TESTS=1). Under parallel load the default run allows 4× as much,
+        // which still catches a blow-up by an order of magnitude.
+        let slack = ProcessInfo.processInfo.environment["DAW_PERF_TESTS"] == "1" ? 1.0 : 4.0
+        #expect(paramStep < 250 * slack && structuralStep < 500 * slack && syncParam < 100 * slack,
+                "an accidental blow-up, not a tuning target")
     }
 }

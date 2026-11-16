@@ -6,6 +6,7 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <memory>
 #include <string>
 #include <thread>
@@ -500,8 +501,12 @@ CheckResult telemetryConcurrentReadersSeeConsistentValues() {
     writer.join();
 
     DAW_CHECK(torn == 0);
-    DAW_CHECK(reads > 100);
-    DAW_CHECK(writes.load() > 100);  // the two really overlapped
+    // DW-252 (T-084): how much the two threads overlap in 300 ms of wall clock depends on the
+    // scheduler, so it is asserted only in the perf job (DAW_PERF_TESTS=1). A torn read always fails.
+    if (const char* perf = std::getenv("DAW_PERF_TESTS"); perf != nullptr && std::string(perf) == "1") {
+        DAW_CHECK(reads > 100);
+        DAW_CHECK(writes.load() > 100);  // the two really overlapped
+    }
     DAW_CHECK(writerViolations == 0);
     return checks;
 }

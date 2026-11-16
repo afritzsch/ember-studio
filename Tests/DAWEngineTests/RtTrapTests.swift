@@ -70,6 +70,7 @@ struct RtTrapTests {
         (.unfairLock, 0, 0, 1),
     ] as [(Probe, UInt64, UInt64, UInt64)])
     fileprivate func countsExactly(probe: Probe, allocations: UInt64, deallocations: UInt64, locks: UInt64) {
+        if Sanitizer.hidesAllocations && allocations + deallocations > 0 { return }  // DW-054/065; locks still count
         #expect(daw.RtTrap.install())
         let counted = daw.testing.runProbeInScope(probe)
         #expect(counted.ok)
@@ -77,6 +78,7 @@ struct RtTrapTests {
     }
 
     @Test("ENG-031: std::vector growth, std::string and std::function inside RtScope are counted",
+          .disabled(if: Sanitizer.hidesAllocations, Sanitizer.allocationNote),
           arguments: [Probe.vectorGrowth, .string, .function])
     fileprivate func countsContainerAllocations(probe: Probe) {
         #expect(daw.RtTrap.install())
@@ -96,7 +98,8 @@ struct RtTrapTests {
         #expect(firstViolation() == nil)
     }
 
-    @Test("ENG-031: violations on a dedicated RT thread are counted; spawning it isn't")
+    @Test("ENG-031: violations on a dedicated RT thread are counted; spawning it isn't",
+          .disabled(if: Sanitizer.hidesAllocations, Sanitizer.allocationNote))
     func countsOnAnotherThread() {
         #expect(daw.RtTrap.install())
         let global = GlobalCounts()
@@ -106,7 +109,8 @@ struct RtTrapTests {
         #expect(GlobalCounts().since(global) == (1, 1, 0))
     }
 
-    @Test("ENG-032: the first violation's backtrace is captured and symbolized off-thread")
+    @Test("ENG-032: the first violation's backtrace is captured and symbolized off-thread",
+          .disabled(if: Sanitizer.hidesAllocations, Sanitizer.allocationNote))
     func firstViolationBacktrace() throws {
         #expect(daw.RtTrap.install())
         daw.RtTrap.resetViolations()
@@ -124,7 +128,8 @@ struct RtTrapTests {
         #expect(try #require(firstViolation()).kind == .allocation)
     }
 
-    @Test("ENG-032, DW-019: the process-wide count sees every thread; an RtScope sees only its own")
+    @Test("ENG-032, DW-019: the process-wide count sees every thread; an RtScope sees only its own",
+          .disabled(if: Sanitizer.hidesAllocations, Sanitizer.allocationNote))
     func scopeCountsAreIsolated() {
         #expect(daw.RtTrap.install())
         let global = GlobalCounts()
@@ -135,7 +140,8 @@ struct RtTrapTests {
         #expect(GlobalCounts().since(global) == (100, 100, 0))
     }
 
-    @Test("DW-019: per-thread counts only grow; resetViolations() leaves them alone")
+    @Test("DW-019: per-thread counts only grow; resetViolations() leaves them alone",
+          .disabled(if: Sanitizer.hidesAllocations, Sanitizer.allocationNote))
     func resetKeepsThreadCounts() {
         #expect(daw.RtTrap.install())
         // A synchronous test body stays on one thread, so these all read the same thread's count.
@@ -148,7 +154,8 @@ struct RtTrapTests {
         #expect(daw.RtTrap.threadViolationCount() == before + 2)
     }
 
-    @Test("ENG-032: violations don't abort by default")
+    @Test("ENG-032: violations don't abort by default",
+          .disabled(if: Sanitizer.hidesAllocations, Sanitizer.allocationNote))
     func doesNotAbortByDefault() {
         setenv("DAW_RT_TRAP_ABORT", "0", 1)
         #expect(daw.RtTrap.install())
@@ -162,7 +169,8 @@ struct RtTrapTests {
         #expect(total == (10, 10, 0))
     }
 
-    @Test("ENG-032: DAW_RT_TRAP_ABORT=1 aborts on the first violation")
+    @Test("ENG-032: DAW_RT_TRAP_ABORT=1 aborts on the first violation",
+          .disabled(if: Sanitizer.active, "DW-054/DW-065: no counted malloc to abort on; exit tests SIGABRT under TSan"))
     func abortsWhenRequested() async {
         await #expect(processExitsWith: .signal(SIGABRT)) {
             setenv("DAW_RT_TRAP_ABORT", "1", 1)
@@ -236,3 +244,18 @@ private func startAndStopDefaultOutput() {
     AudioOutputUnitStop(unit)
 }
 #endif
+
+import Foundation
+
+/// TEST-007 (T-084): the sanitizer CI jobs (`scripts/ci.sh asan|tsan`) set DAW_SANITIZER to
+/// `address` or `thread`. Both sanitizers replace malloc, so the RT trap's malloc_logger sees no
+/// allocations and the tests that count deliberate ones can't pass (DW-054, DW-065; the trap's lock
+/// hooks still count). Swift Testing exit tests always end in SIGABRT under TSan (DW-065), and
+/// wall-clock bounds don't hold in a sanitized build.
+enum Sanitizer {
+    static let name: String? = ProcessInfo.processInfo.environment["DAW_SANITIZER"]
+    static var active: Bool { name != nil }
+    /// DW-054, DW-065: allocations are invisible to the RT trap.
+    static var hidesAllocations: Bool { active }
+    static let allocationNote: Comment = "DW-054/DW-065: under ASan/TSan the RT trap sees no allocations"
+}

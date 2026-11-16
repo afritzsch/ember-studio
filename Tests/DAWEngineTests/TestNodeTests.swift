@@ -26,7 +26,7 @@ struct TestNodeTests {
 
 #if DEBUG  // the trap exists only in Debug (BUILD-005)
 extension RtTrapTests {
-    @Suite("AllocatingNode (TEST-004)")
+    @Suite("AllocatingNode (TEST-004)", .disabled(if: Sanitizer.hidesAllocations, Sanitizer.allocationNote))
     struct AllocatingNodeTests {
         @Test("TEST-004: the trap counts AllocatingNode's malloc and free in every block, not in empty ones")
         func countsEveryBlock() {
