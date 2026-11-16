@@ -148,6 +148,10 @@ let package = Package(
                 // PLUG-010 (T-061): AUAudioUnit hosting (plugins/), AVAudioFormat for bus formats.
                 .linkedFramework("AVFAudio"),
                 .linkedFramework("Foundation"),
+                // PLUG-017 (T-063): plugin editors (plugins/PluginViewHost.mm): NSView containers, AU
+                // view controllers and CoreAudioKit's generic AU view.
+                .linkedFramework("AppKit"),
+                .linkedFramework("CoreAudioKit"),
             ]
         ),
 
