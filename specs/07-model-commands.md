@@ -158,6 +158,13 @@ Additive; nothing in the Interfaces above changes. Closes DW-149 (insert-chain c
 - **No minimum loop length** (DW-125, user decision; asked by the lead with T-089). *SetLoop* no longer refuses an enabled loop shorter than 4096 samples (the DW-060 workaround in *Clip, tempo and loop commands* above is superseded): the transport plays loops shorter than a block since T-089. `SetLoop` and `RestoreLoop` both check only the range (non-empty, non-negative, within `Tick.timelineEnd`); `LoopRange.minLengthSamples` is gone.
 - **Velocity 0 on open** (DW-150, user decision). *Validation on open* (DW-111) also repairs a note velocity of 0 to 1 and lists it in `ProjectLoadReport.repairs` (`"set the velocity of note N from 0 to 1 (DW-150)"`). Every other broken invariant is still `invalidProject`, and the velocity invariant for commands stays 1…127.
 
+### Contract delta (T-075), accepted (autobuild, see docs/autobuild/DECISIONS.md "T-075 gesture commit", "T-075 automatable")
+Additive; nothing in the Interfaces above changes.
+- **`RecordAutomation {target, from, to, points, mode}`** (MODEL-005, AUTO-006). One recorded automation pass, committed as one undoable command ("Record Automation"). It replaces the lane's points in [`from`, `to`] with `points`, and anchors the old curve one tick outside the pass (11 "Contract delta (T-075)" has the merge rule). Its inverse is `SetAutomationLane` with the exact old lane, or none if the command created it.
+  - The checks (MODEL-031): `mode` must be touch, latch or write. `from ≤ to` must lie on the timeline. `points` must be non-empty, strictly increasing, inside [`from`, `to`], and 0…1. The target must be automatable, and a new lane must be creatable on it (DW-236).
+  - JSON: `{"type": "RecordAutomation", "target": {…}, "from": 960, "to": 1920, "mode": "touch", "points": [{"tick": 960, "value": 0.5}, …]}`.
+- **DW-236**: commands that create a lane (`AddAutomationPoint(s)`, `SetAutomationMode`, `RecordAutomation`) refuse a non-automatable built-in param with `invalidArgument`, using `ParamCatalog.builtin`. Existing lanes, and `validate()` on open, stay lenient.
+
 ## Status
 | ID | status | test |
 |---|---|---|
