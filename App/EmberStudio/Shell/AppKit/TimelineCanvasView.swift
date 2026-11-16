@@ -36,6 +36,9 @@ final class TimelineCanvasView: NSView, SnapshotCompositing {
         var pixelsPerBeat: Double
         var snap: SnapMode
         var tileSize: CGSize
+        /// UI-015 (T-075): which tracks show lanes, so expanding or collapsing redraws.
+        var trackRows: [Int] = []
+        var expanded: Set<NodeIDValue> = []
     }
 
     private let tileContainer = CALayer()
@@ -110,6 +113,7 @@ final class TimelineCanvasView: NSView, SnapshotCompositing {
             _ = model.snap
             _ = model.marquee
             _ = model.peaksVersion
+            _ = model.window?.automation.expanded  // UI-015 (T-075)
         } onChange: { [weak self] in
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
@@ -184,7 +188,8 @@ final class TimelineCanvasView: NSView, SnapshotCompositing {
         }
         let key = ContentKey(tracks: model.tracks, assets: model.project.assets, tempoMap: model.project.tempoMap,
                              selection: model.selection, pixelsPerBeat: model.geometry.pixelsPerBeat, snap: model.snap,
-                             tileSize: tileSize)
+                             tileSize: tileSize, trackRows: model.geometry.trackRows,
+                             expanded: model.window?.automation.expanded ?? [])
         let contentChanged = key != contentKey
         contentKey = key
 

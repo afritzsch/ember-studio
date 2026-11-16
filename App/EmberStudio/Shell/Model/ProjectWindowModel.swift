@@ -134,6 +134,8 @@ final class ProjectWindowModel: Identifiable {
     let exportDialog = ExportModel()
     /// DW-230 (T-090): warns when a track monitors the built-in mic through the built-in speakers.
     let feedbackGuard = FeedbackGuard()
+    /// UI-015, AUTO-006/007 (T-075): automation lanes in the arrange view and the window's recorder.
+    let automation = AutomationLanesModel()
 
     init(id: Int, store: ProjectStore, toasts: ToastCenter = ToastCenter()) {
         self.id = id
@@ -145,6 +147,7 @@ final class ProjectWindowModel: Identifiable {
         mixer.window = self
         exportDialog.window = self
         feedbackGuard.window = self
+        automation.window = self  // T-075
         audioPrefs.refreshDevices()
         // UI-004: device toasts name devices (also ones that are gone) and offer the audio settings.
         toasts.deviceName = { [weak self] id in self?.audioPrefs.name(of: id) }
@@ -165,6 +168,7 @@ final class ProjectWindowModel: Identifiable {
         arrange.finishDrag()
         pianoRoll.close()  // UI-021: its note-offs go to the old engine, before the swap
         mixer.documentReplaced()
+        automation.documentReplaced()  // T-075: passes end uncommitted, before the swap
         self.store = store
         arrange.peaks.invalidate(nil)
         selectedTracks = []
@@ -347,6 +351,7 @@ final class ProjectWindowModel: Identifiable {
         }
         controls += trackHeaders.flatMap(\.controls)
         controls += arrange.controls
+        controls += automation.controls  // T-075 (UI-015)
         controls += pianoRoll.controls
         controls += audioPrefs.controls
         controls += exportDialog.controls  // T-082
@@ -483,5 +488,6 @@ final class ProjectWindowModel: Identifiable {
             }
         }
         feedbackGuard.check()  // DW-230 (T-090)
+        automation.transportPolled(transport)  // T-075 (AUTO-006/007)
     }
 }

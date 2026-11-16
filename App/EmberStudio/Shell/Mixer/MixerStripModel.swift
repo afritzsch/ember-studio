@@ -7,6 +7,15 @@ enum MixerParam: Hashable, Sendable {
     case pan(NodeIDValue)
     case sendLevel(ModelID)
 
+    /// The automation target the control drives (AUTO-006, T-075).
+    var target: ParamTarget {
+        switch self {
+        case .gain(let channel): .strip(channel: channel, param: .gain)
+        case .pan(let channel): .strip(channel: channel, param: .pan)
+        case .sendLevel(let send): .sendLevel(send: send)
+        }
+    }
+
     /// The gesture's undo label.
     var label: String {
         switch self {

@@ -222,11 +222,17 @@ public final class AutomationRecorder {
     private static func order(_ a: ParamTarget, _ b: ParamTarget) -> Bool { "\(a)" < "\(b)" }
 
     private func normalized(_ target: ParamTarget, _ native: Float) -> Float {
-        project.automationMapping(for: target, catalog: store.engineSync?.catalog ?? .builtin).normalize(native)
+        project.automationMapping(for: target, catalog: catalog).normalize(native)
     }
 
     private func denormalized(_ target: ParamTarget, _ value: Float) -> Float {
-        project.automationMapping(for: target, catalog: store.engineSync?.catalog ?? .builtin).denormalize(value)
+        project.automationMapping(for: target, catalog: catalog).denormalize(value)
+    }
+
+    /// The engine's ParamInfo, else the built-in catalog (test engines publish none).
+    private var catalog: ParamCatalog {
+        if let catalog = store.engineSync?.catalog, !catalog.infos.isEmpty { return catalog }
+        return .builtin
     }
 
     private func start(_ target: ParamTarget, lane: AutomationLane, value: Float, at tick: Tick, held: Bool) {
