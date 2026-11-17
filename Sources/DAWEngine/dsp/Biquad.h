@@ -145,10 +145,11 @@ struct BiquadState2 {
         return y;
     }
 
-    // Per lane, the larger state term: a lane snaps when this is below BiquadState::kSnap.
-    Double2 quietness() const DAW_RT {
-        return __builtin_elementwise_max(__builtin_elementwise_abs(z1), __builtin_elementwise_abs(z2));
-    }
+    // Per lane, |z2|: a lane can only snap when this is below BiquadState::kSnap (it needs |z1|
+    // below it too, which snap() checks). Half the work of testing both terms on every frame, and
+    // while a signal plays |z2| essentially never gets that small, so the pre-test still almost
+    // never sends a frame to snap().
+    Double2 quietness() const DAW_RT { return __builtin_elementwise_abs(z2); }
 
     // DSP-040 snap, per lane: both terms below kSnap → both exactly 0. Only called on the rare
     // frames where some section may snap; the empty asm makes it recompute |z1| and |z2| here
@@ -163,8 +164,8 @@ struct BiquadState2 {
 
     // BiquadState::tick for both lanes. The snap is a branch, not a select, so it stays off the
     // y → z1 dependency chain: it is rarely taken while a signal plays and steadily taken in
-    // silence, so it stays predicted. The test is the quieter lane's larger term; snap() then
-    // decides each lane exactly.
+    // silence, so it stays predicted. The pre-test is quietness(); snap() then decides each lane
+    // exactly.
     Double2 tick(Double2 x, const BiquadCoeffs& c) DAW_RT {
         const Double2 y = step(x, c);
         if (__builtin_expect(__builtin_reduce_min(quietness()) < BiquadState::kSnap, 0)) snap();
