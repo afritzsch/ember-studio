@@ -69,6 +69,7 @@ struct PassRig {
     float* ptrs[kInChannels]{};
     uint64_t violations = 0;
     uint64_t multiPassBlocks = 0;
+    int firstRecordedMultiPass = -1;
     std::vector<int64_t> positions;
 
     PassRig() {
@@ -104,6 +105,7 @@ struct PassRig {
             violations += scope.violations();
         }
         if (passes > 1) ++multiPassBlocks;
+        if (recorded && positions.empty()) firstRecordedMultiPass = passes > 1;
         if (recorded) positions.insert(positions.end(), framePos.begin(), framePos.begin() + n);
     }
 };
@@ -136,6 +138,7 @@ bool runLoopCase(CheckResult& checks, const LoopCase& c, uint32_t seed) {
     (void)rec.prepare(kRate);
     (void)rig.transport.setLoop(true, c.loopStart, c.loopEnd);
     (void)rig.transport.locate(c.playFrom);
+    rig.block(64);  // stopped, like a device's blocks before play: the recorder sees the position
     (void)rig.transport.play();
     std::mt19937 rng(seed);
     std::uniform_int_distribution<uint32_t> size(c.minBlock, c.maxBlock);
@@ -148,16 +151,31 @@ bool runLoopCase(CheckResult& checks, const LoopCase& c, uint32_t seed) {
     (void)rig.transport.setRecording(true);
     while (static_cast<int64_t>(rig.positions.size()) < c.recordFrames) rig.block(size(rng));
     const std::vector<FinalizedTake> takes = rec.finalize();
-    DAW_CHECK(takes.size() == 1);
-    if (takes.size() != 1) return false;
+    if (takes.size() != 1) {
+        const std::string what = std::string(c.name) + " seed " + std::to_string(seed) + ": " +
+                                 std::to_string(takes.size()) + " takes, " + std::to_string(rig.positions.size()) +
+                                 " frames recorded";
+        checks.fail(what.c_str(), __FILE__, __LINE__);
+        return false;
+    }
     const FinalizedTake& take = takes[0];
     const auto frames = static_cast<int64_t>(rig.positions.size());
     DAW_CHECK(!take.error && take.droppedFrames == 0);
-    DAW_CHECK(take.frames == frames);  // DW-243: no pass of a block left out
-    DAW_CHECK(take.startSample == rig.positions.front() - c.latency);
+    if (take.frames != frames) {  // DW-243: no pass of a block left out
+        const std::string what = std::string(c.name) + " seed " + std::to_string(seed) + ": " +
+                                 std::to_string(take.frames) + " frames, expected " + std::to_string(frames);
+        checks.fail(what.c_str(), __FILE__, __LINE__);
+    }
+    if (take.startSample != rig.positions.front() - c.latency) {
+        const std::string what = std::string(c.name) + " seed " + std::to_string(seed) + ": startSample " +
+                                 std::to_string(take.startSample) + ", expected " +
+                                 std::to_string(rig.positions.front() - c.latency) + " (first block multi-pass: " +
+                                 std::to_string(rig.firstRecordedMultiPass) + ")";
+        checks.fail(what.c_str(), __FILE__, __LINE__);
+    }
     const std::vector<int64_t> expected = expectedPassStarts(rig.positions, c.latency);
     if (take.passStarts != expected) {
-        const std::string what = std::string(c.name) + ": " + std::to_string(take.passStarts.size()) +
+        const std::string what = std::string(c.name) + " seed " + std::to_string(seed) + ": " + std::to_string(take.passStarts.size()) +
                                  " pass starts, expected " + std::to_string(expected.size());
         checks.fail(what.c_str(), __FILE__, __LINE__);
     }

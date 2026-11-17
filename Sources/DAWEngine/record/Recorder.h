@@ -183,12 +183,14 @@ private:
     PunchRange rtPunch_{};
     SamplePos lastPos_ = 0;
     bool hasLastPos_ = false;
+    bool lastPlaying_ = false;
+    bool lastRecording_ = false;
     // DW-243, audio thread only: the transport position just after the last frame of the last
     // block that played (unwrapped: the loop end if it ended there), so a block laid out in
     // several passes knows where it began.
     SamplePos prevEnd_ = 0;
     bool hasPrevEnd_ = false;
-    bool prevEndedOnLoopEnd_ = false;  // ...exactly on the loop end (see captureBlock)
+    SamplePos prevLoopLength_ = 0;  // the loop's length in it, if it looped (see captureBlock)
 
     // Control side.
     std::map<NodeID, uint32_t> armed_;  // track → input pair

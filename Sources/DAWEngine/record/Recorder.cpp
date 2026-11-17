@@ -372,18 +372,23 @@ void Recorder::capture(Session& session, const AudioBufferView& input, uint32_t 
 
 void Recorder::captureBlock(const Transport& transport, const AudioBufferView& input, uint32_t numFrames) DAW_RT {
     // The transport didn't advance (no graph published, or an oversize block): this block was
-    // laid out already. DW-243: a block of whole passes of a short loop that ends on the loop end
-    // leaves the position where it was, too; after a block that ended there, a block counts as new
-    // (a stale one then would be recorded twice; Transport has no block counter to tell).
+    // laid out already. DW-243: inside a loop, a block of a whole number of loop lengths leaves
+    // the position where it was, too, so such a block counts as new while the loop plays (a stale
+    // one then would be recorded twice; Transport has no block counter to tell).
     const SamplePos pos = transport.samplePos();
-    const bool advanced = !hasLastPos_ || pos != lastPos_ || prevEndedOnLoopEnd_;
+    const bool wholeLoops = prevLoopLength_ > 0 && SamplePos{numFrames} % prevLoopLength_ == 0;
+    const TransportBlock& block = transport.block();
+    // A stale block is the last one again, flags included (play can start where it stopped).
+    const bool advanced = !hasLastPos_ || pos != lastPos_ || block.playing != lastPlaying_ ||
+                          block.recording != lastRecording_ || wholeLoops;
     const bool hadLastPos = hasLastPos_;
     const SamplePos prevPos = lastPos_;
     lastPos_ = pos;
+    lastPlaying_ = block.playing;
+    lastRecording_ = block.recording;
     hasLastPos_ = true;
     if (!advanced) return;
 
-    const TransportBlock& block = transport.block();
     // DW-243: where the block before this one left off, for a block in several passes.
     const bool hadPrevEnd = hasPrevEnd_;
     const SamplePos prevEnd = prevEnd_;
@@ -392,8 +397,9 @@ void Recorder::captureBlock(const Transport& transport, const AudioBufferView& i
         const TransportSegment& last = block.seg[std::min<uint8_t>(block.numSegments, 2) - 1];
         prevEnd_ = last.startSample + SamplePos{last.numFrames};
     }
-    prevEndedOnLoopEnd_ = hasPrevEnd_ && block.tempo != nullptr && transport.loopEnabled() &&
-                          prevEnd_ == block.tempo->tickToSample(transport.loopEnd());
+    prevLoopLength_ = hasPrevEnd_ && block.tempo != nullptr && transport.loopEnabled()
+                          ? block.tempo->tickToSample(transport.loopEnd()) - block.tempo->tickToSample(transport.loopStart())
+                          : 0;
     if (numFrames == 0 || !block.playing || !block.recording || block.numSegments == 0 || block.tempo == nullptr)
         return;
 
