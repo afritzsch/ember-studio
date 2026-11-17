@@ -7,6 +7,7 @@
 #include <memory>
 #include <numbers>
 
+#include "automation/WrapJump.h"
 #include "core/ProcessContext.h"
 #include "dsp/Finite.h"
 #include "dsp/Hadamard.h"
@@ -112,12 +113,17 @@ void Reverb::clear() DAW_RT {
     damp_.fill(0.0f);
 }
 
-float Reverb::param(const ProcessContext& ctx, uint32_t index) const DAW_RT {
+float Reverb::param(const ProcessContext& ctx, uint32_t index, bool afterWrap) const DAW_RT {
     const ParamInfo& info = kParamInfo[index];
     if (index >= numParams_) return info.def;
-    const float v = ctx.params.get(firstParam_ + index);
+    const float v = afterWrap ? afterWrapOr(ctx, firstParam_ + index) : ctx.params.get(firstParam_ + index);
     if (std::isnan(v)) return info.def;
     return v < info.min ? info.min : v > info.max ? info.max : v;
+}
+
+Reverb::Settings Reverb::settings(const ProcessContext& ctx, bool afterWrap) const DAW_RT {
+    return Settings{param(ctx, kSize, afterWrap), param(ctx, kDecay, afterWrap), param(ctx, kDamping, afterWrap),
+                    param(ctx, kPredelay, afterWrap), param(ctx, kMix, afterWrap)};
 }
 
 void Reverb::process(ProcessContext& ctx, NodeIO& io) DAW_RT {
@@ -127,11 +133,7 @@ void Reverb::process(ProcessContext& ctx, NodeIO& io) DAW_RT {
     if (n == 0) return;  // ENG-004: a 0-frame block leaves every state as it was
 
     // ENG-021: one read per slot per block.
-    const float size = param(ctx, kSize);
-    const float decay = param(ctx, kDecay);
-    const float damping = param(ctx, kDamping);
-    const float predelay = param(ctx, kPredelay);
-    const float mix = param(ctx, kMix);
+    const Settings before = settings(ctx, false);
 
     const bool hasInput = covers(in, n);
     // DSP-040: NaN guard. Also covers a node that was never prepared.
@@ -145,6 +147,27 @@ void Reverb::process(ProcessContext& ctx, NodeIO& io) DAW_RT {
         return;
     }
 
+    const float* inL = hasInput ? in.channels[0] : nullptr;
+    const float* inR = hasInput ? in.channels[in.numChannels > 1 ? 1 : 0] : nullptr;
+    float* outL = out.numChannels > 0 ? out.channels[0] : nullptr;
+    float* outR = out.numChannels > 1 ? out.channels[1] : nullptr;
+    // AUTO-003 (T-092): with a loop wrap that automation jumps at, the block runs in two spans,
+    // the second with the after-wrap values.
+    const uint32_t wrap = wrapFrame(ctx, firstParam_, numParams_ < kNumParams ? numParams_ : kNumParams, n);
+    if (wrap == 0) {
+        run(inL, inR, outL, outR, n, before, false);
+    } else {
+        run(inL, inR, outL, outR, wrap, before, false);
+        auto at = [wrap](auto* p) DAW_RT { return p != nullptr ? p + wrap : nullptr; };
+        run(at(inL), at(inR), at(outL), at(outR), n - wrap, settings(ctx, true), true);
+    }
+    // Channels beyond stereo are silent.
+    for (uint32_t c = 2; c < out.numChannels; ++c) std::memset(out.channels[c], 0, std::size_t{n} * sizeof(float));
+}
+
+void Reverb::run(const float* inL, const float* inR, float* outL, float* outR, uint32_t n, const Settings& p,
+                 bool jump) DAW_RT {
+    const float size = p.size, decay = p.decay, damping = p.damping, predelay = p.predelay, mix = p.mix;
     if (size != size_) {
         const auto lengths = lengthsFor(size, sampleRate_);
         for (uint32_t i = 0; i < kLines; ++i) target_[i] = static_cast<float>(lengths[i]);
@@ -165,6 +188,9 @@ void Reverb::process(ProcessContext& ctx, NodeIO& io) DAW_RT {
         gains_ = gains;
         mix_.reset(mix);
         primed_ = true;
+    } else if (jump) {  // AUTO-003: decay and mix jump at a loop wrap; the glides don't
+        gains_ = gains;
+        mix_.reset(mix);
     }
     // ENG-022: decay and mix ramp from where the previous block ended.
     const ParamRamp mixRamp = mix_.next(mix, n);
@@ -173,10 +199,6 @@ void Reverb::process(ProcessContext& ctx, NodeIO& io) DAW_RT {
     if (gainsRamp)
         for (uint32_t i = 0; i < kLines; ++i) gainStep[i] = (gains[i] - gains_[i]) / static_cast<float>(n);
 
-    const float* inL = hasInput ? in.channels[0] : nullptr;
-    const float* inR = hasInput ? in.channels[in.numChannels > 1 ? 1 : 0] : nullptr;
-    float* outL = out.numChannels > 0 ? out.channels[0] : nullptr;
-    float* outR = out.numChannels > 1 ? out.channels[1] : nullptr;
     float* preL = pre_.data();
     float* preR = pre_.data() + preCap_;
     float* lines = lines_.data();
@@ -290,8 +312,6 @@ void Reverb::process(ProcessContext& ctx, NodeIO& io) DAW_RT {
         if (outR) outR[s] = (1.0f - m) * dryR + m * wR;
     }
     gains_ = gains;
-    // Channels beyond stereo are silent.
-    for (uint32_t c = 2; c < out.numChannels; ++c) std::memset(out.channels[c], 0, std::size_t{n} * sizeof(float));
 }
 
 } // namespace daw

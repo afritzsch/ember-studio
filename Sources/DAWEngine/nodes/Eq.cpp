@@ -6,6 +6,7 @@
 #include <limits>
 #include <memory>
 
+#include "automation/WrapJump.h"
 #include "core/ProcessContext.h"
 #include "dsp/Finite.h"
 
@@ -99,18 +100,18 @@ void Eq::clearState() DAW_RT {
     for (auto& channel : state_) channel.fill(BiquadState{});
 }
 
-float Eq::param(const ProcessContext& ctx, uint32_t index) const DAW_RT {
+float Eq::param(const ProcessContext& ctx, uint32_t index, bool afterWrap) const DAW_RT {
     const ParamInfo& info = kParamInfo[index];
     if (index >= numParams_) return info.def;
-    const float v = ctx.params.get(firstParam_ + index);
+    const float v = afterWrap ? afterWrapOr(ctx, firstParam_ + index) : ctx.params.get(firstParam_ + index);
     if (std::isnan(v)) return info.def;
     return v < info.min ? info.min : v > info.max ? info.max : v;
 }
 
-Eq::BandParams Eq::readBand(const ProcessContext& ctx, uint32_t band) const DAW_RT {
+Eq::BandParams Eq::readBand(const ProcessContext& ctx, uint32_t band, bool afterWrap) const DAW_RT {
     const BandSlots& slots = kBandSlots[band];
-    return {param(ctx, slots.on) >= 0.5f, param(ctx, slots.freq), slots.gain == kNone ? 0.0f : param(ctx, slots.gain),
-            param(ctx, slots.q)};
+    return {param(ctx, slots.on, afterWrap) >= 0.5f, param(ctx, slots.freq, afterWrap),
+            slots.gain == kNone ? 0.0f : param(ctx, slots.gain, afterWrap), param(ctx, slots.q, afterWrap)};
 }
 
 BiquadCoeffs Eq::design(uint32_t band, const BandParams& p) const DAW_RT {
@@ -156,66 +157,93 @@ void Eq::process(ProcessContext& ctx, NodeIO& io) DAW_RT {
     }
     primed_ = true;
 
+    // AUTO-003 (T-092): with a loop wrap that automation jumps at, the ramp above covers the
+    // frames before the wrap, and the bands jump to their after-wrap values at the wrap frame.
+    const uint32_t wrap = wrapFrame(ctx, firstParam_, numParams_ < kNumParams ? numParams_ : kNumParams, n);
+    // The after-wrap params: the bands that change are redesigned and hold from the wrap on.
+    auto jump = [&]() DAW_RT {
+        for (uint32_t b = 0; b < kNumBands; ++b) {
+            const BandParams p = readBand(ctx, b, true);
+            if (!(p == params_[b])) {
+                params_[b] = p;
+                coeffs_[b] = design(b, p);
+            }
+            from[b] = coeffs_[b];
+            ramping[b] = false;
+        }
+    };
+
     const bool hasInput = covers(in, n);
     if (hasInput && !allFinite(in, n)) {  // DSP-040
+        if (wrap > 0) jump();
         silence(io, n);
         return;
     }
     const float* inL = hasInput ? in.channels[0] : nullptr;
     const float* inR = hasInput ? in.channels[in.numChannels > 1 ? 1 : 0] : nullptr;
-
-    // Bands that can't change the signal this block are skipped; they keep their zero state
-    // (see BiquadCoeffs::isIdentity), so the result is the same.
-    uint32_t active[kNumBands];
-    uint32_t numActive = 0;
-    for (uint32_t b = 0; b < kNumBands; ++b)
-        if (ramping[b] || !coeffs_[b].isIdentity() || !state_[0][b].isZero() || !state_[1][b].isZero())
-            active[numActive++] = b;
-
     const uint32_t outChannels = out.numChannels < 2 ? out.numChannels : 2;
     float* outL = outChannels > 0 ? out.channels[0] : nullptr;
     float* outR = outChannels > 1 ? out.channels[1] : nullptr;
 
-    // T-091 (TEST-008): both channels run together, one NEON lane each (BiquadState2: the same
-    // arithmetic as BiquadState::tick, bit for bit). A block where no active band ramps, the
-    // usual case, runs the chain with coefficients and state in registers (runSteady); a ramp
-    // interpolates the coefficients per frame as before.
-    BiquadState2 st[kNumBands];
-    BiquadCoeffs steady[kNumBands];
-    bool anyRamp = false;
-    for (uint32_t k = 0; k < numActive; ++k) {
-        const uint32_t b = active[k];
-        st[k] = BiquadState2(state_[0][b], state_[1][b]);
-        steady[k] = coeffs_[b];
-        anyRamp = anyRamp || ramping[b];
-    }
-    const StereoIO stereo{inL, inR, outL, outR};
-    if (!anyRamp) {
-        switch (numActive) {
-            case 0: runSteady<0>(stereo, n, steady, st); break;
-            case 1: runSteady<1>(stereo, n, steady, st); break;
-            case 2: runSteady<2>(stereo, n, steady, st); break;
-            case 3: runSteady<3>(stereo, n, steady, st); break;
-            case 4: runSteady<4>(stereo, n, steady, st); break;
-            case 5: runSteady<5>(stereo, n, steady, st); break;
-            default: runSteady<kNumBands>(stereo, n, steady, st); break;
+    // Frames [offset, offset + len): every band ramps from `from` to coeffs_ where ramping[b].
+    auto run = [&](uint32_t offset, uint32_t len) DAW_RT {
+        // Bands that can't change the signal are skipped; they keep their zero state (see
+        // BiquadCoeffs::isIdentity), so the result is the same.
+        uint32_t active[kNumBands];
+        uint32_t numActive = 0;
+        for (uint32_t b = 0; b < kNumBands; ++b)
+            if (ramping[b] || !coeffs_[b].isIdentity() || !state_[0][b].isZero() || !state_[1][b].isZero())
+                active[numActive++] = b;
+
+        // T-091 (TEST-008): both channels run together, one NEON lane each (BiquadState2: the
+        // same arithmetic as BiquadState::tick, bit for bit). A span where no active band ramps,
+        // the usual case, runs the chain with coefficients and state in registers (runSteady); a
+        // ramp interpolates the coefficients per frame as before.
+        BiquadState2 st[kNumBands];
+        BiquadCoeffs steady[kNumBands];
+        bool anyRamp = false;
+        for (uint32_t k = 0; k < numActive; ++k) {
+            const uint32_t b = active[k];
+            st[k] = BiquadState2(state_[0][b], state_[1][b]);
+            steady[k] = coeffs_[b];
+            anyRamp = anyRamp || ramping[b];
         }
-    } else {
-        const double invFrames = 1.0 / n;
-        for (uint32_t i = 0; i < n; ++i) {
-            Double2 x = stereo.in(i);
-            for (uint32_t k = 0; k < numActive; ++k) {
-                const uint32_t b = active[k];
-                // ENG-022's ramp shape: the block's last frame is exactly on the new coefficients.
-                const BiquadCoeffs c = !ramping[b] || i + 1 == n
-                                           ? coeffs_[b]
-                                           : from[b].lerp(coeffs_[b], static_cast<double>(i + 1) * invFrames);
-                x = st[k].tick(x, c);
+        const StereoIO stereo{inL ? inL + offset : nullptr, inR ? inR + offset : nullptr,
+                              outL ? outL + offset : nullptr, outR ? outR + offset : nullptr};
+        if (!anyRamp) {
+            switch (numActive) {
+                case 0: runSteady<0>(stereo, len, steady, st); break;
+                case 1: runSteady<1>(stereo, len, steady, st); break;
+                case 2: runSteady<2>(stereo, len, steady, st); break;
+                case 3: runSteady<3>(stereo, len, steady, st); break;
+                case 4: runSteady<4>(stereo, len, steady, st); break;
+                case 5: runSteady<5>(stereo, len, steady, st); break;
+                default: runSteady<kNumBands>(stereo, len, steady, st); break;
             }
-            stereo.out(i, x);
+        } else {
+            const double invFrames = 1.0 / len;
+            for (uint32_t i = 0; i < len; ++i) {
+                Double2 x = stereo.in(i);
+                for (uint32_t k = 0; k < numActive; ++k) {
+                    const uint32_t b = active[k];
+                    // ENG-022's ramp shape: the span's last frame is exactly on the new coefficients.
+                    const BiquadCoeffs c = !ramping[b] || i + 1 == len
+                                               ? coeffs_[b]
+                                               : from[b].lerp(coeffs_[b], static_cast<double>(i + 1) * invFrames);
+                    x = st[k].tick(x, c);
+                }
+                stereo.out(i, x);
+            }
         }
+        for (uint32_t k = 0; k < numActive; ++k) st[k].store(state_[0][active[k]], state_[1][active[k]]);
+    };
+    if (wrap == 0) {
+        run(0, n);
+    } else {
+        run(0, wrap);
+        jump();
+        run(wrap, n - wrap);
     }
-    for (uint32_t k = 0; k < numActive; ++k) st[k].store(state_[0][active[k]], state_[1][active[k]]);
     for (uint32_t c = 2; c < out.numChannels; ++c) std::memset(out.channels[c], 0, std::size_t{n} * sizeof(float));
 
     // A blow-up (a filter or a float conversion going non-finite) is treated like a bad input.

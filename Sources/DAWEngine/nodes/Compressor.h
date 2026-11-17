@@ -15,7 +15,10 @@
 //   6 detector   switch: RMS when ≥ 0.5, else peak; default 0 (peak)
 // threshold, ratio, knee and makeup ramp linearly across the block (ENG-022, per sample, like
 // ParamRamp). attack, release and the detector switch are latched per block: they set how the
-// gain moves, not the gain itself, so they can't zipper.
+// gain moves, not the gain itself, so they can't zipper. AUTO-003 (T-092): at a loop wrap inside
+// the block with automation on any compressor param, the ramps end on this block's values at the
+// frame before the wrap, and every param takes its after-wrap value from the wrap frame on
+// (automation/WrapJump.h), latched ones included.
 //
 // Signal path, per sample n (everything in double, stereo-linked: one gain for all channels):
 //   key       the sidechain input when one is routed (NodeIO::sidechain non-empty), else the
@@ -115,7 +118,19 @@ public:
     uint64_t nanBlocks() const { return nanBlocks_.load(std::memory_order_relaxed); }
 
 private:
-    float param(const ProcessContext& ctx, uint32_t index) const DAW_RT;
+    // One block's params (ENG-021), or their values after its loop wrap (AUTO-003).
+    struct Settings {
+        float threshold, ratio, knee, makeup, attackMs, releaseMs;
+        bool rms;
+    };
+    // `afterWrap`: the value after this block's loop wrap (AUTO-003, automation/WrapJump.h).
+    float param(const ProcessContext& ctx, uint32_t index, bool afterWrap = false) const DAW_RT;
+    Settings settings(const ProcessContext& ctx, bool afterWrap) const DAW_RT;
+    // Frames [offset, offset + len) of the block with `s`; `jump`: the ramped params start at
+    // `s` instead of ramping to it (the block's first frame after prepare(), or a loop wrap).
+    // Returns the span's deepest e.
+    double run(const NodeIO& io, const AudioBufferView* key, uint32_t offset, uint32_t len, const Settings& s,
+               bool jump) DAW_RT;
 
     ParamID firstParam_;
     uint32_t numParams_;

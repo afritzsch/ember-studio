@@ -40,6 +40,9 @@
 // numParams doesn't cover a param uses its default (the model gives it the published table since
 // T-070, DSP-041), and out-of-range or NaN values are clamped or read as the default. See
 // kParamInfo.
+// AUTO-003 (T-092): at a loop wrap inside the block with automation on any sampler param, the
+// params take their after-wrap values from the wrap frame on (automation/WrapJump.h): the voices'
+// envelopes advance with the new rates from there, and events at or after it use them.
 //
 // NaN guard (DSP-040, DW-142): a block whose output went non-finite (a NaN or ±Inf in an asset)
 // is silenced and every voice stops; it counts in nanBlocks() and, when the factory was given
@@ -152,7 +155,10 @@ private:
         bool wrapped = false;     // has looped at least once
     };
 
-    float param(const ProcessContext& ctx, uint32_t index) const DAW_RT;
+    // `afterWrap`: the value after this block's loop wrap (AUTO-003, automation/WrapJump.h).
+    float param(const ProcessContext& ctx, uint32_t index, bool afterWrap = false) const DAW_RT;
+    // ENG-021: the ADSR rates and velocity sensitivity from the params (or their after-wrap values).
+    void readParams(const ProcessContext& ctx, bool afterWrap) DAW_RT;
     void handle(const MidiEvent& event) DAW_RT;
     void noteOn(uint8_t channel, uint8_t key, uint8_t velocity) DAW_RT;
     void noteOff(uint8_t channel, uint8_t key) DAW_RT;

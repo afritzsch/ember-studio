@@ -8,6 +8,7 @@
 #include <utility>
 #include <xlocale.h>
 
+#include "automation/WrapJump.h"
 #include "core/ProcessContext.h"
 #include "dsp/Hermite.h"
 
@@ -462,12 +463,19 @@ void Sampler::render(uint32_t from, uint32_t to) DAW_RT {
             renderVoice(v, left_ + from, right_ != nullptr ? right_ + from : nullptr, to - from);
 }
 
-float Sampler::param(const ProcessContext& ctx, uint32_t index) const DAW_RT {
+float Sampler::param(const ProcessContext& ctx, uint32_t index, bool afterWrap) const DAW_RT {
     const ParamInfo& info = kParamInfo[index];
     if (index >= numParams_) return info.def;
-    const float v = ctx.params.get(firstParam_ + index);
+    const float v = afterWrap ? afterWrapOr(ctx, firstParam_ + index) : ctx.params.get(firstParam_ + index);
     if (std::isnan(v)) return info.def;
     return std::clamp(v, info.min, info.max);
+}
+
+void Sampler::readParams(const ProcessContext& ctx, bool afterWrap) DAW_RT {
+    const AdsrParams adsr{param(ctx, kAttack, afterWrap), param(ctx, kDecay, afterWrap), param(ctx, kSustain, afterWrap),
+                          param(ctx, kRelease, afterWrap)};
+    rates_ = AdsrRates::make(adsr, sampleRate_);
+    velocitySensitivity_ = param(ctx, kVelocity, afterWrap);
 }
 
 void Sampler::process(ProcessContext& ctx, NodeIO& io) DAW_RT {
@@ -477,9 +485,9 @@ void Sampler::process(ProcessContext& ctx, NodeIO& io) DAW_RT {
     const uint32_t numFrames = out.numChannels > 0 ? std::min(ctx.numFrames, out.numFrames) : 0;
 
     // ENG-021: params once per block.
-    const AdsrParams adsr{param(ctx, kAttack), param(ctx, kDecay), param(ctx, kSustain), param(ctx, kRelease)};
-    rates_ = AdsrRates::make(adsr, sampleRate_);
-    velocitySensitivity_ = param(ctx, kVelocity);
+    readParams(ctx, false);
+    // AUTO-003 (T-092): a loop wrap that automation jumps at; the after-wrap values from there.
+    uint32_t wrap = wrapFrame(ctx, firstParam_, numParams_ < kNumParams ? numParams_ : kNumParams, numFrames);
 
     // With no frames to render into, events still apply (at "the block's end").
     left_ = numFrames > 0 ? out.channels[0] : nullptr;
@@ -487,12 +495,22 @@ void Sampler::process(ProcessContext& ctx, NodeIO& io) DAW_RT {
 
     // Sample-accurate (DSP-022): render up to each event's frame, then apply it.
     uint32_t pos = 0;
+    // The wrap counts like an event before the events at its frame (they are the loop start's).
+    auto jumpUpTo = [&](uint32_t frame) DAW_RT {
+        if (wrap == 0 || frame < wrap) return;
+        render(pos, wrap);
+        pos = wrap;
+        readParams(ctx, true);
+        wrap = 0;
+    };
     for (const MidiEvent& e : io.midiIn) {  // bounded by the MIDI storage's capacity
         const uint32_t frame = std::clamp(e.frameOffset, pos, numFrames);
+        jumpUpTo(frame);
         render(pos, frame);
         pos = frame;
         handle(e);
     }
+    jumpUpTo(numFrames);
     render(pos, numFrames);
 
     // DSP-040 (DW-142): a NaN or ±Inf in an asset (or a blow-up) silences the block and stops every

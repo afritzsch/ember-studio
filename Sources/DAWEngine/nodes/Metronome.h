@@ -14,6 +14,11 @@
 // Switch and levels are latched when a click starts and hold for the whole click: turning the
 // metronome off (or on, or changing a level) never cuts or reshapes a click in progress, so it
 // needs no ramp (ENG-022) and makes no partial clicks or discontinuities.
+// AUTO-003 (T-092): at a loop wrap inside the block with automation on any metronome param, the
+// clicks of the new pass (the segment after the wrap) latch the after-wrap values
+// (automation/WrapJump.h). The metronome runs on the MIX-023 look-ahead block, and automation
+// follows the transport's block (AUTO-010): it honors the jump when its own wrap falls in a
+// block (pass) where automation registered one, which is always so without graph latency.
 //
 // Sound (deterministic, IO-011): a click is kClickSeconds long; sample k of it is
 //   amp · (1 − k/N)³ · cos(2π · f · k / sampleRate),   N = round(kClickSeconds · sampleRate)
@@ -111,7 +116,10 @@ private:
         uint32_t fadeLeft = 0;         // > 0: fading out, this many samples to go
     };
 
-    float param(const ProcessContext& ctx, uint32_t index) const DAW_RT;
+    // `afterWrap`: the value after this block's loop wrap (AUTO-003, automation/WrapJump.h).
+    float param(const ProcessContext& ctx, uint32_t index, bool afterWrap = false) const DAW_RT;
+    // ENG-021: on_, beatAmp_ and accentAmp_ from the params (or their after-wrap values).
+    void readParams(const ProcessContext& ctx, bool afterWrap) DAW_RT;
     void trigger(bool downbeat) DAW_RT;
     void fadeAll() DAW_RT;
     // Adds every sounding click to frames [from, to) and advances them.

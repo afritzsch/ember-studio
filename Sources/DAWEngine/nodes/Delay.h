@@ -21,6 +21,10 @@
 // A T that changes again during a crossfade is taken up when it ends. Tempo changes act the same
 // way: the synced T is recomputed every block from the tempo at the block's start (TIME-007), so
 // a tempo change while playing crossfades to the new time, as does a locate to another tempo.
+// AUTO-003 (T-092): at a loop wrap inside the block with automation on any delay param, feedback
+// and mix reach this block's values at the frame before the wrap and jump to their after-wrap
+// values at the wrap frame (automation/WrapJump.h); lowpass, pingpong and T switch there too (a
+// new T crossfades from the wrap frame, still at the block's tempo, TIME-007).
 //
 // Delay time in frames: T = round(time · rate / 1000) (sync off) or
 // T = round(beats · 60 · rate / bpm) (sync on; `beats` in quarter notes from kNotes, `bpm` the
@@ -164,7 +168,8 @@ public:
     uint32_t currentDelayFrames() const { return xfadeTo_; }
 
 private:
-    float param(const ProcessContext& ctx, uint32_t index) const DAW_RT;
+    // `afterWrap`: the value after this block's loop wrap (AUTO-003, automation/WrapJump.h).
+    float param(const ProcessContext& ctx, uint32_t index, bool afterWrap = false) const DAW_RT;
     void clear() DAW_RT;
 
     ParamID firstParam_;

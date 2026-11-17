@@ -18,6 +18,10 @@
 // a step would click: the delay times glide towards their new values at kGlide samples per
 // sample instead (a short, bounded pitch bend, like a tape delay's time knob). damping is latched
 // per block: it changes a one-pole coefficient, which moves no sample by a step.
+// AUTO-003 (T-092): at a loop wrap inside the block with automation on any reverb param, decay
+// and mix reach this block's values at the frame before the wrap and jump to their after-wrap
+// values at the wrap frame (automation/WrapJump.h); damping switches there, and size and
+// predelay start gliding to their after-wrap values there.
 //
 // Signal path, per sample n (float; channel 0 = L, 1 = R):
 //   input     inL = input channel 0, inR = channel 1 (a mono input feeds both). Without an input
@@ -134,8 +138,19 @@ public:
     bool isSilent() const;
 
 private:
-    float param(const ProcessContext& ctx, uint32_t index) const DAW_RT;
+    // One block's params (ENG-021), or their values after its loop wrap (AUTO-003).
+    struct Settings {
+        float size, decay, damping, predelay, mix;
+    };
+    // `afterWrap`: the value after this block's loop wrap (AUTO-003, automation/WrapJump.h).
+    float param(const ProcessContext& ctx, uint32_t index, bool afterWrap = false) const DAW_RT;
+    Settings settings(const ProcessContext& ctx, bool afterWrap) const DAW_RT;
     void clear() DAW_RT;
+    // `n` frames of the network with `s`, the buffers already offset to the span's first frame
+    // (null: no input / skipped output). `jump`: decay and mix start at `s` instead of ramping
+    // to it (AUTO-003, after a loop wrap); the glides and damping take `s` up as always.
+    void run(const float* inL, const float* inR, float* outL, float* outR, uint32_t n, const Settings& s,
+             bool jump) DAW_RT;
 
     ParamID firstParam_;
     uint32_t numParams_;
