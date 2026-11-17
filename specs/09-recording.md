@@ -87,6 +87,13 @@ Facade additions are in 08 (same heading). Model side, additive and defaulted (f
 Clarifications:
 - *Pass bookkeeping (REC-030).* The recorder logs at most `Recorder::kMaxWraps` (65536) wraps per take; later ones (and wraps after the loop or tempo changed mid-take) stay in the last pass. In a block of several passes whose start can't be traced to the block before (a tempo edit, or play and locate applied in one block), the earlier wraps are rebuilt assuming the block ran inside the loop.
 
+### Contract delta (T-093), accepted (autobuild, see docs/autobuild/DECISIONS.md "T-093 model shape")
+Facade additions are in 08 (same heading); the model side is in 07 (same heading). Closes DW-216 and the user's "per-track MIDI input/channel picker" backlog item (DECISIONS "User review").
+- **REC-011 per track.** Each MIDI track has an input, `Track.midiInput {source: all | <CoreMIDI unique ID>, channel: 0 omni | 1…16}`, default all/omni, which is T-053's "every source to every armed MIDI track on all channels". An armed track plays through, and records, only what its input passes. The channel applies to channel-voice messages (no system message reaches any track). A source that isn't connected keeps the selection and delivers nothing; it is heard again as soon as it connects.
+- **Hanging notes.** T-053's rules hold per track: a key a track hears from several inputs sounds once on that track and ends at the last of those inputs' releases. Changing a track's input while notes, the sustain pedal or a bend are held ends what it no longer hears at once (and sounds keys held through inputs it now hears), like disarming does.
+- **REC-012 per track.** A take records each track's notes as it heard them: a note played through an input its filter didn't pass isn't part of its take; across an input change mid-take, the notes end (or start) at the switch. A track that heard no note gets no take (the others still do).
+- **UI** (12 same heading): a picker in the track header and on the mixer strip.
+
 ## Status
 | ID | status | test |
 |---|---|---|

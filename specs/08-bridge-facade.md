@@ -390,6 +390,22 @@ Additive. Safe mode builds plugin slots without their plugin (10 "Contract delta
 
 Affected: T-083 only. Tests: `AUPluginTests`/`VST3PluginTests` "safe mode" (`auSafeModeSlots`, `vst3SafeModeSlots`: fake AU / EmberTest instance counters unchanged, no failure, pass-through, state kept); `SafeModeSlotTests` (DAWModelTests).
 
+### Contract delta (T-093), accepted (autobuild, see docs/autobuild/DECISIONS.md "T-093 model shape")
+09's per-track MIDI input (REC-011, DW-216). Additive and defaulted: a track with no filter set hears every source on every channel, exactly T-053's routing.
+```cpp
+void setMidiInputFilter(NodeID track, bool allSources, int32_t source, uint8_t channel);   // channel 0 omni, 1…16
+FacadeError injectMidiFromSource(int32_t source, int64_t atSample, bool relativeToNow,
+                                 uint8_t status, uint8_t data1, uint8_t data2, uint8_t size);   // test seam
+```
+- **Filter.** Kept per track whether it is armed or not (arming uses it), until the default is set again. `allSources`, or only the CoreMIDI source whose unique ID is `source`; a source that isn't connected delivers nothing. `channel` filters channel-voice messages (the router never routes system messages, so the "omni or drop" question doesn't arise; a channel above 16 is clamped to omni). It applies from the next block, live and to a take running; it never ends a take. What the track no longer hears (notes, sustain pedal, bends) ends at frame 0 of that block and held keys it now hears sound, so a change never hangs a note; the take records the same (notes end or start at the switch).
+- **Seam.** `injectMidiFromSource` is `injectMidi` arriving as if from the source with unique ID `source` (the router binds up to 4 distinct IDs per engine to test inputs; `io` after that). Plain `injectMidi` has no source ID: only tracks hearing all sources get it. Offline engines: `unsupported`, like `injectMidi`.
+- **Takes.** Each armed track's `recordingFinalized` carries only the notes its filter passed when they were played; a track that heard no note gets no event (before: every armed track got every note, and no event only if nothing was played at all).
+- **Engine internals** (not facade API). `MidiInputRouter` keeps the armed tracks in a preallocated table of lanes (`kMaxArmed` = 64), each with its own live stream, held-key counts, pedal and bend state; the audio thread reads the filters from atomics (no allocation or lock, RT trap 0). Router queries take the player: `events(player)`, `heldNote(player, …)`, `pedalMask(player)`, `bendMask(player)` (`MidiClipPlayer` passes its own ID). `openInput(source)` gives a CoreMIDI slot its unique ID (`io/CoreMidiInput`).
+
+Swift (`EngineProtocol.swift`, block "T-093 additions"): `setMidiInput(track:_: Track.MidiInput)` (default: ignored) and `injectMidi(atSample:relativeToNow:status:data1:data2:source: Int32?)` (default: the plain seam without a source, `notImplemented` with one). `EngineClient` maps them to the facade; `FakeEngine` records `.setMidiInput(track:_:)` and `.injectMidiFromSource`, and exposes `midiInputFilters` (the non-default ones).
+
+Affected: T-093 only. Tests: `MidiInputTests` (`perTrackFilter`, `filterChangeNeverHangs`, `recordsPerTrack`, the facade end-to-end and the real CoreMIDI source filtered by its unique ID), `TrackMidiInputTests`, `TrackMidiInputControlTests`, `TrackMidiInputUITests`.
+
 ## Status
 | ID | status | test |
 |---|---|---|

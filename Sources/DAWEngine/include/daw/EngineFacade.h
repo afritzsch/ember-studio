@@ -677,8 +677,9 @@ public:
 
     // MARK: MIDI input (09, T-053; accepted (autobuild, see docs/autobuild/DECISIONS.md))
     //
-    // REC-011: every connected CoreMIDI source reaches every armed MIDI track on all channels,
-    // and play-through doesn't depend on the monitoring mode. A MIDI take records while the
+    // REC-011: every connected CoreMIDI source reaches every armed MIDI track on all channels
+    // unless the track's filter says otherwise (setMidiInputFilter, T-093), and play-through
+    // doesn't depend on the monitoring mode. A MIDI take records while the
     // transport plays with setRecording(true) and some track is armed (realtime mode), and ends
     // like an audio take: it becomes one recordingFinalized event per armed track, with
     // `recording.midi` set and the notes, or nothing at all if no note was played.

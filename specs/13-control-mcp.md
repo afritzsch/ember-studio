@@ -116,6 +116,9 @@ With a realtime engine choice, `project.new`/`project.open` through the socket g
 - **`transport.setRecordOptions {midiLoopTakes?} → transport`** (REC-034): record options, engine state like the punch range (not in the project, not undoable, the dirty flag stays). A field left out keeps its value. `midiLoopTakes`: a MIDI loop recording becomes a take folder with one take per pass instead of one merged clip (default false). The transport state gains `midiLoopTakes`. `dawctl` and `dawmcp` expose it like every method (`daw_transport_set_record_options`).
 - `engine.events` carry the new `recording` fields (`passes`, `loopStartSample`, `loopEndSample`, `passStarts`, `midiLoopTakes`, notes' `pass`); a loop take is a take folder (`/tracks/i/takeFolders`) by the time `transport.stop` answers, one "Record" undo.
 
+### Contract delta (T-093), accepted (autobuild, see docs/autobuild/DECISIONS.md "T-093 model shape")
+Additive. `midi.inject` events take `source?`, a CoreMIDI unique ID (a number, as `midi.inputs` reports it): the message arrives as if from that source, so a track's MIDI input filter can be driven headless (up to 4 distinct IDs per engine). Without it, only tracks hearing all sources get the message (T-053's seam). The input itself is the command `SetTrackMidiInput` (07) through `command.apply`; `project.get` shows `tracks[i].midiInput` once it isn't the default. In the app, `ui.state`/`ui.perform` cover the picker (12 same heading).
+
 ### `dawctl`
 | ID | Requirement |
 |---|---|
