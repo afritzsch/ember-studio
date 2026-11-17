@@ -62,6 +62,7 @@
 #include <atomic>
 #include <cstdint>
 #include <span>
+#include <string_view>
 #include <vector>
 
 #include "core/Node.h"
@@ -115,13 +116,23 @@ public:
     static constexpr double kFallbackBpm = 120.0;  // no tempo map in the TransportBlock
     static constexpr float kSnap = 1e-9f;          // −180 dBFS
 
+    // DW-196 (T-065): the note param's value labels, `kNotes` names in index order (checked below).
+    static constexpr const char* kNoteLabels[kNumNotes] = {
+        "1/32", "1/16T", "1/16", "1/8T", "1/16D", "1/8", "1/4T", "1/8D", "1/4", "1/2T", "1/4D", "1/2", "1/2D", "1/1",
+    };
+    static constexpr bool noteLabelsMatch() {
+        for (uint32_t i = 0; i < kNumNotes; ++i)
+            if (std::string_view(kNoteLabels[i]) != std::string_view(kNotes[i].name)) return false;
+        return true;
+    }
+
     static constexpr std::array<ParamInfo, kNumParams> kParamInfo{{
         {kTime, "time", "Time", 1.0f, 4000.0f, 375.0f, ParamInfo::Curve::log, "ms", true},
-        {kSync, "sync", "Tempo Sync", 0.0f, 1.0f, 1.0f, ParamInfo::Curve::linear, "", true},
-        {kNote, "note", "Note Value", 0.0f, 13.0f, 5.0f, ParamInfo::Curve::linear, "", true},
+        {kSync, "sync", "Tempo Sync", 0.0f, 1.0f, 1.0f, ParamInfo::Curve::linear, "", true, 1},
+        {kNote, "note", "Note Value", 0.0f, 13.0f, 5.0f, ParamInfo::Curve::linear, "", true, kNumNotes - 1, kNoteLabels},
         {kFeedback, "feedback", "Feedback", 0.0f, 0.95f, 0.35f, ParamInfo::Curve::linear, "", true},
         {kLowpass, "lowpass", "Lowpass", 200.0f, 20000.0f, 8000.0f, ParamInfo::Curve::log, "Hz", true},
-        {kPingPong, "pingpong", "Ping-Pong", 0.0f, 1.0f, 0.0f, ParamInfo::Curve::linear, "", true},
+        {kPingPong, "pingpong", "Ping-Pong", 0.0f, 1.0f, 0.0f, ParamInfo::Curve::linear, "", true, 1},
         {kMix, "mix", "Mix", 0.0f, 1.0f, 0.3f, ParamInfo::Curve::linear, "", true},
     }};
     static std::span<const ParamInfo> paramInfo() { return kParamInfo; }
@@ -176,5 +187,8 @@ private:
     bool primed_ = false;  // the first block jumps to the slot values (see ChannelStrip)
     std::atomic<uint64_t> nanBlocks_{0};
 };
+
+// DW-196 (T-065): the note labels published in ParamInfo are the note values the delay plays.
+static_assert(Delay::noteLabelsMatch(), "Delay::kNoteLabels must follow kNotes");
 
 } // namespace daw

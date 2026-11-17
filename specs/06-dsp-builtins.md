@@ -112,6 +112,19 @@ class NodeRegistry { public: static std::span<const ParamInfo> paramInfo(NodeKin
                      static std::unique_ptr<Node> create(NodeKind, std::string_view configJSON); };
 ```
 
+### Contract delta (T-065), accepted (autobuild, see docs/autobuild/DECISIONS.md "T-065 scope" and phase 8 "Spec housekeeping", DW-196)
+Additive; existing tables compile unchanged.
+```cpp
+struct ParamInfo { /* …as above… */
+                   uint32_t steps = 0;                       // 0 continuous, 1 a switch, n: n + 1 values min + k·(max − min)/n
+                   const char* const* valueLabels = nullptr; // steps + 1 display names in value order, or null
+};
+```
+- `steps` follows VST3's `stepCount`: the number of steps between `min` and `max`. A value between steps is rounded to the nearest one by the node, as before (the delay's note index, a switch on at ≥ 0.5).
+- Set on every built-in enum or switch param: the delay's `sync` and `pingpong` (1) and `note` (13, labels `Delay::kNoteLabels`, checked against `kNotes` by a `static_assert`); the EQ's six band switches (1); the compressor's `detector` (1, labels "Peak", "RMS"); the channel strip's `mute` and `phase`, the gain node's `mute` and the metronome's `on` (1).
+- `paramInfoJSON` adds `"steps": n` to every row and `"labels": [...]` when the row has labels. The model's `ParamDescriptor` (DAWModel, `ParamCatalog.infos`) parses both (rows without them are continuous; labels whose count isn't `steps + 1` are dropped) and offers `choices`, `display(_:)`, `step(of:)`. The device chain's generic UI (12, UI-032) draws a switch as a toggle and a labelled or multi-step param as a menu.
+- Not covered: hosted plugins' discrete params (`pluginInfoJSON` has no steps yet; DW-213).
+
 ## Status
 | ID | status | test |
 |---|---|---|

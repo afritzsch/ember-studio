@@ -77,7 +77,7 @@ public:
     static constexpr uint32_t kMaxVoices = 16;
 
     static constexpr std::array<ParamInfo, kNumParams> kParamInfo{{
-        {kOn, "on", "On", 0.0f, 1.0f, 1.0f, ParamInfo::Curve::linear, "", true},
+        {kOn, "on", "On", 0.0f, 1.0f, 1.0f, ParamInfo::Curve::linear, "", true, 1},
         {kLevel, "level", "Level", 0.0f, kMaxLevel, 0.25f, ParamInfo::Curve::db, "dB", true},
         {kAccent, "accent", "Accent", 0.0f, kMaxLevel, 2.0f, ParamInfo::Curve::db, "dB", true},
     }};

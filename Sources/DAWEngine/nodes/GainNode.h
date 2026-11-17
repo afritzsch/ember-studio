@@ -37,7 +37,7 @@ public:
 
     static constexpr std::array<ParamInfo, kNumParams> kParamInfo{{
         {kLevel, "level", "Level", 0.0f, kMaxLevel, 1.0f, ParamInfo::Curve::db, "dB", true},
-        {kMute, "mute", "Mute", 0.0f, 1.0f, 0.0f, ParamInfo::Curve::linear, "", true},
+        {kMute, "mute", "Mute", 0.0f, 1.0f, 0.0f, ParamInfo::Curve::linear, "", true, 1},
     }};
     static std::span<const ParamInfo> paramInfo() { return kParamInfo; }
 
