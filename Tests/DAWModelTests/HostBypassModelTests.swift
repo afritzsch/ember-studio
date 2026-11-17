@@ -176,7 +176,8 @@ struct SafeModeTests {
         let folder = try TempFolder("marker")
         defer { folder.remove() }
         let (p, au, vst3, _, _, _) = bypassProject()
-        var open: [CrashMarker.OpenProject] = [CrashMarker.OpenProject(project: p, folder: URL(filePath: "/tmp/Bypass.dawproject"))]
+        // The marker's closure is @Sendable; it runs on the main actor, like this test (T-084: Swift 6.4 warning).
+        nonisolated(unsafe) var open: [CrashMarker.OpenProject] = [CrashMarker.OpenProject(project: p, folder: URL(filePath: "/tmp/Bypass.dawproject"))]
         let session = CrashMarkerSession.start(directory: folder.url) { open }
         #expect(session.crashedSessions.isEmpty)
         let marker = try #require(CrashMarker.read(session.fileURL))
