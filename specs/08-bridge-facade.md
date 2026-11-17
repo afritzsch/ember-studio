@@ -390,6 +390,19 @@ Additive. Safe mode builds plugin slots without their plugin (10 "Contract delta
 
 Affected: T-083 only. Tests: `AUPluginTests`/`VST3PluginTests` "safe mode" (`auSafeModeSlots`, `vst3SafeModeSlots`: fake AU / EmberTest instance counters unchanged, no failure, pass-through, state kept); `SafeModeSlotTests` (DAWModelTests).
 
+### Contract delta (T-096), accepted (autobuild, see docs/autobuild/DECISIONS.md "T-096 control additions")
+DW-220: a running export couldn't be stopped. **Additive**: existing calls, fields and cases keep their meaning.
+```cpp
+enum class JobState : uint8_t { unknown, queued, running, succeeded, failed,
+                                cancelled };   // new, last
+bool cancelJob(JobID job);                     // renderOffline jobs only
+```
+- **Semantics.** `cancelJob` on a queued render takes it out of the export queue: it ends as `cancelled` at once and never touches the engine or the file. On the running render it sets a flag that `OfflineDriver::render` (new defaulted parameter `const std::atomic<bool>* cancel`) reads before every block and between the normalize pass's chunks, never inside `Engine::render`. The render stops there; the transport, recording and device come back as after any export (DW-057/064); the writer is closed and the partial file unlinked (close, then unlink); `OfflineRenderStats::cancelled` is set; the job ends as `cancelled` with the stats so far (`render`), no `error`, and a `jobFinished` event without an error. A render that finished before it saw the flag stays `succeeded`. `cancelJob` returns false, changing nothing, for other job kinds and for unknown or finished jobs. Non-RT, any thread (under the facade lock; the flag is a `std::atomic<bool>` read on `daw.export`).
+- **Swift.** `EngineJobStatus.State.cancelled` (`isFinished` is true for it); `EngineProtocol.cancelJob(_ job: JobID) -> Bool`, a protocol requirement with a default `false` in an extension so test doubles compile unchanged; `EngineClient` calls the facade. `FakeEngine` implements it and adds test hooks: `holdRenders` (renders stay `running` until cancelled or `finishHeldRenders()`), `setMeter(_:_:)` (what `meter(_:)` reads), and records `.cancelJob(job)`.
+- **No change** for meters (DW-174) or preview notes (DW-189): `engine.meters` and `engine.previewNote` (13) use `meter(NodeID)` and `previewNote` as they are. The strip meter is one reading for L and R together, so `engine.meters` reports one value per strip.
+
+Affected: T-096 (implements it; `render.cancel` and the export dialog's Cancel, 12/13). No other task's calls change. Tests: `ControlFollowupTests` "the engine's cancelJob …" (queued and running jobs, files deleted, finished/other jobs refused, 0 RT violations), `ExportDialogTests` "DW-220 (T-096) …".
+
 ## Status
 | ID | status | test |
 |---|---|---|
