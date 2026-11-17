@@ -77,6 +77,7 @@ struct EditState {
     std::mutex mutex;
     std::shared_ptr<PluginEditQueue> queue;  // null: edits are dropped (no facade, tests)
     NodeID slot = 0;
+    IEditController* controller = nullptr;  // for a begin's value; cleared before the controller goes
     std::unordered_map<ParamID, uint32_t> indexOf;
     std::vector<uint32_t> open;    // per index: beginEdit nesting
     std::vector<float> editValue;  // the plugin's newest value not yet seen back from the model (NaN)
@@ -100,8 +101,12 @@ public:
         std::lock_guard lock(edits_->mutex);
         const auto it = edits_->indexOf.find(id);
         if (it == edits_->indexOf.end()) return kInvalidArgument;
-        if (edits_->open[it->second]++ == 0)
-            edits_->push(it->second, std::numeric_limits<float>::quiet_NaN(), PluginEditKind::begin);
+        if (edits_->open[it->second]++ == 0) {
+            // The value before the gesture (the editor calls beginEdit before it changes it).
+            const float before = edits_->controller != nullptr ? static_cast<float>(edits_->controller->getParamNormalized(id))
+                                                               : std::numeric_limits<float>::quiet_NaN();
+            edits_->push(it->second, before, PluginEditKind::begin);
+        }
         return kResultOk;
     }
     // DW-204: inside a gesture a step of it; outside one an ungestured edit (the model groups those).
@@ -336,6 +341,10 @@ struct VST3Instance::Impl {
         componentPoint = nullptr;
         controllerPoint = nullptr;
         if (controller) controller->setComponentHandler(nullptr);
+        {
+            std::lock_guard lock(edits->mutex);  // DW-204
+            edits->controller = nullptr;
+        }
         if (separateController && controller) controller->terminate();
         controller = nullptr;
         processor = nullptr;
@@ -548,6 +557,7 @@ Result<std::shared_ptr<VST3Instance>> VST3Instance::instantiate(const VST3Plugin
         // DW-204: performEdit names a ParamID; the model knows the parameter by its index.
         std::lock_guard lock(impl->edits->mutex);
         for (std::size_t i = 0; i < params; ++i) impl->edits->indexOf.emplace(impl->paramIDs[i], static_cast<uint32_t>(i));
+        impl->edits->controller = impl->controller;
         impl->edits->open.assign(params, 0);
         impl->edits->editValue.assign(params, std::numeric_limits<float>::quiet_NaN());
         impl->edits->editTime.assign(params, {});

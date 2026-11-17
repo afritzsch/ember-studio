@@ -181,11 +181,13 @@ public final class ProjectStore {
         // DW-130 (T-056): the document follows a session-rate change the engine made by itself.
         sync.onEngineSampleRateChange = { [weak self] rate in self?.followEngineSampleRate(rate) }
         connectRecording(sync)  // T-052: recordings folder, REC-004 takes → ImportAsset + AddClip
+        sync.pluginEdits.store = self  // T-063 (DW-204): plugin-side edits → SetParam gestures
         engineSync = sync
         return sync
     }
 
     public func detachEngine() {
+        engineSync?.pluginEdits.endGestures()  // T-063: an open plugin gesture ends with its engine
         engineSync?.invalidate()
         engineSync = nil
     }

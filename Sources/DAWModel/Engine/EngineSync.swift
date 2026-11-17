@@ -82,6 +82,10 @@ public final class EngineSync {
         }
     }
 
+    /// DW-204 (T-063): a plugin's own edits (`pluginParamEdited`) → undoable `SetParam` gestures.
+    /// `ProjectStore.attachEngine` points it at the store.
+    public let pluginEdits = PluginEditRecorder()
+
     /// T-052: asset loads of imported takes not yet waited for (`settleLoads`).
     private var pendingLoads: [JobID] = []
     /// REC-001 (T-052): the audio tracks armed in the engine, with their input pair.
@@ -216,6 +220,9 @@ public final class EngineSync {
             }
         case .graphRejected:
             lastError = event.error
+        case .pluginParamEdited:
+            // DW-204 (T-063): ungestured ones are grouped per poll (pollEvents ends the batch).
+            if let edit = event.pluginEdit { pluginEdits.handle(slot: event.subject, edit: edit) }
         case .recordingFinalized:
             // REC-004 (T-052): the store turns the take into ImportAsset + AddClip.
             if let take = event.recording { onRecordingFinalized?(take, event.error) }
@@ -333,6 +340,7 @@ public final class EngineSync {
     public func pollEvents() -> [EngineEvent] {
         let events = engine.pollEvents()
         for event in events { handle(event) }
+        pluginEdits.finishBatch()  // DW-204 (T-063)
         return events
     }
 
