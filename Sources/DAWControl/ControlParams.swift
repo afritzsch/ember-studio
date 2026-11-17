@@ -177,6 +177,13 @@ public struct TransportSetPunchParams: Codable, Hashable, Sendable {
     public var end: Tick?
 }
 
+/// REC-034 (T-080): record options, engine state like the punch range (not in the project, not
+/// undoable). A field left out keeps its value. `midiLoopTakes`: a MIDI loop recording becomes a
+/// take folder with one take per pass instead of one merged clip (default false).
+public struct TransportSetRecordOptionsParams: Codable, Hashable, Sendable {
+    public var midiLoopTakes: Bool?
+}
+
 /// T-026 (TIME-010): performs `SetMetronome` (outside undo history). Fields left out keep their
 /// value; at least one is needed.
 public struct TransportSetMetronomeParams: Codable, Hashable, Sendable {

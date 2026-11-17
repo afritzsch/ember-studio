@@ -28,6 +28,7 @@ module DAWEngineTestSupport {
   header "SendChecks.h"
   header "TelemetryChecks.h"
   header "TempoMapTestSupport.h"
+  header "LoopTakeChecks.h"
   header "TestNodeChecks.h"
   header "TransportChecks.h"
   header "SamplerChecks.h"

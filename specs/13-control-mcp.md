@@ -112,6 +112,10 @@ Additive. `device.list` devices carry `isBuiltIn`, `outputIsHeadphones` and `isD
 
 With a realtime engine choice, `project.new`/`project.open` through the socket give the new project the app's one live engine; they no longer make a second one. A project that `engine: {mode: "realtime"}` asks for explicitly still gets its own engine, as before.
 
+### Contract delta (T-080), accepted (autobuild, see docs/autobuild/DECISIONS.md "T-080 takes model"; pre-accepted in T-080's briefing)
+- **`transport.setRecordOptions {midiLoopTakes?} → transport`** (REC-034): record options, engine state like the punch range (not in the project, not undoable, the dirty flag stays). A field left out keeps its value. `midiLoopTakes`: a MIDI loop recording becomes a take folder with one take per pass instead of one merged clip (default false). The transport state gains `midiLoopTakes`. `dawctl` and `dawmcp` expose it like every method (`daw_transport_set_record_options`).
+- `engine.events` carry the new `recording` fields (`passes`, `loopStartSample`, `loopEndSample`, `passStarts`, `midiLoopTakes`, notes' `pass`); a loop take is a take folder (`/tracks/i/takeFolders`) by the time `transport.stop` answers, one "Record" undo.
+
 ### `dawctl`
 | ID | Requirement |
 |---|---|

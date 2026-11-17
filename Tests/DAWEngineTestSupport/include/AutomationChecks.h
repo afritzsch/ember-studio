@@ -43,4 +43,15 @@ CheckResult automationAUParam();
 // against an oracle of the passes and the smoother).
 CheckResult automationShortLoopPasses();
 
+// AUTO-006 (T-075): AutomationSuspension (suspend/resume, ID 0, capacity); a suspended lane lets
+// slot writes stand while playing and while stopped, survives a graph swap, and plays again from
+// the next block after resume; resuming while stopped keeps the written value until the playhead
+// moves (DW-237); other lanes aren't affected. 0 RT violations.
+CheckResult automationSuspend();
+
+// AUTO-007 / DW-237 (T-075 confirms the engine half T-074 built): while stopped a SetParam holds
+// until play starts or the playhead moves; a graph rebuild while stopped writes the new lane's
+// value at the playhead once.
+CheckResult automationStoppedEdit();
+
 } // namespace daw::testing

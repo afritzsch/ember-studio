@@ -113,15 +113,15 @@ DSP effects (T-070..073) depend only on the Node API and can be **pulled forward
 | T-072 | D | Delay (tempo sync) | DSP-032, 040, 041 | T-008 | done |
 | T-073 | D | Reverb (FDN, deterministic) | DSP-033, 040, 041 | T-004, T-005 | done |
 | T-074 | E+M | Automation lanes model + AutomationPlayer + plugin param path | AUTO-001..005, 008..010 | T-030, T-061/T-062 (for AUTO-009) | done |
-| T-075 | U+M | Automation recording (touch/latch/write) + lane UI | AUTO-006, 007, UI-015 | T-074, T-033 | wip(t-075-automation-recording) |
+| T-075 | U+M | Automation recording (touch/latch/write) + lane UI | AUTO-006, 007, UI-015 | T-074, T-033 | done |
 | T-076 | U | Mixer view + meters + routing pickers | UI-030, 031, 033 | T-022, T-032 | done |
 | T-077 | D | M7 goldens | TEST (M7 set) | T-071, T-073, T-074 | done |
 
 ### M8 — Comping, export, hardening
 | Task | Lane | Title | Requirements | Depends on | Status |
 |---|---|---|---|---|---|
-| T-080 | E+M | Loop recording takes, TakeFolder, comp model, flattening | REC-030..034 | T-052, T-035 | wip(t-080-loop-takes) |
-| T-081 | U | Take folder / comp editing UI | UI-016 | T-080, T-033 | todo |
+| T-080 | E+M | Loop recording takes, TakeFolder, comp model, flattening | REC-030..034 | T-052, T-035 | done |
+| T-081 | U | Take folder / comp editing UI | UI-016 | T-080, T-033 | ready |
 | T-082 | U | Export dialog | UI-042 | T-009, T-032 | done |
 | T-083 | U | Crash recovery dialog | UI-043 | T-031, T-064 | ready |
 | T-084 | E | Sanitizer CI jobs, perf smoke, GitHub Actions | TEST-007, 008, BUILD-009 | T-077 | wip(t-084-ci) |
@@ -439,14 +439,14 @@ Recorded by the lead from worker reports.
 | DW-233 | T-074 | AUTO-003 for hosted plugins: VST3 could add a second `IParameterChanges` point at the wrap frame, AU a second render-thread event, both reading `ParamSlotTable::afterWrap` | P | todo |
 | DW-234 | T-074 | Lanes whose target is removed (RemoveSend/RemoveDevice) stay in the document, valid but left out of the graph (undo brings them back); decide whether remove commands should cascade | M | todo; done (T-088) |
 | DW-235 | T-074 | `Bus` and `MasterChannel` use synthesized Codable, so they require the `automation` key (every file written so far has it); only Track decodes a missing key as no lanes | M | todo |
-| DW-236 | T-074 | The model doesn't know built-in `automatable` flags (ParamCatalog parses only defaults), so a lane on a non-automatable built-in param is accepted by the model and dropped by the engine; T-075's lane UI should offer only automatable params, or ParamCatalog parses the flag | M/U (T-075) | todo |
-| DW-237 | T-074 | While stopped, `AutomationSet` writes lane values once per position or graph change: a `SetParam` while stopped holds until play/locate, and any rebuild while stopped rewrites the lane value at the playhead. T-075 (AUTO-007) should confirm | E/U (T-075) | todo |
+| DW-236 | T-074 | The model doesn't know built-in `automatable` flags (ParamCatalog parses only defaults), so a lane on a non-automatable built-in param is accepted by the model and dropped by the engine; T-075's lane UI should offer only automatable params, or ParamCatalog parses the flag | M/U (T-075) | done (T-075) |
+| DW-237 | T-074 | While stopped, `AutomationSet` writes lane values once per position or graph change: a `SetParam` while stopped holds until play/locate, and any rebuild while stopped rewrites the lane value at the playhead. T-075 (AUTO-007) should confirm | E/U (T-075) | done (T-075) |
 | DW-238 | T-074 (T-064) | Swift warning in `Tests/DAWModelTests/HostBypassModelTests.swift:192` ('open' mutated after capture by sendable closure) | M (tests) | todo |
 | DW-239 | T-077 | 14's golden table has no rows for `clip_overlap_crossfade`, `export_normalize`, `input_monitoring_loopback`, `plugin_bypass_null` | lead (14) | todo |
 | DW-240 | T-077 | `Tests/GoldenTests/GoldenEngine.swift` mirrors `EngineClient`'s telemetry by hand and dropped `nanBlocks` (fixed in T-077); it may drop other later fields (`recordDrops`, `deviceInputLatency`, `armedTracks`, …). Share one conversion | B / tests | todo |
 | DW-241 | T-077 | Wall-clock tests flaky under parallel load besides UI-010 (DW-223): DW-032 `SyncCostTests` step-cost bounds, CTL-031 `ProgressTests` values.count ≥ 3 | E/B (T-084 perf job) | todo |
 | DW-242 | T-089 | `AUPluginNode::reset()` and `VST3PluginNode::reset()` do nothing, so the DW-063 reset before an offline render doesn't clear a hosted plugin's tail (AU: `AudioUnitReset`; VST3: processor reset/flush) | P | todo |
-| DW-243 | T-089 | With a loop shorter than the device buffer, the recorder reads `Transport::block()` once per device block (the last pass), so earlier passes of that block aren't captured. Matters for T-080 loop takes | E (T-080) | todo |
+| DW-243 | T-089 | With a loop shorter than the device buffer, the recorder reads `Transport::block()` once per device block (the last pass), so earlier passes of that block aren't captured. Matters for T-080 loop takes | E (T-080) | done (T-080) |
 | DW-244 | T-089 | 02 ENG-041's render order should mention passes (one graph run per pass, automation per pass); documented in 03 and `core/Engine.h` only | spec (lead) | todo |
 | DW-245 | T-089 | The toolbar / `ui.state` could show `playPending` (play waiting for an asset re-conversion); `GoldenEngine.transport()` doesn't mirror punch or `playPending` (with DW-240) | U / tests | todo |
 | DW-246 | T-090 | The facade has no `unloadAsset`: the live engine keeps the decoded audio of every project that was ever in front until quit (and background windows keep their own copy in their offline engine). A handover could unload the leaving project's assets | E/B | todo |
@@ -456,3 +456,11 @@ Recorded by the lead from worker reports.
 | DW-250 | T-088 | 12's mixer inserts list can become editable (InsertDevice/RemoveDevice/MoveDevice exist): device picker for built-ins and plugins, master strip via the master's ID, reorder with MoveDevice, `ui.perform` ids like T-076's | U (T-065) | todo |
 | DW-251 | T-088 | `validate()` doesn't restrict insert kinds: a sampler or structural built-in can still enter an insert chain via RestoreTrack/RestoreBus or a file (only InsertDevice enforces it); `metronome_click` relies on a metronome insert. `SetAutomationLane` (the inverse of every automation command) is the last way to make an orphan lane | M (optional) | todo |
 | DW-252 | T-088 | ENG-050 "lock-free readers never see a torn latency table or meter pair" failed once under load average ~40; passes alone. Watch as a flake (with DW-241) | E | todo |
+| DW-253 | T-075 | "+ Lane" doesn't list hosted plugin params (AU/VST3): the model has no list of them; needs `pluginInfoJSON`-based choices. T-063's plugin edit events could also feed `AutomationRecorder` | U (T-065) | todo |
+| DW-254 | T-075 | Only the mixer's continuous controls record automation; nudge buttons stay plain `SetParam`, and UI-032's device chain controls need the same `controlMoved`/`controlReleased` hooks | U (T-065) | todo |
+| DW-255 | T-075 | Recorded points appear on the lane only when the pass commits (release/stop), not live while recording | U | todo |
+| DW-256 | T-075 | After a touch pass commits, the lane resumes right after `perform`; the rebuilt graph lands after EngineSync's ~10 ms debounce, so the old lane can play for a block or two. Resume on `graphApplied` instead | M | todo |
+| DW-257 | T-075 | The dawctl touch-playback check (−12 dB inside the pass, back after release) could become a golden fixture | D | todo |
+| DW-258 | T-080 | `RemoveAsset` doesn't check take clips: Debug `validate()` rejects the removal, Release would leave a take on a missing asset | M | todo |
+| DW-259 | T-080 | `SetSessionSampleRate`/`RestoreSessionSampleRate` don't rescale take clips' `sourceOffsetSamples` | M | todo |
+| DW-260 | T-080 | The recorder guesses whether a block advanced (`Transport` has no block counter): a stale block of whole loop lengths could be recorded twice, and a multi-pass block that can't be traced to the previous one (play + locate in one block, tempo edit) is rebuilt assuming it ran inside the loop. A per-block counter on `Transport` or an `advanced` flag through `InputCapture` makes both exact | E (small) | todo |

@@ -1,0 +1,24 @@
+# comp_crossfade (REC-032, T-080): a take folder's comp renders as ordinary clips with 64-sample
+# equal-power crossfades at its boundaries (DSP-002's path, 09 "Contract delta (T-080)").
+# Three takes on one audio track, like three loop passes: T1 = tone_441_48k from frame 0 over
+# ticks 0..960 (samples 0..24000), T2 = tone_1k_48k over ticks 0..480 (its 12000 frames), T3 =
+# tone_441_48k from frame 6000 over ticks 0..960. The default comp is the latest take everywhere
+# (T3); two selections make it T2 on [0, 240), T3 on [240, 720), T1 on [720, 960). At tick 240
+# (sample 6000) and 720 (sample 18000) the earlier segment's take has audio past the boundary, so
+# its clip runs on 64 samples (3 ticks) and the next segment's clip fades in over it: [6000, 6064)
+# and [18000, 18064). The centre pan law halves the 0.5 sines: -15.05 dB RMS everywhere outside
+# the crossfades, 1 kHz before 6000 and 441 Hz after.
+# @expect {"field": "frames", "value": 24000}
+# @expect {"field": "spectrumPeakHz", "value": 1000, "tolerance": 25, "range": {"start": 0, "end": 6000}}
+# @expect {"field": "spectrumPeakHz", "value": 441, "tolerance": 25, "range": {"start": 6064, "end": 18000}}
+# @expect {"field": "rmsDb", "value": -15.05, "tolerance": 0.05, "range": {"start": 1000, "end": 6000}}
+# @expect {"field": "rmsDb", "value": -15.05, "tolerance": 0.05, "range": {"start": 6064, "end": 18000}}
+# @expect {"field": "rmsDb", "value": -15.05, "tolerance": 0.05, "range": {"start": 18064, "end": 24000}}
+project.new {"name": "comp_crossfade", "sampleRate": 48000}
+command.apply {"command": {"type": "AddTrack", "name": "Comp", "kind": "audio"}}
+asset.import {"path": "assets/tone_441_48k.wav"}
+asset.import {"path": "assets/tone_1k_48k.wav"}
+command.apply {"command": {"type": "CreateTakeFolder", "trackID": 2, "takes": [{"start": 0, "length": 960, "assetID": 3}, {"start": 0, "length": 480, "assetID": 4}, {"start": 0, "length": 960, "assetID": 3, "sourceOffsetSamples": 6000}]}}
+command.apply {"command": {"type": "SetCompSelection", "folderID": 5, "start": 0, "end": 240, "takeID": 8}}
+command.apply {"command": {"type": "SetCompSelection", "folderID": 5, "start": 720, "end": 960, "takeID": 6}}
+render.offline {"from": 0, "to": 960, "path": "comp_crossfade.wav", "tail": false}

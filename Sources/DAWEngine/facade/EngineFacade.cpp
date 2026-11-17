@@ -331,6 +331,8 @@ struct EngineFacade::Impl {
     // 09 (T-052): the drivers' InputCapture (driverConfig). Outlives the driver, which ~Impl stops
     // first. recordInputLatency: the running device's IO-005 input latency (telemetry).
     Recorder recorder;
+    // REC-034 (T-080): setRecordOptions (under the mutex).
+    bool midiLoopTakes = false;
     Recorder* const capture = &recorder;
     uint32_t recordInputLatency = 0;
     AssetTable assets;
@@ -575,6 +577,11 @@ void EngineFacade::Impl::pushTakes(std::vector<FinalizedTake> takes) {
         event.recording.sampleRate = take.sampleRate;
         event.recording.inputPair = take.inputPair;
         event.recording.droppedFrames = take.droppedFrames;
+        // REC-030 (T-080): the loop passes.
+        event.recording.passes = take.passStarts.empty() ? 1 : static_cast<uint32_t>(take.passStarts.size());
+        event.recording.loopStart = take.loopStart;
+        event.recording.loopEnd = take.loopEnd;
+        event.recording.passStarts = std::move(take.passStarts);
         if (take.error)
             event.error = toFacadeError(*take.error);
         else if (take.droppedFrames > 0)  // REC-002: the app warns (ToastCenter)
@@ -602,7 +609,13 @@ void EngineFacade::Impl::pushMidiTakes(std::vector<FinalizedMidiTake> takes) {
         event.recording.droppedFrames = take.droppedEvents;
         event.recording.notes.reserve(take.notes.size());
         for (const RecordedMidiNote& note : take.notes)
-            event.recording.notes.push_back(RecordedNotePOD{note.start, note.end, note.pitch, note.velocity, note.channel});
+            event.recording.notes.push_back(
+                RecordedNotePOD{note.start, note.end, note.pitch, note.velocity, note.channel, note.pass});
+        // REC-034 (T-080): the passes, and whether the model makes takes of them.
+        event.recording.passes = take.passes;
+        event.recording.loopStart = take.loopStart;
+        event.recording.loopEnd = take.loopEnd;
+        event.recording.midiLoopTakes = midiLoopTakes;
         if (take.droppedEvents > 0)
             event.error = facadeError(FacadeErrorCode::io, "MIDI recording dropped " + std::to_string(take.droppedEvents) +
                                                                " events (the record buffer was full)");
@@ -1245,6 +1258,15 @@ float EngineFacade::getParam(ParamID id) const {
     return id < params.capacity() ? params.get(id) : 0.0f;
 }
 
+bool EngineFacade::setAutomationSuspended(uint64_t laneID, bool suspended) {
+    AutomationSuspension& table = impl_->engine.automationSuspension();
+    if (!suspended) {
+        table.resume(laneID);
+        return true;
+    }
+    return table.suspend(laneID);
+}
+
 // MARK: Transport
 
 void EngineFacade::play() {
@@ -1325,6 +1347,11 @@ void EngineFacade::setPunch(bool enabled, Tick in, Tick out) {
     impl_->recorder.setPunch(punch);
 }
 
+void EngineFacade::setRecordOptions(bool midiLoopTakes) {
+    std::lock_guard lock(impl_->mutex);
+    impl_->midiLoopTakes = midiLoopTakes;  // REC-034 (T-080)
+}
+
 // UI-021 (T-043): see EngineFacade.h. The inbox (nodes/MidiClipPlayer.h) is lock-free towards
 // the audio thread; the facade lock only serializes its producers.
 void EngineFacade::previewNote(NodeID source, uint8_t pitch, uint8_t velocity, bool on) {
@@ -1350,6 +1377,7 @@ TransportPOD EngineFacade::transport() const {
     out.punchIn = punch.in;
     out.punchOut = punch.out;
     out.playPending = impl_->playPending;  // IO-033 (T-089)
+    out.midiLoopTakes = impl_->midiLoopTakes;  // REC-034 (T-080)
     return out;
 }
 

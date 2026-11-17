@@ -198,7 +198,9 @@ private struct TrackHeaderColumn: View {
                 ForEach(model.trackHeaders) { track in
                     TrackHeaderRow(track: track)
                         .frame(height: ProjectWindowModel.trackHeight - 1)
+                        .overlay(alignment: .bottomTrailing) { AutomationTrackAccessory(model: model.automation, trackID: track.id) }
                     Divider()
+                    AutomationLaneHeaders(model: model.automation, trackID: track.id)  // UI-015 (T-075)
                 }
             }
             .offset(y: -model.scrollY)
