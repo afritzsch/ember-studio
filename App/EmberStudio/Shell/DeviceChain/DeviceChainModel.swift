@@ -180,7 +180,8 @@ final class DeviceChainModel {
     func pluginInfo(_ slot: NodeIDValue) -> PluginInfo? {
         if let cached = pluginInfos[slot] { return cached }
         guard let json = pluginInfoJSON(slot), let info = PluginInfo.parse(json) else { return nil }
-        pluginInfos[slot] = info
+        // A plugin not loaded yet is asked again next time (its params come with the load).
+        if info.loaded { pluginInfos[slot] = info }
         return info
     }
 

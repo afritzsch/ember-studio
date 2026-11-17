@@ -172,6 +172,10 @@ final class AutomationLanesModel {
                 case .au(let au): slotName = au.name
                 case .vst3(let vst): slotName = vst.name
                 }
+                // DW-253 (T-065): a hosted plugin's param by the name its pluginInfoJSON gives.
+                if slot.isPlugin, let param = window?.deviceChain.pluginInfo(slotID)?.params.first(where: { $0.index == index }) {
+                    paramName = param.name
+                }
             }
             return "\(slotName) \(paramName)"
         }
@@ -186,6 +190,7 @@ final class AutomationLanesModel {
     /// DW-236: the targets of `track` a lane may drive, without one yet: strip volume, pan, mute,
     /// each send's level, and each built-in device's automatable params (hosted plugins' params
     /// aren't listed here; a lane on one can come from `dawctl`).
+    /// DW-253 (T-065): hosted plugins' params are listed now, as the engine reports them.
     func choices(for track: Track) -> [LaneTargetChoice] {
         var out: [LaneTargetChoice] = [
             .init(target: .strip(channel: track.id, param: .gain), key: "gain", name: "Volume"),
@@ -200,6 +205,13 @@ final class AutomationLanesModel {
             for index in rows.keys.sorted() where catalog.isAutomatable(kind, index) {
                 let target = ParamTarget.device(slot: slot.id, index: index)
                 out.append(.init(target: target, key: "device.\(slot.id).\(index)", name: name(of: target)))
+            }
+        }
+        // DW-253 (T-065): hosted plugins' params, as the engine lists them (pluginInfoJSON).
+        for slot in [track.instrument].compactMap({ $0 }) + track.inserts where slot.isPlugin {
+            for param in window?.deviceChain.pluginInfo(slot.id)?.params ?? [] {
+                let target = ParamTarget.device(slot: slot.id, index: param.index)
+                out.append(.init(target: target, key: "device.\(slot.id).\(param.index)", name: name(of: target)))
             }
         }
         return out.filter { project.automationLane(for: $0.target) == nil }

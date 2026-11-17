@@ -255,6 +255,30 @@ struct DeviceChainTests {
         window.pluginEditors.closeAll()
     }
 
+    @Test("DW-253: the \"+ Lane\" menu lists a hosted plugin's params by their pluginInfoJSON names; a plugin not loaded yet lists none")
+    func laneMenuPluginParams() throws {
+        let (window, _, a, _, _, _, _, _) = try chainWindow()
+        window.perform(InsertDevice(channel: a, device: .vst3(VST3Descriptor(identifier: "/x.vst3#01", name: "Plain"))))
+        let slot = window.project.track(a)!.inserts.last!.id
+        var loaded = false
+        window.deviceChain.readPluginInfo = { id in
+            guard id == slot else { return "" }
+            return loaded
+                ? #"{"slot":\#(id),"loaded":true,"params":[{"index":0,"id":"7","name":"Gain","unit":"","min":0,"max":1,"value":0.25},{"index":1,"id":"8","name":"Tone","unit":"","min":0,"max":1,"value":0.5}]}"#
+                : #"{"slot":\#(id),"loaded":false}"#
+        }
+        try window.control("track.\(a).automation").action()
+        #expect(!window.controls.contains { $0.id.hasPrefix("track.\(a).automation.add.device.\(slot).") })
+        loaded = true
+        let add = try window.control("track.\(a).automation.add.device.\(slot).1")
+        #expect(add.label == "Add Plain Tone Lane")
+        add.action()
+        let target = ParamTarget.device(slot: slot, index: 1)
+        #expect(window.project.automationLane(for: target)?.lane.mode == .read)
+        #expect(window.automation.name(of: target) == "Plain Tone")
+        #expect(!window.controls.contains { $0.id == "track.\(a).automation.add.device.\(slot).1" }, "has a lane now")
+    }
+
     @Test("DW-226, PLUG-021: in safe mode AU/VST3 slots show as bypassed by safe mode (toggle on, disabled) in the chain and the mixer; built-ins keep their own bypass")
     func safeMode() throws {
         let (window, _, a, _, _, eq, _, _) = try chainWindow()
