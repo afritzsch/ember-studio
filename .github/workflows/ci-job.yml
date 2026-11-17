@@ -20,7 +20,9 @@ permissions:
 jobs:
   run:
     name: scripts/ci.sh ${{ inputs.job }}
-    runs-on: macos-26
+    # DW-261: hosted images have no Xcode 27 yet (2026-11). Set the repo variable CI_RUNNER (e.g. to a
+    # self-hosted runner's label) to run elsewhere; until then the job fails fast in the Xcode step.
+    runs-on: ${{ vars.CI_RUNNER || 'macos-26' }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     steps:
       - uses: actions/checkout@v4
