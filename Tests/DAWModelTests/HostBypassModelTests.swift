@@ -176,9 +176,12 @@ struct SafeModeTests {
         let folder = try TempFolder("marker")
         defer { folder.remove() }
         let (p, au, vst3, _, _, _) = bypassProject()
-        // The marker's closure is @Sendable; it runs on the main actor, like this test (T-084: Swift 6.4 warning).
-        nonisolated(unsafe) var open: [CrashMarker.OpenProject] = [CrashMarker.OpenProject(project: p, folder: URL(filePath: "/tmp/Bypass.dawproject"))]
-        let session = CrashMarkerSession.start(directory: folder.url) { open }
+        // T-084: the marker's closure is @Sendable, so it captures a box rather than a mutated var
+        // (Swift 6.4 warning); it runs on the main actor, like this test.
+        final class Open: @unchecked Sendable { var projects: [CrashMarker.OpenProject] = [] }
+        let open = Open()
+        open.projects = [CrashMarker.OpenProject(project: p, folder: URL(filePath: "/tmp/Bypass.dawproject"))]
+        let session = CrashMarkerSession.start(directory: folder.url) { open.projects }
         #expect(session.crashedSessions.isEmpty)
         let marker = try #require(CrashMarker.read(session.fileURL))
         #expect(marker.processID == ProcessInfo.processInfo.processIdentifier)
@@ -190,7 +193,7 @@ struct SafeModeTests {
         // This process is alive: its marker isn't a crashed session's.
         #expect(CrashMarker.leftByCrashedSessions(in: folder.url).isEmpty)
 
-        open = []
+        open.projects = []
         session.refresh()
         #expect(CrashMarker.read(session.fileURL)?.projects == [])
         session.end()
