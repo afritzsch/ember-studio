@@ -139,4 +139,18 @@ struct PluginManagerTests {
         try window.control("plugins.close").action()
         #expect(!window.pluginPanel.isOpen)
     }
+
+    @Test("UI-041, CONV §9: a tool-launched app works on its own copy of the scan cache under $TMPDIR; a person's app on the user's cache")
+    func automatedCacheCopy() throws {
+        let dir = try TempDir()
+        let user = dir.file("user/plugins.json")
+        try FileManager.default.createDirectory(at: user.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("{}".utf8).write(to: user)
+        #expect(PluginManagerModel.sharedCacheURL(automated: false, userCache: user) == user)
+        let pid = Int32.random(in: 900_000...999_999)
+        let copy = PluginManagerModel.sharedCacheURL(automated: true, pid: pid, userCache: user)
+        defer { try? FileManager.default.removeItem(at: copy.deletingLastPathComponent()) }
+        #expect(copy != user && copy.path.contains("EmberStudio-Plugins-\(pid)"))
+        #expect(FileManager.default.contents(atPath: copy.path) == Data("{}".utf8), "seeded from the user's cache")
+    }
 }

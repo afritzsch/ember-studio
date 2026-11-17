@@ -67,7 +67,23 @@ final class PluginManagerModel {
 
     /// The app's one manager. Windows show it (`PluginManagerPanelModel`); tests give a window
     /// one of their own.
-    static let shared = PluginManagerModel()
+    static let shared = PluginManagerModel(cacheURL: sharedCacheURL(automated: AppOptions(arguments: CommandLine.arguments).isAutomated))
+
+    /// PLUG-004's `plugins.json` for a person at the app. An app launched by a tool (`dawmcp`,
+    /// `dawctl --launch`, tests: `AppOptions.isAutomated`) works on a copy of it in a folder of its
+    /// own under `$TMPDIR` (CONV §9: parallel worktrees' apps never write one shared file), so it
+    /// starts with the user's scan results and its scans stay its own.
+    nonisolated static func sharedCacheURL(automated: Bool, pid: Int32 = ProcessInfo.processInfo.processIdentifier,
+                                           userCache: URL = PluginCache.defaultURL) -> URL {
+        guard automated else { return userCache }
+        let folder = FileManager.default.temporaryDirectory.appending(path: "EmberStudio-Plugins-\(pid)", directoryHint: .isDirectory)
+        let copy = folder.appending(path: "plugins.json")
+        if !FileManager.default.fileExists(atPath: copy.path) {
+            try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try? FileManager.default.copyItem(at: userCache, to: copy)
+        }
+        return copy
+    }
 
     /// Every cached plugin, blocked ones included, by name.
     private(set) var plugins: [ScannedPlugin] = []
