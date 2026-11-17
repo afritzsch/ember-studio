@@ -1,4 +1,4 @@
-# One CI job: `scripts/ci.sh <job>` on a macos-15 runner (T-084). Called by ci.yml, so every job
+# One CI job: `scripts/ci.sh <job>` on a macos-26 runner (T-084; DW-261: macos-15 tops out at Xcode 26.3). Called by ci.yml, so every job
 # shares the same checkout, toolchain, cache and log upload steps.
 name: CI job
 
@@ -20,7 +20,7 @@ permissions:
 jobs:
   run:
     name: scripts/ci.sh ${{ inputs.job }}
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: ${{ inputs.timeout-minutes }}
     steps:
       - uses: actions/checkout@v4
@@ -35,6 +35,9 @@ jobs:
           export DEVELOPER_DIR="$xcode/Contents/Developer"
           xcodebuild -version
           swift --version
+          # DW-261: the code needs Xcode 27 / Swift 6.4 (exit tests, macOS 27 SDK). Fail clearly, not deep in the build.
+          major=$(xcodebuild -version | sed -n 's/^Xcode \([0-9]*\).*/\1/p')
+          if [ "${major:-0}" -lt 27 ]; then echo "::error::Newest Xcode on this runner is $major; Ember Studio needs Xcode 27+ (DW-261)"; exit 1; fi
 
       # Fetched dependencies only (the MCP Swift SDK). Compiled outputs are never cached: the test
       # job must build clean (DW-005), and the weekly jobs gain little from a week-old cache.
