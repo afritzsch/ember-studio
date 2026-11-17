@@ -396,24 +396,36 @@ CheckResult auPluginEditsBecomeEvents() {
         DAW_CHECK(mix != nil);
         if (mix == nil) return checks;
 
+        // DW-276 (T-094): robust under load. Every wait polls with a generous deadline (the V2
+        // bridge reports on its own queue, late on a loaded machine). The hold after a release or an
+        // ungestured edit lasts kHold from when the observer saw it, which is after `since` was
+        // taken; so a check made less than kHoldSure after `since` must still see the hold, and a
+        // later one (a starved test thread at load 20+) can't tell, so it only checks what holds
+        // either way. The window is measured after the decision it vouches for.
+        constexpr auto kWait = 15000ms;
+        constexpr auto kHoldSure = 250ms;  // < AUInstance's 300 ms hold
+        using Clock = std::chrono::steady_clock;
+        auto withinHold = [=](Clock::time_point since) { return Clock::now() - since < kHoldSure; };
+
         // An editor's gesture: Touch, values, Release.
         std::vector<PluginParamEdit> edits;
         auto collect = [&](size_t atLeast) {
             return eventually([&] {
                 for (const auto& e : queue->take()) edits.push_back(e);
                 return edits.size() >= atLeast;
-            });
+            }, kWait);
         };
         [mix setValue:30 originator:nil atHostTime:0 eventType:AUParameterAutomationEventTypeTouch];
         // The gesture is open: a model value isn't pushed (it would fight the knob).
-        DAW_CHECK(eventually([&] { return instance->pushDecision(0, 10.0f) == AUInstance::PushDecision::defer; }));
+        DAW_CHECK(eventually([&] { return instance->pushDecision(0, 10.0f) == AUInstance::PushDecision::defer; }, kWait));
         for (float v : {40.0f, 50.0f}) [mix setValue:v originator:nil atHostTime:0 eventType:AUParameterAutomationEventTypeValue];
+        const auto released = Clock::now();
         [mix setValue:50 originator:nil atHostTime:0 eventType:AUParameterAutomationEventTypeRelease];
         DAW_CHECK(collect(3));
         DAW_CHECK(eventually([&] {
             for (const auto& e : queue->take()) edits.push_back(e);
             return !edits.empty() && edits.back().phase == PluginEditKind::end;
-        }));
+        }, kWait));
         if (edits.size() >= 3) {
             DAW_CHECK(edits.front().slot == 20 && edits.front().index == 0 && edits.front().phase == PluginEditKind::begin);
             DAW_CHECK(edits.back().phase == PluginEditKind::end);
@@ -425,7 +437,8 @@ CheckResult auPluginEditsBecomeEvents() {
         // (the AU has it), then the model leads.
         rig->engine().params().set(p + 0, 20.0f);
         rig->render(256);
-        DAW_CHECK(std::fabs(mix.value - 50.0f) < 1e-4f);
+        const bool heldAfterRelease = withinHold(released);  // so the render's decision was inside it
+        if (heldAfterRelease) DAW_CHECK(std::fabs(mix.value - 50.0f) < 1e-4f);  // 20 deferred, never scheduled
         rig->engine().params().set(p + 0, 50.0f);
         rig->render(256);
         auto pooled = std::static_pointer_cast<AUPluginNode>(rig->engine().nodes().get(20));
@@ -433,7 +446,7 @@ CheckResult auPluginEditsBecomeEvents() {
         rig->engine().params().set(p + 0, 80.0f);
         rig->render(256);
         DAW_CHECK(pooled && pooled->paramEventsPushed() == pushedBefore + 1);
-        DAW_CHECK(eventually([&] { return std::fabs(instance->params(true)[0].value - 80.0f) < 1e-3f; }));
+        DAW_CHECK(eventually([&] { return std::fabs(instance->params(true)[0].value - 80.0f) < 1e-3f; }, kWait));
         // The tree reports the push back (V2 bridge): that echo is no edit.
         std::this_thread::sleep_for(100ms);
         edits.clear();
@@ -442,12 +455,18 @@ CheckResult auPluginEditsBecomeEvents() {
 
         // A plain value change (a menu, a preset) is an ungestured edit; the model's older value is
         // held back until it matches or 300 ms pass.
+        const auto edited = Clock::now();
         mix.value = 25;
         DAW_CHECK(collect(1));
         if (!edits.empty()) DAW_CHECK(edits.back().phase == PluginEditKind::value && std::fabs(edits.back().value - 25.0f) < 1e-4f);
-        DAW_CHECK(instance->pushDecision(0, 80.0f) == AUInstance::PushDecision::defer);
-        // The hold lasts ~300 ms (a timer on a utility queue; later under load).
-        DAW_CHECK(eventually([&] { return instance->pushDecision(0, 80.0f) == AUInstance::PushDecision::push; }, 3000ms));
+        // pushDecision never returns skip here (80 isn't the held 25), so defer, or push once the hold
+        // ran out; only a check inside the window can insist on defer.
+        const AUInstance::PushDecision decision = instance->pushDecision(0, 80.0f);
+        const bool heldAfterEdit = withinHold(edited);  // measured after the decision
+        DAW_CHECK(decision != AUInstance::PushDecision::skip);
+        if (heldAfterEdit) DAW_CHECK(decision == AUInstance::PushDecision::defer);
+        // The hold lasts ~300 ms (its deadline is checked when the node asks).
+        DAW_CHECK(eventually([&] { return instance->pushDecision(0, 80.0f) == AUInstance::PushDecision::push; }, kWait));
     }
     DAW_CHECK(rig->violations() == 0);
     return checks;
