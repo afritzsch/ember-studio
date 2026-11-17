@@ -125,7 +125,7 @@ DSP effects (T-070..073) depend only on the Node API and can be **pulled forward
 | T-082 | U | Export dialog | UI-042 | T-009, T-032 | done |
 | T-083 | U | Crash recovery dialog | UI-043 | T-031, T-064 | done |
 | T-084 | E | Sanitizer CI jobs, perf smoke, GitHub Actions | TEST-007, 008, BUILD-009 | T-077 | done |
-| T-091 | D | DSP performance for TEST-008: compressor gain computer block-wise (vForce or fast dB, skip below threshold − knee), EQ per-sample coefficient path; perf job ≥ 10× (target 20×) | TEST-008, DSP-031, DSP-030 | T-084 | wip(t-091-dsp-perf) |
+| T-091 | D | DSP performance for TEST-008: compressor gain computer block-wise (vForce or fast dB, skip below threshold − knee), EQ per-sample coefficient path; perf job ≥ 10× (target 20×) | TEST-008, DSP-031, DSP-030 | T-084 | done |
 
 ### Follow-ups from the user review (2026-11-10, see docs/autobuild/DECISIONS.md → User review)
 | Task | Lane | Title | Requirements | Depends on | Status |
@@ -133,6 +133,15 @@ DSP effects (T-070..073) depend only on the Node API and can be **pulled forward
 | T-088 | M | Insert-chain commands `InsertDevice`/`RemoveDevice`/`MoveDevice` (tracks, buses, master); remove commands cascade the automation lanes that target the removed send/device in one undo step; velocity-0 notes repaired on open | MODEL-005, DW-149, DW-234, DW-150 | T-064, T-074 | done |
 | T-089 | E+B | Transport/export follow-ups: playhead keeps its tick on tempo edits; loops shorter than a block (several wraps per block); offline renders reset all nodes first; `play()` during asset re-conversion is queued, not refused | DW-061, DW-125, DW-063, IO-033 (T-056 change) | T-056, T-074 | done |
 | T-090 | U | App follow-ups: one live engine per app (front window plays, others offline), monitoring feedback guard (built-in mic → built-in speakers), export dialog's "Include Metronome" starts in the metronome's state, load-tolerant UI-010 perf smoke | DW-156, DW-230, T-026 change, DW-223 | T-054, T-082 | done |
+
+### Follow-ups from autobuild phase 10 (open DW items; see docs/autobuild/DECISIONS.md "Phase 10 follow-up tasks")
+| Task | Lane | Title | Requirements | Depends on | Status |
+|---|---|---|---|---|---|
+| T-092 | D+E | DSP/engine follow-ups: AUTO-003 wrap jump (`automation/WrapJump.h`) for EQ, compressor, delay, reverb, sampler, metronome; `locate_reset` golden with a real delay/reverb tail; skip `BypassNode`'s dry copy for unbypassed 0-latency inserts; buffered `AudioFileWriter` writes | DW-232, DW-197, DW-280, DW-279 (AUTO-003, TEST-008) | T-091 | ready |
+| T-093 | E+M+U | Per-track MIDI input and channel selection (backlog the user chose): `Track.midiInput {source, channel}` persisted + command, the MIDI input path filters per armed track, picker in the track header and mixer strip, ui.state/ui.perform | DW-216 (REC-020.., MODEL-005) | T-053, T-065 | ready |
+| T-094 | P | Plugin hosting follow-ups: VST3 display strings and steps/labels in `pluginInfoJSON` (generic UI shows real values), scanner timeout / retry with a longer limit, parallel scan, the DW-204 AU timing flake under load, "Enable Plugins" latency | DW-213, DW-275, DW-018, DW-276, DW-268 | T-065, T-083 | ready |
+| T-095 | U (+M) | App follow-ups 2: enable one slot in safe mode, plugin-editor edits into `AutomationRecorder`, `visibleTracks` counting lane/take rows, track header overlap, the empty "Comp Editor" tab, `deviceChain` id prefix in `ViewModelTests`, arrow-key clip nudge, editable toolbar tempo/signature | DW-266, DW-277, DW-270, DW-271, DW-272, DW-278, DW-179, DW-180 | T-065, T-081, T-083 | ready |
+| T-096 | B+U | Control/export follow-ups: cancel a running export (facade + dialog), `render.offline` dither, meters through the control protocol, headless `engine.previewNote` | DW-220, DW-219, DW-174, DW-189 | T-082 | ready |
 
 ## Critical path
 `T-001 → T-002 → T-004 → T-012 → T-014 → T-016 → T-017 → T-018` unlocks agent self-testing. Prioritize it; everything else fans out from there.
@@ -380,7 +389,7 @@ Recorded by the lead from worker reports.
 | DW-173 | T-071 | DSP-041 names `NodeRegistry::paramInfo(NodeKind)`, but it doesn't exist; the facade's `paramInfoJSON` hard-codes kinds (strip, compressor, metronome, gain). Add `paramInfo` to `NodeKindInfo`/`NodeRegistry` and have `paramInfoJSON` read it | E | done (T-070) |
 | DW-174 | T-071 | Meters (strip post-fader, compressor GR) can't be read through the control protocol: `dawctl`/`dawmcp` have no meter method, only the facade's `meter(node)` / `EngineProtocol.meter`. Add one (13 delta); a typed GR reading could come with it | B | todo |
 | DW-175 | T-071 | `nodes/BuiltinNodes.h` doc comment lists the registered kinds but not `compressor` (one line) | D | done (T-073) |
-| DW-176 | T-071 | TEST-008 perf (64 × EQ + Comp ≥ 20× realtime): the compressor does a per-sample `log10` + `exp` in double, unmeasured. If too slow, add a below-knee fast path | D (T-077 / T-084) | todo |
+| DW-176 | T-071 | TEST-008 perf (64 × EQ + Comp ≥ 20× realtime): the compressor does a per-sample `log10` + `exp` in double, unmeasured. If too slow, add a below-knee fast path | D (T-077 / T-084) | done (T-091: block-wise compressor with `dsp/FastDb.h`, below-knee rest path) |
 | DW-177 | T-026 | Export dialog (T-082) must leave the click out by default: go through `render.offline` (which does it) or set `store.engineSync?.isMetronomeSuppressed = true` around `renderOffline`; an "Include metronome" checkbox maps to `includeMetronome` | U (T-082) | done (T-082: the export dialog holds the click slot at 0 unless "Include Metronome") |
 | DW-178 | T-026 | `paramInfoJSON(.gain)` now publishes GainNode's 2 slots, so a device slot of built-in kind `.gain` gets level/mute slots (it had none). Sends are unaffected (`ParamLayout.Send`). Check when insert chains land (DW-149) | M | todo |
 | DW-179 | T-034 | Arrow keys aren't bound to `clip.nudge.left|right|up|down`; `KeyChord` drops function keys today (UX choice) | U | todo |
@@ -465,7 +474,7 @@ Recorded by the lead from worker reports.
 | DW-258 | T-080 | `RemoveAsset` doesn't check take clips: Debug `validate()` rejects the removal, Release would leave a take on a missing asset | M | todo |
 | DW-259 | T-080 | `SetSessionSampleRate`/`RestoreSessionSampleRate` don't rescale take clips' `sourceOffsetSamples` | M | todo |
 | DW-260 | T-080 | The recorder guesses whether a block advanced (`Transport` has no block counter): a stale block of whole loop lengths could be recorded twice, and a multi-pass block that can't be traced to the previous one (play + locate in one block, tempo edit) is rebuilt assuming it ran inside the loop. A per-block counter on `Transport` or an `advanced` flag through `InputCapture` makes both exact | E (small) | todo |
-| DW-261 | T-084 | After the first push, check the macos-15 image's Xcode (tests need Swift 6.2+ exit tests; local is Xcode 27.2 / Swift 6.4); switch the runner label in `ci-job.yml` if it's too old | lead | todo |
+| DW-261 | T-084 | After the first push, check the macos-15 image's Xcode (tests need Swift 6.2+ exit tests; local is Xcode 27.2 / Swift 6.4); switch the runner label in `ci-job.yml` if it's too old | lead | partial (lead, phase 10): hosted macos-15/macos-26 images have no Xcode 27 (≤ 26.6); CI fails fast and takes its runner from the repo variable `CI_RUNNER` → user: self-hosted runner or wait for an image |
 | DW-262 | T-084 | test.sh's warning check covers `swift build`, not test targets, so test-target warnings don't fail CI | E (small) | todo |
 | DW-263 | T-063 | A plugin-side edit without a begin (menu, preset) has no "before" value, so undoing it leaves the plugin at the edited value (the first-edit baseline covers only gestured edits) | P+M | todo |
 | DW-264 | T-063 | A VST3 without its own editor gets none (generic ParamInfo UI is T-065); editor panel positions aren't remembered; third-party VSTGUI/JUCE VST3 and AUv3 out-of-process editors untried | U/P (T-065) | partial: generic UI for a plugin without editor done (T-065); panel positions, 3rd-party editors todo |
@@ -483,3 +492,6 @@ Recorded by the lead from worker reports.
 | DW-276 | T-065 | Flake under heavy load: `PluginEditorTests` "DW-204: AU Touch/Value/Release…" (V2 bridge async echo/hold timing margin); seen at load average 20+ only | P | todo |
 | DW-277 | T-065 | Plugin-side edits from a plugin's own editor (T-063 events) don't feed `AutomationRecorder`, so they aren't recorded while automation recording is on | U | todo |
 | DW-278 | T-065 | `ViewModelTests`' control-id naming regex has no `deviceChain` prefix (passes only because the test keeps the tab closed) | U (small) | todo |
+| DW-279 | T-091 | `AudioFileWriter::write` calls `ExtAudioFileWrite` (→ `pwrite`) once per 128-frame block: 3–7 % of the TEST-008 render. Buffer ~64k frames before each write | E (io) | todo |
+| DW-280 | T-091 | `BypassNode` copies the dry input every block even for a 0-latency insert that isn't bypassed (2–4 % of TEST-008); skip it when neither this block nor the previous one is bypassed | E (graph) | todo |
+| DW-281 | T-091 | TEST-008's 10.7× was measured in Low Power Mode (`pmset lowpowermode 1`, ~2.5 GHz) with three other workers: little margin; re-run `scripts/ci.sh perf` with Low Power Mode off (estimate 15–18×, still short of the 20× target) | user / lead | todo |
