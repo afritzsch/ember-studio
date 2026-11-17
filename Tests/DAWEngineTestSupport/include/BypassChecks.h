@@ -19,4 +19,9 @@ CheckResult bypassLatentNull();
 // grown latency gets a new line and still aligns; an unallocated bypass slot is rejected.
 CheckResult bypassCrossfadeAndRebuild();
 
+// DW-280 (T-092): a 0-latency insert that skips its dry copy while unbypassed still crossfades
+// with, and while bypassed outputs, exactly this block's input, across random block sizes and a
+// random toggle schedule; 0 RT violations.
+CheckResult bypassZeroLatencyToggles();
+
 } // namespace daw::testing

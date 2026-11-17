@@ -13,5 +13,7 @@ struct BypassTests {
 
     @Test("PLUG-018: a toggle is a one-block crossfade; rebuilds carry the bypass delay line over; a grown latency stays aligned")
     func crossfadeAndRebuild() { expectPasses(daw.testing.bypassCrossfadeAndRebuild()) }
-}
 
+    @Test("DW-280, PLUG-018: a 0-latency insert skips its dry copy while unbypassed; toggles and bypassed blocks still use this block's input, bit for bit")
+    func zeroLatencyToggles() { expectPasses(daw.testing.bypassZeroLatencyToggles()) }
+}

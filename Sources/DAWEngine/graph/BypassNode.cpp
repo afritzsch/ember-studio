@@ -19,17 +19,21 @@ void BypassNode::process(ProcessContext& ctx, NodeIO& io) DAW_RT {
     DAW_RT_ASSERT(n <= s.maxBlock_ && latency_ <= s.line_.maxDelay());
     const bool bypass = isBypassed(ctx.params.get(bypassParam_));
 
-    // The delayed input, every block (before the wrapped node may overwrite a shared buffer).
-    float* dryChannels[2] = {s.scratch_.get(), s.scratch_.get() + s.maxBlock_};
-    const AudioBufferView dry{dryChannels, 2, n};
-    s.line_.process(io.audioIn, dry, latency_, false, n);
-
     if (!s.primed_) {
         s.primed_ = true;
         s.bypassed_ = bypass;  // the first block takes the slot as it is: no fade in from nothing
     }
     const bool was = s.bypassed_;
     s.bypassed_ = bypass;
+
+    // The delayed input (before the wrapped node may overwrite a shared buffer). Every block for
+    // a latent node, so its line has the right history at a toggle. DW-280 (T-092, TEST-008): a
+    // 0-latency insert's line has no history to keep (maxDelay() 0: its output is the input, and
+    // a later build with latency gets a new line), so a block that is neither bypassed nor
+    // toggling, where the dry signal isn't used, skips the copy.
+    float* dryChannels[2] = {s.scratch_.get(), s.scratch_.get() + s.maxBlock_};
+    const AudioBufferView dry{dryChannels, 2, n};
+    if (bypass || was || s.line_.maxDelay() != 0) s.line_.process(io.audioIn, dry, latency_, false, n);
 
     const AudioBufferView& out = io.audioOut;
     if (was && bypass) {

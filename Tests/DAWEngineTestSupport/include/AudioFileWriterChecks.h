@@ -22,6 +22,11 @@ CheckResult writerRecordingFormat();
 // another seed, or no dither, gives different bytes.
 CheckResult writerDitherDeterministic();
 
+// DW-279 (T-092), IO-035, IO-011: the buffered writer gives byte for byte the files the
+// unbuffered one did (hashes recorded from it) for every format, with and without dither, for
+// any block split around the buffer size; the destructor flushes like close().
+CheckResult writerBufferedBitIdentical();
+
 // IO-035: integers clamp to full scale (counted), NaN writes 0, float doesn't clip.
 CheckResult writerClipping();
 

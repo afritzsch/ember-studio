@@ -382,3 +382,61 @@ CheckResult bypassCrossfadeAndRebuild() {
 }
 
 } // namespace daw::testing
+
+namespace daw::testing {
+
+CheckResult bypassZeroLatencyToggles() {
+    CheckResult checks;
+    // DW-280 (T-092): a 0-latency insert skips its dry copy while neither this block nor the
+    // previous one is bypassed. The dry signal it uses at a toggle or while bypassed must still be
+    // this block's input: noise → effect(latency 0, × 0, bypassable) → master against the same
+    // noise straight to the master, with random block sizes and a random toggle schedule (long
+    // unbypassed runs included). Expected, bit for bit: in · g, g = 0 unbypassed, 1 bypassed, the
+    // linear one-block ramp at a toggle (BypassNode's own arithmetic, with the × 0 output as 0).
+    auto stats = std::make_shared<EffectStats>();
+    Engine engine, plain;
+    GraphBuilder builder(bypassRegistry(stats), kRate, kBlock), plainBuilder(bypassRegistry(stats), kRate, kBlock);
+    const ParamID bypass = allocate(engine, 0.0f);
+    Desc d, p;
+    d.master(1).node(10, NodeKind::sampler, "noise 9").node(20, NodeKind::delay, "0 0", bypass).chain({10, 20, 1});
+    p.master(1).node(10, NodeKind::sampler, "noise 9").chain({10, 1});
+    DAW_CHECK(publish(builder, engine, d.d) && publish(plainBuilder, plain, p.d));
+    std::mt19937 rng(11);
+    std::uniform_int_distribution<uint32_t> size(1, kBlock);
+    std::uniform_int_distribution<int> run(1, 12);
+    Capture out, in;
+    std::vector<float> expected;
+    bool was = false, on = false;
+    int left = 0, toggles = 0;
+    for (int block = 0; block < 600; ++block) {
+        if (--left <= 0) {
+            on = !on;
+            left = on ? run(rng) : 3 * run(rng);  // unbypassed runs are the longer ones
+        }
+        engine.params().set(bypass, on ? 1.0f : 0.0f);
+        const uint32_t n = size(rng);
+        const size_t at = in.left.size();
+        out.render(engine, n);
+        in.render(plain, n);
+        const float step = 1.0f / static_cast<float>(n);
+        for (uint32_t f = 0; f < n; ++f) {
+            const float t = static_cast<float>(f + 1) * step;
+            const float g = was == on ? (on ? 1.0f : 0.0f) : (on ? t : 1.0f - t);
+            const float dry = in.left[at + f];
+            expected.push_back(was == on ? (on ? dry : 0.0f) : 0.0f * (1.0f - g) + dry * g);
+        }
+        toggles += was != on ? 1 : 0;
+        was = on;
+    }
+    DAW_CHECK(toggles > 50);
+    DAW_CHECK(out.left.size() == expected.size());
+    bool exact = true;
+    for (size_t i = 0; i < std::min(out.left.size(), expected.size()); ++i)
+        exact = exact && out.left[i] == expected[i] && out.right[i] == expected[i];
+    DAW_CHECK(exact);
+    DAW_CHECK(out.peak() > 0.4f);
+    DAW_CHECK(out.violations == 0 && in.violations == 0);
+    return checks;
+}
+
+} // namespace daw::testing
