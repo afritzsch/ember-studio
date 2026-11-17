@@ -146,6 +146,8 @@ final class ToastCenter {
             recordingFinalized(event)
         case .assetLoaded, .jobFinished:
             return
+        case .pluginParamEdited:  // T-063 (DW-204): the model records it; no toast
+            return
         }
     }
 

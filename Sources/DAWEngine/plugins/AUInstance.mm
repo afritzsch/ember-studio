@@ -229,7 +229,6 @@ struct AUInstance::EditState {
     static void observe(const std::shared_ptr<EditState>& self, uint64_t address, float value,
                         AUParameterAutomationEventType type) {
         std::lock_guard lock(self->mutex);
-        fprintf(stderr, "DBG observe addr %llu value %f type %d count %zu\n", (unsigned long long)address, value, (int)type, self->count);
         const auto it = self->indexOf.find(address);
         if (it == self->indexOf.end()) return;
         const uint32_t i = it->second;
@@ -302,12 +301,34 @@ struct AUInstance::Impl {
     bool hadTransport = false;
     Tick lastEndTick = 0;
     std::vector<uint64_t> addresses;               // params_[i].address
-    AUParameterObserverToken editToken = nullptr;  // DW-204: on unit.parameterTree
+    // DW-204: the automation observer and the tree it is on. A V2 bridge builds a new tree when
+    // the AU reports a parameter-list change (setting its formats or state can), so the observer
+    // moves to the unit's current tree after every non-RT step that may change it.
+    AUParameterTree* editTree = nil;
+    AUParameterObserverToken editToken = nullptr;
+    std::weak_ptr<AUInstance::EditState> edits;
+
+    void observeEdits() {
+        AUParameterTree* tree = unit.parameterTree;
+        if (tree == editTree) return;
+        if (editTree != nil && editToken != nullptr) [editTree removeParameterObserver:editToken];
+        editTree = tree;
+        editToken = nullptr;
+        if (tree == nil) return;
+        std::weak_ptr<AUInstance::EditState> weak = edits;
+        editToken = [tree tokenByAddingParameterAutomationObserver:^(NSInteger count,
+                                                                     const AUParameterAutomationEvent* events) {
+            auto state = weak.lock();
+            if (!state) return;
+            for (NSInteger e = 0; e < count; ++e)
+                AUInstance::EditState::observe(state, events[e].address, events[e].value, events[e].eventType);
+        }];
+    }
 
     ~Impl() {
         if (unit != nil) {
             if (observer != nil) [unit removeObserver:observer forKeyPath:@"latency"];
-            if (editToken != nullptr) [unit.parameterTree removeParameterObserver:editToken];  // DW-204
+            if (editTree != nil && editToken != nullptr) [editTree removeParameterObserver:editToken];  // DW-204
             std::lock_guard lifecycle(gLifecycleMutex);  // DW-214
             if (unit.renderResourcesAllocated) [unit deallocateRenderResources];
             // The host blocks point at this Impl, which is going away (the unit may outlive it).
@@ -436,17 +457,8 @@ Result<std::shared_ptr<AUInstance>> AUInstance::instantiate(const AUComponentID&
 
         // DW-204 (T-063): the plugin's own edits (its editor's gestures), from now on.
         instance->edits_->size(instance->params_);
-        {
-            std::weak_ptr<EditState> weak = instance->edits_;
-            impl.editToken = [unit.parameterTree tokenByAddingParameterAutomationObserver:^(
-                                                     NSInteger count, const AUParameterAutomationEvent* events) {
-                auto state = weak.lock();
-                fprintf(stderr, "DBG block n=%ld state=%p\n", (long)count, (void*)state.get());
-                if (!state) return;
-                for (NSInteger e = 0; e < count; ++e)
-                    EditState::observe(state, events[e].address, events[e].value, events[e].eventType);
-            }];
-        }
+        impl.edits = instance->edits_;
+        impl.observeEdits();
         // PLUG-013: observe latency changes from now on.
         impl.observer = [[DAWAULatencyObserver alloc] init];
         impl.observer->state = new std::shared_ptr<LatencyState>(instance->latency_);
@@ -607,6 +619,7 @@ Result<void> AUInstance::prepare(double sampleRate, uint32_t maxBlock) {
         latency_->rate.store(sampleRate, std::memory_order_release);
         latency_->samples.store(
             static_cast<uint32_t>(std::max(0.0, std::round(unit.latency * sampleRate))), std::memory_order_release);
+        impl.observeEdits();  // DW-204: the formats may have rebuilt a V2 bridge's tree
         prepared_.store(true, std::memory_order_release);
         return {};
     }
@@ -652,6 +665,7 @@ Result<void> AUInstance::setFullState(const std::vector<uint8_t>& state) {
         if (![plist isKindOfClass:[NSDictionary class]])
             return auError(ErrorCode::invalidArgument, identifier() + ": state isn't a plist dictionary", error);
         impl_->unit.fullState = plist;
+        impl_->observeEdits();  // DW-204
         return {};
     }
 }
