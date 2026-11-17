@@ -132,6 +132,8 @@ Unattended phases started by `/autobuild` (see `.claude/skills/autobuild/SKILL.m
 - T-075 merged (57bb306): trial merge test.sh 12/12 and swift test green while three workers ran. Worker closed. M7 complete.
 - T-080 merged (c21c6ea): add-only conflicts with T-075 (CommandRegistry + tests, EngineProtocol, specs 07/08) kept both sides; test.sh 12/12, swift test green. Worker closed. T-081 is ready.
 - T-063 asked about undoing a first plugin-side edit; decided (c) (DECISIONS "T-063 first-edit undo").
+- T-084 asked two questions; decided (DECISIONS "T-084 sanitizer findings", "T-084 TEST-008 perf"): the worker fixed the two fixture findings and a test warning; TEST-008 keeps its bound and T-091 (D, DSP performance) was added as ready.
+- T-084 merged (fb3423b): test.sh 12/12, swift test green. Worker closed.
 
 ## Summary for the user
 
