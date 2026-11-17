@@ -71,6 +71,17 @@ struct PerfSmokeTests {
         return commands
     }
 
+    /// Core cycles and instructions retired by this process so far (T-091): unlike seconds, they
+    /// hardly move with the machine's load or clock, so before/after comparisons of DSP changes
+    /// stay meaningful on a busy machine. Which core type ran the work still shifts cycles a bit.
+    static func processCounters() -> (cycles: UInt64, instructions: UInt64) {
+        var info = rusage_info_v4()
+        let status = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) { proc_pid_rusage(getpid(), RUSAGE_INFO_V4, $0) }
+        }
+        return status == 0 ? (info.ri_cycles, info.ri_instructions) : (0, 0)
+    }
+
     /// User + system CPU time of this process so far, in seconds.
     static func processCPUSeconds() -> Double {
         var usage = rusage()
@@ -101,22 +112,28 @@ struct PerfSmokeTests {
         // CPU seconds the process spent during the render (daw.export plus whatever else ran). Under
         // load the wall-clock ratio drops while this stays put, so the report shows which it was.
         let cpuBefore = Self.processCPUSeconds()
+        let countersBefore = Self.processCounters()
         let response = try await dispatcher.call(.renderOffline, [
             "from": 0, "to": .int(Self.seconds * 1920), "path": "perf_smoke.wav",
             "blockSize": .int(Int64(Self.blockSize)), "tail": false,
         ])
         let render = try response.decode(RenderOfflineResult.self)
         let cpuSeconds = Self.processCPUSeconds() - cpuBefore
+        let countersAfter = Self.processCounters()
+        let frames = Double(render.frames)
+        let cyclesPerFrame = Double(countersAfter.cycles &- countersBefore.cycles) / max(frames, 1)
+        let instructionsPerFrame = Double(countersAfter.instructions &- countersBefore.instructions) / max(frames, 1)
         let cpuRatio = render.durationSec / max(cpuSeconds, 1e-9)
         let telemetry = try await dispatcher.call(.engineTelemetry)
         let ratio = render.durationSec / max(render.renderTimeSec, 1e-9)
 
         print(String(format: "TEST-008: %d tracks × (EQ + comp) + %d reverb buses, %.0f s at %.0f Hz / %u frames: "
                      + "rendered in %.3f s = %.1f× realtime (target %.0f×, fail < %.0f×; %@); "
-                     + "process CPU %.3f s = %.1f× realtime per CPU second",
+                     + "process CPU %.3f s = %.1f× realtime per CPU second; %.0f cycles, %.0f instructions per frame",
                      Self.tracks, Self.buses, render.durationSec, render.sampleRate, Self.blockSize,
                      render.renderTimeSec, ratio, Self.targetRatio, Self.minimumRatio,
-                     Self.strict ? "strict, DAW_PERF_TESTS=1" : "report only", cpuSeconds, cpuRatio))
+                     Self.strict ? "strict, DAW_PERF_TESTS=1" : "report only", cpuSeconds, cpuRatio,
+                     cyclesPerFrame, instructionsPerFrame))
         if Self.strict && ratio < Self.targetRatio {
             print("TEST-008: warning: \(String(format: "%.1f", ratio))× is below the \(Self.targetRatio)× target")
         }
@@ -127,6 +144,7 @@ struct PerfSmokeTests {
                 "blockSize": .int(Int64(Self.blockSize)), "audioSeconds": .double(render.durationSec),
                 "renderSeconds": .double(render.renderTimeSec), "realtimeRatio": .double(ratio),
                 "cpuSeconds": .double(cpuSeconds), "cpuRealtimeRatio": .double(cpuRatio),
+                "cyclesPerFrame": .double(cyclesPerFrame), "instructionsPerFrame": .double(instructionsPerFrame),
                 "targetRatio": .double(Self.targetRatio), "minimumRatio": .double(Self.minimumRatio),
                 "rtViolations": .int(Int64(render.rtViolations)), "telemetry": telemetry,
             ]

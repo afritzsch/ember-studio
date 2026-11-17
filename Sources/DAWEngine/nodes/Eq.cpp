@@ -6,19 +6,13 @@
 #include <memory>
 
 #include "core/ProcessContext.h"
+#include "dsp/Finite.h"
 
 namespace daw {
 
 namespace {
 
 bool covers(const AudioBufferView& view, uint32_t n) DAW_RT { return view.numChannels > 0 && view.numFrames >= n; }
-
-bool allFinite(const AudioBufferView& view, uint32_t n) DAW_RT {
-    for (uint32_t c = 0; c < view.numChannels; ++c)
-        for (uint32_t i = 0; i < n; ++i)
-            if (!std::isfinite(view.channels[c][i])) return false;
-    return true;
-}
 
 // Slot indices of each band's params; kNone for a param the band doesn't have.
 constexpr uint32_t kNone = Eq::kNumParams;
@@ -33,6 +27,38 @@ constexpr BandSlots kBandSlots[Eq::kNumBands] = {
     {Eq::kHighOn, Eq::kHighFreq, Eq::kHighGain, Eq::kHighQ},
     {Eq::kLpOn, Eq::kLpFreq, kNone, Eq::kLpQ},
 };
+
+// The EQ's stereo input and output: a null input reads as silence, a null output is skipped.
+struct StereoIO {
+    const float *inL, *inR;
+    float *outL, *outR;
+
+    Double2 in(uint32_t i) const DAW_RT {
+        return Double2{inL != nullptr ? double{inL[i]} : 0.0, inR != nullptr ? double{inR[i]} : 0.0};
+    }
+    void out(uint32_t i, Double2 y) const DAW_RT {
+        if (outL != nullptr) outL[i] = static_cast<float>(y.x);
+        if (outR != nullptr) outR[i] = static_cast<float>(y.y);
+    }
+};
+
+// T-091: N bands with fixed coefficients over a block. N is a constant, so the chain unrolls and
+// its coefficients and state stay in registers instead of going through memory every frame.
+template <uint32_t N>
+void runSteady(const StereoIO& io, uint32_t n, const BiquadCoeffs* coeffs, BiquadState2* state) DAW_RT {
+    BiquadCoeffs c[N > 0 ? N : 1];
+    BiquadState2 s[N > 0 ? N : 1];
+    for (uint32_t k = 0; k < N; ++k) {
+        c[k] = coeffs[k];
+        s[k] = state[k];
+    }
+    for (uint32_t i = 0; i < n; ++i) {
+        Double2 x = io.in(i);
+        for (uint32_t k = 0; k < N; ++k) x = s[k].tick(x, c[k]);
+        io.out(i, x);
+    }
+    for (uint32_t k = 0; k < N; ++k) state[k] = s[k];
+}
 
 } // namespace
 
@@ -138,22 +164,47 @@ void Eq::process(ProcessContext& ctx, NodeIO& io) DAW_RT {
     const uint32_t outChannels = out.numChannels < 2 ? out.numChannels : 2;
     float* outL = outChannels > 0 ? out.channels[0] : nullptr;
     float* outR = outChannels > 1 ? out.channels[1] : nullptr;
-    const double invFrames = 1.0 / n;
-    for (uint32_t i = 0; i < n; ++i) {
-        double l = inL != nullptr ? double{inL[i]} : 0.0;
-        double r = inR != nullptr ? double{inR[i]} : 0.0;
-        for (uint32_t k = 0; k < numActive; ++k) {
-            const uint32_t b = active[k];
-            // ENG-022's ramp shape: the block's last frame is exactly on the new coefficients.
-            const BiquadCoeffs c = !ramping[b] || i + 1 == n
-                                       ? coeffs_[b]
-                                       : from[b].lerp(coeffs_[b], static_cast<double>(i + 1) * invFrames);
-            l = state_[0][b].tick(l, c);
-            r = state_[1][b].tick(r, c);
-        }
-        if (outL != nullptr) outL[i] = static_cast<float>(l);
-        if (outR != nullptr) outR[i] = static_cast<float>(r);
+
+    // T-091 (TEST-008): both channels run together, one NEON lane each (BiquadState2: the same
+    // arithmetic as BiquadState::tick, bit for bit). A block where no active band ramps, the
+    // usual case, runs the chain with coefficients and state in registers (runSteady); a ramp
+    // interpolates the coefficients per frame as before.
+    BiquadState2 st[kNumBands];
+    BiquadCoeffs steady[kNumBands];
+    bool anyRamp = false;
+    for (uint32_t k = 0; k < numActive; ++k) {
+        const uint32_t b = active[k];
+        st[k] = BiquadState2(state_[0][b], state_[1][b]);
+        steady[k] = coeffs_[b];
+        anyRamp = anyRamp || ramping[b];
     }
+    const StereoIO stereo{inL, inR, outL, outR};
+    if (!anyRamp) {
+        switch (numActive) {
+            case 0: runSteady<0>(stereo, n, steady, st); break;
+            case 1: runSteady<1>(stereo, n, steady, st); break;
+            case 2: runSteady<2>(stereo, n, steady, st); break;
+            case 3: runSteady<3>(stereo, n, steady, st); break;
+            case 4: runSteady<4>(stereo, n, steady, st); break;
+            case 5: runSteady<5>(stereo, n, steady, st); break;
+            default: runSteady<kNumBands>(stereo, n, steady, st); break;
+        }
+    } else {
+        const double invFrames = 1.0 / n;
+        for (uint32_t i = 0; i < n; ++i) {
+            Double2 x = stereo.in(i);
+            for (uint32_t k = 0; k < numActive; ++k) {
+                const uint32_t b = active[k];
+                // ENG-022's ramp shape: the block's last frame is exactly on the new coefficients.
+                const BiquadCoeffs c = !ramping[b] || i + 1 == n
+                                           ? coeffs_[b]
+                                           : from[b].lerp(coeffs_[b], static_cast<double>(i + 1) * invFrames);
+                x = st[k].tick(x, c);
+            }
+            stereo.out(i, x);
+        }
+    }
+    for (uint32_t k = 0; k < numActive; ++k) st[k].store(state_[0][active[k]], state_[1][active[k]]);
     for (uint32_t c = 2; c < out.numChannels; ++c) std::memset(out.channels[c], 0, std::size_t{n} * sizeof(float));
 
     // A blow-up (a filter or a float conversion going non-finite) is treated like a bad input.

@@ -8,6 +8,7 @@
 #include <numbers>
 
 #include "core/ProcessContext.h"
+#include "dsp/Finite.h"
 #include "dsp/Hadamard.h"
 
 namespace daw {
@@ -15,13 +16,6 @@ namespace daw {
 namespace {
 
 bool covers(const AudioBufferView& view, uint32_t n) DAW_RT { return view.numChannels > 0 && view.numFrames >= n; }
-
-bool allFinite(const AudioBufferView& view, uint32_t n) DAW_RT {
-    for (uint32_t c = 0; c < view.numChannels; ++c)
-        for (uint32_t i = 0; i < n; ++i)
-            if (!std::isfinite(view.channels[c][i])) return false;
-    return true;
-}
 
 uint32_t nextPowerOfTwo(uint32_t n) {
     uint32_t p = 1;
@@ -188,7 +182,50 @@ void Reverb::process(ProcessContext& ctx, NodeIO& io) DAW_RT {
     float* lines = lines_.data();
     constexpr float kNorm = 0.35355339059327373f;  // 1/√8
 
-    for (uint32_t s = 0; s < n; ++s) {
+    // T-091 (TEST-008): a block where nothing glides and the gains hold, the usual case, reads
+    // whole-frame taps (readAt's frac is 0) and keeps the damping state in locals. The same
+    // float expressions as the general loop below, so the same bits.
+    bool steady = !gainsRamp && predelay_ == predelayTarget_;
+    for (uint32_t i = 0; i < kLines; ++i) steady = steady && delay_[i] == target_[i];
+    if (steady) {
+        uint32_t taps[kLines];
+        float damp[kLines];
+        for (uint32_t i = 0; i < kLines; ++i) {
+            taps[i] = static_cast<uint32_t>(delay_[i]);
+            damp[i] = damp_[i];
+        }
+        const auto preTap = static_cast<uint32_t>(predelay_);
+        for (uint32_t s = 0; s < n; ++s) {
+            const float dryL = inL ? inL[s] : 0.0f;
+            const float dryR = inR ? inR[s] : 0.0f;
+            preL[preWrite_] = dryL;
+            preR[preWrite_] = dryR;
+            const float pL = preL[(preWrite_ - preTap) & preMask_];
+            const float pR = preR[(preWrite_ - preTap) & preMask_];
+            preWrite_ = (preWrite_ + 1) & preMask_;
+
+            float x[kLines];
+            float v[kLines];
+            for (uint32_t i = 0; i < kLines; ++i) {
+                x[i] = lines[std::size_t{i} * lineCap_ + ((lineWrite_ - taps[i]) & lineMask_)];
+                damp[i] = snap(b * x[i] + a * damp[i]);
+                v[i] = gains[i] * damp[i];
+            }
+            hadamardInPlace(v);
+            for (uint32_t i = 0; i < kLines; ++i)
+                lines[std::size_t{i} * lineCap_ + lineWrite_] = snap(v[i] * kNorm + ((i & 1u) == 0 ? pL : pR));
+            lineWrite_ = (lineWrite_ + 1) & lineMask_;
+
+            const float wL = kOutGain * (x[0] - x[1] + x[2] - x[3] + x[4] - x[5] + x[6] - x[7]);
+            const float wR = kOutGain * (x[0] + x[1] - x[2] - x[3] + x[4] + x[5] - x[6] - x[7]);
+            const float m = mixRamp.at(s);
+            if (outL) outL[s] = (1.0f - m) * dryL + m * wL;
+            if (outR) outR[s] = (1.0f - m) * dryR + m * wR;
+        }
+        for (uint32_t i = 0; i < kLines; ++i) damp_[i] = damp[i];
+    }
+
+    for (uint32_t s = 0; !steady && s < n; ++s) {
         const float dryL = inL ? inL[s] : 0.0f;
         const float dryR = inR ? inR[s] : 0.0f;
 
