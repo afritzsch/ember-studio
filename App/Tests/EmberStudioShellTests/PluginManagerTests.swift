@@ -121,14 +121,14 @@ struct PluginManagerTests {
                                          discovery: FakeDiscovery([vst3("/a.vst3", "Alpha"), vst3("/z.vst3", "Zap")]), scanner: scanner)
         let (window, _) = try makeWindow()
         window.pluginPanel.manager = manager
-        #expect(window.controls.filter { $0.id.hasPrefix("plugins.") }.map(\.id) == ["plugins.manager"])
-        try window.control("plugins.manager").action()
+        #expect(window.controls.filter { $0.id.hasPrefix("prefs.plugins") }.map(\.id) == ["prefs.plugins"])
+        try window.control("prefs.plugins").action()
         #expect(window.pluginPanel.isOpen)
-        try window.control("plugins.scan").action()
-        #expect(try window.control("plugins.scan").isEnabled == false && (try window.control("plugins.rescan")).isEnabled == false)
+        try window.control("prefs.plugins.scan").action()
+        #expect(try window.control("prefs.plugins.scan").isEnabled == false && (try window.control("prefs.plugins.rescan")).isEnabled == false)
         await manager.scanTask?.value
-        let ids = window.controls.filter { $0.id.hasPrefix("plugins.") }.map(\.id)
-        #expect(ids == ["plugins.manager", "plugins.close", "plugins.scan", "plugins.rescan", "plugins.blocked.retry", "plugins.blocked.0.retry"])
+        let ids = window.controls.filter { $0.id.hasPrefix("prefs.plugins") }.map(\.id)
+        #expect(ids == ["prefs.plugins", "prefs.plugins.close", "prefs.plugins.scan", "prefs.plugins.rescan", "prefs.plugins.blocked.retry", "prefs.plugins.blocked.0.retry"])
         let state = UIStateDumper.dump(window.pluginPanel)
         #expect(state["open"] == true && state["scanning"] == false && state["scannerPath"] == "/x/PluginScanner")
         #expect(state["plugins"]?[0]?["name"] == "Alpha" && state["plugins"]?[0]?["format"] == "vst3")
@@ -136,7 +136,7 @@ struct PluginManagerTests {
         #expect(state["lastScan"]?["scanned"] == 2)
         // The picker offers what the manager has (effects only).
         #expect(window.deviceChain.choices.last?.name == "Alpha")
-        try window.control("plugins.close").action()
+        try window.control("prefs.plugins.close").action()
         #expect(!window.pluginPanel.isOpen)
     }
 

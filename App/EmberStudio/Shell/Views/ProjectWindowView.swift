@@ -128,7 +128,7 @@ private struct ToolbarRow: View {
             if let browser = controls["pane.browser"] { ControlToggle(control: browser) }
             if let inspector = controls["pane.inspector"] { ControlToggle(control: inspector) }
             if let settings = controls["prefs.audio"] { ControlToggle(control: settings, face: "Audio") }
-            if let plugins = controls["plugins.manager"] { ControlToggle(control: plugins, face: "Plugins") }  // T-065
+            if let plugins = controls["prefs.plugins"] { ControlToggle(control: plugins, face: "Plugins") }  // T-065
         }
         .labelStyle(.iconOnly)
         .padding(.horizontal, 10)

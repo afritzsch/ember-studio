@@ -16,19 +16,19 @@ struct PluginManagerPanel: View {
                 Text("Plugins").font(.headline)
                 Text(summary(manager, usable: usable.count, blocked: blocked.count))
                     .foregroundStyle(.secondary)
-                    .accessibilityIdentifier("plugins.summary")
+                    .accessibilityIdentifier("prefs.plugins.summary")
                 if manager.isScanning {
-                    ProgressView().controlSize(.small).accessibilityIdentifier("plugins.progress")
+                    ProgressView().controlSize(.small).accessibilityIdentifier("prefs.plugins.progress")
                 }
                 Spacer()
-                if let scan = controls["plugins.scan"] { ControlButton(control: scan, face: "Scan") }
-                if let rescan = controls["plugins.rescan"] { ControlButton(control: rescan, face: "Rescan All") }
-                if let close = controls["plugins.close"] {
+                if let scan = controls["prefs.plugins.scan"] { ControlButton(control: scan, face: "Scan") }
+                if let rescan = controls["prefs.plugins.rescan"] { ControlButton(control: rescan, face: "Rescan All") }
+                if let close = controls["prefs.plugins.close"] {
                     ControlButton(control: close, systemImage: "xmark").labelStyle(.iconOnly)
                 }
             }
             if let error = manager.error {
-                Text(error).foregroundStyle(.red).accessibilityIdentifier("plugins.error")
+                Text(error).foregroundStyle(.red).accessibilityIdentifier("prefs.plugins.error")
             }
             HStack(alignment: .top, spacing: 16) {
                 list("Available", count: usable.count) {
@@ -39,7 +39,7 @@ struct PluginManagerPanel: View {
                         }
                     }
                 }
-                .accessibilityIdentifier("plugins.available")
+                .accessibilityIdentifier("prefs.plugins.available")
                 list("Blocked", count: blocked.count) {
                     ForEach(Array(blocked.enumerated()), id: \.element.id) { n, plugin in
                         HStack(spacing: 6) {
@@ -48,14 +48,14 @@ struct PluginManagerPanel: View {
                                 Text(plugin.blockedReason ?? "").foregroundStyle(.red).lineLimit(2)
                             }
                             Spacer(minLength: 0)
-                            if let retry = controls["plugins.blocked.\(n).retry"] { ControlButton(control: retry, face: "Retry") }
+                            if let retry = controls["prefs.plugins.blocked.\(n).retry"] { ControlButton(control: retry, face: "Retry") }
                         }
                     }
-                    if let all = controls["plugins.blocked.retry"], !blocked.isEmpty {
+                    if let all = controls["prefs.plugins.blocked.retry"], !blocked.isEmpty {
                         ControlButton(control: all, face: "Retry All")
                     }
                 }
-                .accessibilityIdentifier("plugins.blocked")
+                .accessibilityIdentifier("prefs.plugins.blocked")
             }
             .frame(height: 120)
         }
@@ -63,7 +63,7 @@ struct PluginManagerPanel: View {
         .controlSize(.small)
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityIdentifier("plugins.panel")
+        .accessibilityIdentifier("prefs.plugins.panel")
     }
 
     private func summary(_ manager: PluginManagerModel, usable: Int, blocked: Int) -> String {
