@@ -4,9 +4,9 @@
 //
 // The window is kept as 300 chunks of ~1 ms (round(sampleRate / 1000) frames), each holding its
 // peak and sum of squares, plus the chunk being filled. A reading covers the 300 complete chunks
-// and the partial one, so it spans 300 … 301 ms. Recomputing the totals from the chunks on each
-// reading (300 adds) means nothing drifts the way a running sum with subtraction would, and no
-// per-sample history is needed. Before 300 ms have been seen, the missing past counts as silence.
+// and the partial one, so it spans 300 … 301 ms. Recomputing the totals from the chunks (in
+// groups of 20, each recomputed when one of its chunks completes; T-091) means nothing drifts the
+// way a running sum with subtraction would, and no per-sample history is needed. Before 300 ms have been seen, the missing past counts as silence.
 //
 // Stereo frames meter as one signal: peak = max(|L|, |R|), mean square = (L² + R²) / 2, so a sine
 // of amplitude A in both channels reads peak A and RMS A/√2.
@@ -39,6 +39,14 @@ private:
     uint32_t chunkFrames_ = 48;
     std::array<float, kChunks> chunkPeak_{};
     std::array<double, kChunks> chunkSumSq_{};
+    // T-091 (TEST-008): the chunks in groups of kGroup, each group's peak and sum recomputed from
+    // its chunks whenever one of them completes, so a reading adds 15 groups instead of 300
+    // chunks and still nothing drifts.
+    static constexpr uint32_t kGroup = 20;
+    static constexpr uint32_t kGroups = kChunks / kGroup;
+    static_assert(kChunks % kGroup == 0);
+    std::array<float, kGroups> groupPeak_{};
+    std::array<double, kGroups> groupSumSq_{};
     uint32_t next_ = 0;  // the chunk slot the partial chunk goes into when it completes
     float partialPeak_ = 0.0f;
     double partialSumSq_ = 0.0;

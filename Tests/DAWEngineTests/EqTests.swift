@@ -22,4 +22,7 @@ struct EqTests {
 
     @Test("DSP-030: registered NodeKind::eq through GraphBuilder and the Engine, response in place, 0 latency; DW-142 NaN telemetry through the effects and the facade")
     func throughEngine() { expectPasses(daw.testing.eqThroughEngine()) }
+
+    @Test("T-091, DSP-030, DSP-040: stereo NEON biquad = scalar tick per lane bit for bit (snaps included); flat band exact")
+    func stereoBiquad() { expectPasses(daw.testing.eqStereoBiquad()) }
 }

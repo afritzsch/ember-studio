@@ -25,4 +25,7 @@ struct CompressorTests {
 
     @Test("DSP-031, MIX-008, DW-096: registered NodeKind::compressor keyed by a sidechain edge in the Engine; GR meter in Telemetry")
     func throughEngine() { expectPasses(daw.testing.compressorThroughEngine()) }
+
+    @Test("T-091, DSP-031: FastDb ln/exp within 1e-12 of libm; GainCurve = the static curve; below-knee rest path exact; chunked passes = 1-frame blocks bit for bit")
+    func blockPaths() { expectPasses(daw.testing.compressorBlockPaths()) }
 }

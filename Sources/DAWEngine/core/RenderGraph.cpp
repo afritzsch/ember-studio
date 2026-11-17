@@ -52,6 +52,25 @@ void DelayLine::process(const AudioBufferView& in, const AudioBufferView& out, u
                         bool add, uint32_t numFrames) DAW_RT {
     DAW_RT_ASSERT(delay <= maxDelay() && numFrames <= maxBlock_);
     const uint32_t capacity = mask_ + 1;
+    if (capacity == maxBlock_) {
+        // T-091 (TEST-008): maxDelay() is 0 (the line of a 0-latency insert's bypass, BypassNode),
+        // so the delay is always 0 and the history is never read: the output is the input. Plain
+        // copies instead of masked ring writes and reads; write_ moves on as before.
+        for (uint32_t c = 0; c < out.numChannels; ++c) {
+            float* dst = out.channels[c];
+            const float* src = c < numChannels_ && c < in.numChannels ? in.channels[c] : nullptr;
+            if (add) {
+                if (src != nullptr)
+                    for (uint32_t f = 0; f < numFrames; ++f) dst[f] += src[f];
+            } else if (src != nullptr) {
+                std::memcpy(dst, src, std::size_t{numFrames} * sizeof(float));
+            } else {
+                std::memset(dst, 0, std::size_t{numFrames} * sizeof(float));
+            }
+        }
+        write_ += numFrames;
+        return;
+    }
     // Write first, then read: capacity >= delay + numFrames, so the frames read are never the
     // ones just overwritten unless they are the input itself (delay < numFrames).
     const uint32_t read = write_ - delay;

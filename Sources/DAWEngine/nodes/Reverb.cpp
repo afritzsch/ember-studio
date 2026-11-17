@@ -8,6 +8,7 @@
 #include <numbers>
 
 #include "core/ProcessContext.h"
+#include "dsp/Finite.h"
 #include "dsp/Hadamard.h"
 
 namespace daw {
@@ -15,13 +16,6 @@ namespace daw {
 namespace {
 
 bool covers(const AudioBufferView& view, uint32_t n) DAW_RT { return view.numChannels > 0 && view.numFrames >= n; }
-
-bool allFinite(const AudioBufferView& view, uint32_t n) DAW_RT {
-    for (uint32_t c = 0; c < view.numChannels; ++c)
-        for (uint32_t i = 0; i < n; ++i)
-            if (!std::isfinite(view.channels[c][i])) return false;
-    return true;
-}
 
 uint32_t nextPowerOfTwo(uint32_t n) {
     uint32_t p = 1;
@@ -188,7 +182,80 @@ void Reverb::process(ProcessContext& ctx, NodeIO& io) DAW_RT {
     float* lines = lines_.data();
     constexpr float kNorm = 0.35355339059327373f;  // 1/√8
 
-    for (uint32_t s = 0; s < n; ++s) {
+    // T-091 (TEST-008): a block where nothing glides and the gains hold, the usual case, reads
+    // whole-frame taps (readAt's frac is 0) and keeps the damping state in locals. The same
+    // float expressions as the general loop below, so the same bits.
+    bool steady = !gainsRamp && predelay_ == predelayTarget_;
+    for (uint32_t i = 0; i < kLines; ++i) steady = steady && delay_[i] == target_[i];
+    if (steady) {
+        // The 8 lines as two 4-lane vectors: the damping, gains, Hadamard butterflies and the
+        // write-back are the general loop's float operations lane by lane (a − b as a − b, the
+        // same fused multiply-adds), so the same bits; the taps and writes stay scalar.
+        using Float4 = float __attribute__((ext_vector_type(4)));
+        using Int4 = int __attribute__((ext_vector_type(4)));
+        static_assert(kLines == 8);
+        auto snap4 = [](Float4 x) DAW_RT {
+            const Int4 loud = __builtin_elementwise_abs(x) >= Reverb::kSnap;  // NaN never gets here
+            return __builtin_bit_cast(Float4, __builtin_bit_cast(Int4, x) & loud);
+        };
+        // One Hadamard stage within each vector: pairs h apart (h = 1, 2) become (a + b, a − b).
+        auto stage1 = [](Float4 v) DAW_RT {
+            const Float4 lo = __builtin_shufflevector(v, v, 0, 0, 2, 2);
+            const Float4 hi = __builtin_shufflevector(v, v, 1, 1, 3, 3);
+            const Float4 sum = lo + hi, diff = lo - hi;
+            return __builtin_shufflevector(sum, diff, 0, 4, 2, 6);
+        };
+        auto stage2 = [](Float4 v) DAW_RT {
+            const Float4 lo = __builtin_shufflevector(v, v, 0, 1, 0, 1);
+            const Float4 hi = __builtin_shufflevector(v, v, 2, 3, 2, 3);
+            const Float4 sum = lo + hi, diff = lo - hi;
+            return __builtin_shufflevector(sum, diff, 0, 1, 4, 5);
+        };
+        uint32_t taps[kLines];
+        for (uint32_t i = 0; i < kLines; ++i) taps[i] = static_cast<uint32_t>(delay_[i]);
+        Float4 dampLo{damp_[0], damp_[1], damp_[2], damp_[3]}, dampHi{damp_[4], damp_[5], damp_[6], damp_[7]};
+        const Float4 gainLo{gains[0], gains[1], gains[2], gains[3]}, gainHi{gains[4], gains[5], gains[6], gains[7]};
+        const auto preTap = static_cast<uint32_t>(predelay_);
+        for (uint32_t s = 0; s < n; ++s) {
+            const float dryL = inL ? inL[s] : 0.0f;
+            const float dryR = inR ? inR[s] : 0.0f;
+            preL[preWrite_] = dryL;
+            preR[preWrite_] = dryR;
+            const float pL = preL[(preWrite_ - preTap) & preMask_];
+            const float pR = preR[(preWrite_ - preTap) & preMask_];
+            preWrite_ = (preWrite_ + 1) & preMask_;
+
+            float x[kLines];
+            for (uint32_t i = 0; i < kLines; ++i)
+                x[i] = lines[std::size_t{i} * lineCap_ + ((lineWrite_ - taps[i]) & lineMask_)];
+            const Float4 xLo{x[0], x[1], x[2], x[3]}, xHi{x[4], x[5], x[6], x[7]};
+            dampLo = snap4(b * xLo + a * dampLo);
+            dampHi = snap4(b * xHi + a * dampHi);
+            Float4 vLo = gainLo * dampLo, vHi = gainHi * dampHi;
+            vLo = stage2(stage1(vLo));
+            vHi = stage2(stage1(vHi));
+            const Float4 sum = vLo + vHi, diff = vLo - vHi;  // stage h = 4
+            const Float4 pre{pL, pR, pL, pR};
+            const Float4 wLo = snap4(sum * kNorm + pre), wHi = snap4(diff * kNorm + pre);
+            for (uint32_t i = 0; i < 4; ++i) {
+                lines[std::size_t{i} * lineCap_ + lineWrite_] = wLo[i];
+                lines[std::size_t{i + 4} * lineCap_ + lineWrite_] = wHi[i];
+            }
+            lineWrite_ = (lineWrite_ + 1) & lineMask_;
+
+            const float wL = kOutGain * (x[0] - x[1] + x[2] - x[3] + x[4] - x[5] + x[6] - x[7]);
+            const float wR = kOutGain * (x[0] + x[1] - x[2] - x[3] + x[4] + x[5] - x[6] - x[7]);
+            const float m = mixRamp.at(s);
+            if (outL) outL[s] = (1.0f - m) * dryL + m * wL;
+            if (outR) outR[s] = (1.0f - m) * dryR + m * wR;
+        }
+        for (uint32_t i = 0; i < 4; ++i) {
+            damp_[i] = dampLo[i];
+            damp_[i + 4] = dampHi[i];
+        }
+    }
+
+    for (uint32_t s = 0; !steady && s < n; ++s) {
         const float dryL = inL ? inL[s] : 0.0f;
         const float dryR = inR ? inR[s] : 0.0f;
 

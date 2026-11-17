@@ -92,15 +92,85 @@ struct BiquadState {
     // re-excites the filter, which then limit-cycles around 1e-9 instead of decaying.
     static constexpr double kSnap = 1e-12;
 
+    // T-091: ordered so that y → next z1 → next y is short (the recurrence that bounds a
+    // cascade's speed): y = b0·x + z1 is one fused multiply-add; then z1 = (b1·x + z2) − a1·y and
+    // z2 = b2·x − a2·y, each product rounded on its own (separate statements, so nothing is
+    // contracted), which keeps H(z) = 1 exact: with b = a and zero state, y = x and both
+    // differences cancel to exactly 0 (BiquadCoeffs::isIdentity).
     double tick(double x, const BiquadCoeffs& c) DAW_RT {
-        const double y = c.b0 * x + z1;
-        z1 = c.b1 * x - c.a1 * y + z2;
-        z2 = c.b2 * x - c.a2 * y;
+        const double y = std::fma(c.b0, x, z1);
+        const double u = c.b1 * x;
+        const double v = c.b2 * x;
+        const double p1 = c.a1 * y;
+        const double p2 = c.a2 * y;
+        const double w = u + z2;
+        z1 = w - p1;
+        z2 = v - p2;
         if (std::fabs(z1) < kSnap && std::fabs(z2) < kSnap) z1 = z2 = 0.0;
         return y;
     }
 
     bool isZero() const DAW_RT { return z1 == 0.0 && z2 == 0.0; }
+};
+
+// T-091 (TEST-008): a stereo pair of TDF-II states, left in lane 0 and right in lane 1, stepped
+// together with NEON doubles. Each lane does exactly BiquadState::tick's arithmetic (the same
+// fused operations) and snaps to 0 under the same condition, so the result is BiquadState::tick's,
+// bit for bit, per channel.
+using Double2 = double __attribute__((ext_vector_type(2)));
+using Mask2 = long __attribute__((ext_vector_type(2)));
+
+struct BiquadState2 {
+    Double2 z1 = 0.0, z2 = 0.0;
+
+    BiquadState2() = default;
+    BiquadState2(const BiquadState& left, const BiquadState& right) DAW_RT
+        : z1(Double2{left.z1, right.z1}), z2(Double2{left.z2, right.z2}) {}
+    void store(BiquadState& left, BiquadState& right) const DAW_RT {
+        left = {z1.x, z2.x};
+        right = {z1.y, z2.y};
+    }
+
+    // One step without the DSP-040 snap; a caller that steps several sections may snap them
+    // once per frame (see quietness() and snap()), which gives the same result as tick().
+    Double2 step(Double2 x, const BiquadCoeffs& c) DAW_RT {
+        const Double2 y = __builtin_elementwise_fma(Double2(c.b0), x, z1);
+        const Double2 u = c.b1 * x;
+        const Double2 v = c.b2 * x;
+        const Double2 p1 = c.a1 * y;
+        const Double2 p2 = c.a2 * y;
+        const Double2 w = u + z2;
+        z1 = w - p1;
+        z2 = v - p2;
+        return y;
+    }
+
+    // Per lane, |z2|: a lane can only snap when this is below BiquadState::kSnap (it needs |z1|
+    // below it too, which snap() checks). Half the work of testing both terms on every frame, and
+    // while a signal plays |z2| essentially never gets that small, so the pre-test still almost
+    // never sends a frame to snap().
+    Double2 quietness() const DAW_RT { return __builtin_elementwise_abs(z2); }
+
+    // DSP-040 snap, per lane: both terms below kSnap → both exactly 0. Only called on the rare
+    // frames where some section may snap; the empty asm makes it recompute |z1| and |z2| here
+    // instead of the compiler keeping quietness()'s values alive (spilled) on every frame.
+    void snap() DAW_RT {
+        __asm__ volatile("" : "+w"(z1), "+w"(z2));
+        const Mask2 quiet = (__builtin_elementwise_abs(z1) < BiquadState::kSnap) &
+                            (__builtin_elementwise_abs(z2) < BiquadState::kSnap);
+        z1 = __builtin_bit_cast(Double2, __builtin_bit_cast(Mask2, z1) & ~quiet);
+        z2 = __builtin_bit_cast(Double2, __builtin_bit_cast(Mask2, z2) & ~quiet);
+    }
+
+    // BiquadState::tick for both lanes. The snap is a branch, not a select, so it stays off the
+    // y → z1 dependency chain: it is rarely taken while a signal plays and steadily taken in
+    // silence, so it stays predicted. The pre-test is quietness(); snap() then decides each lane
+    // exactly.
+    Double2 tick(Double2 x, const BiquadCoeffs& c) DAW_RT {
+        const Double2 y = step(x, c);
+        if (__builtin_expect(__builtin_reduce_min(quietness()) < BiquadState::kSnap, 0)) snap();
+        return y;
+    }
 };
 
 } // namespace daw

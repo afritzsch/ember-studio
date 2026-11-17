@@ -151,7 +151,7 @@ bool AudioClipPlayer::renderClip(const TempoMap& tempo, const Clip& clip, Sample
     const SamplePos fadeIn = tempo.tickToSample(clip.fadeInEnd) - clipStart;
     const SamplePos fadeOut = clipEnd - tempo.tickToSample(clip.fadeOutStart);
 
-    for (SamplePos pos = begin; pos < end; ++pos) {  // bounded by numFrames
+    auto frame = [&](SamplePos pos) DAW_RT {
         const size_t f = static_cast<size_t>(pos - from);
         const SamplePos sinceStart = pos - clipStart;
         const SamplePos untilEnd = clipEnd - 1 - pos;
@@ -175,7 +175,34 @@ bool AudioClipPlayer::renderClip(const TempoMap& tempo, const Clip& clip, Sample
             right[f] += w * srcR[src];
         }
         trans[f] *= cover.out;
+    };
+
+    // T-091 (TEST-008): the clip's interior (past its fade-in and crossfade-in, before its
+    // fade-out and crossfade-out, with source frames) is most of every block. There the frame
+    // above is cover {1, 0} and g = clip.gain, so it reduces to the plain loop below with the
+    // same products (g · 1 · trans = g · trans), so the same bits.
+    const SamplePos interiorBegin =
+        std::clamp(std::max({clipStart + std::max(nIn, fadeIn), srcBegin}), begin, end);
+    const SamplePos interiorEnd =
+        std::clamp(std::min({clipEnd - std::max(nOut, fadeOut), srcEnd}), interiorBegin, end);
+    for (SamplePos pos = begin; pos < interiorBegin; ++pos) frame(pos);  // bounded by numFrames
+    if (interiorBegin < interiorEnd) {
+        const float g = clip.gain;
+        const size_t f0 = static_cast<size_t>(interiorBegin - from);
+        const size_t count = static_cast<size_t>(interiorEnd - interiorBegin);
+        const float* sl = srcL + (interiorBegin + toSource);
+        const float* sr = srcR + (interiorBegin + toSource);
+        float* l = left + f0;
+        float* r = right + f0;
+        float* t = trans + f0;
+        for (size_t i = 0; i < count; ++i) {  // bounded by numFrames
+            const float w = g * t[i];
+            l[i] += w * sl[i];
+            r[i] += w * sr[i];
+            t[i] = 0.0f;  // trans *= cover.out = 0: nothing under the interior is heard
+        }
     }
+    for (SamplePos pos = interiorEnd; pos < end; ++pos) frame(pos);  // bounded by numFrames
 
     // Solid over the whole range: nothing under this clip can be heard here.
     return clipStart + nIn <= from && clipEnd - nOut >= rangeEnd;

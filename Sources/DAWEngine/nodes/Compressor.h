@@ -50,6 +50,7 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <limits>
 #include <span>
 
 #include "core/Node.h"
@@ -122,6 +123,10 @@ private:
     Telemetry* telemetry_;
     double sampleRate_ = 48000.0;
     double rmsCoeff_ = 0.0;  // β
+    // T-091: the attack and release coefficients for the times they were last worked out for
+    // (an exp each; the times rarely change between blocks). NaN: none yet.
+    float attackMs_ = std::numeric_limits<float>::quiet_NaN(), releaseMs_ = std::numeric_limits<float>::quiet_NaN();
+    double attackCoeff_ = 0.0, releaseCoeff_ = 0.0;
     double env_ = 0.0;       // e, dB
     double ms_ = 0.0;        // m, linear power
     ParamSmoother threshold_, ratio_, knee_, makeup_;
