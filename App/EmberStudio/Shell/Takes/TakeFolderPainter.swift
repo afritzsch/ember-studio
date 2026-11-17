@@ -45,27 +45,28 @@ enum TakeFolderPainter {
         ctx.clip(to: CGRect(x: r.minX, y: r.minY, width: r.width, height: r.height))
         ctx.setFillColor(bandColor.cgColor)
         ctx.fill(band)
-        // Segment boundaries and take numbers.
+        // The folder's label, then each segment's boundary (below the band) and take number; a
+        // number that would run into the label or past its segment is left out.
+        drawDisclosure(ctx, takes.disclosureRect(p, geometry: g), expanded: expanded)
+        let label = "Takes \(p.folder.takes.count)" as NSString
+        var labelEnd = r.minX + Self.labelInset
+        if r.width > Self.labelInset + 40 {
+            CanvasPainter.withAppKitContext(ctx) { label.draw(at: CGPoint(x: r.minX + Self.labelInset, y: r.minY), withAttributes: labelAttributes) }
+            labelEnd += label.size(withAttributes: labelAttributes).width
+        }
         let numbers = Dictionary(uniqueKeysWithValues: p.folder.takes.enumerated().map { ($1.id, $0 + 1) })
         for (i, segment) in p.folder.comp.enumerated() {
             let x = g.x(segment.start)
             if i > 0 {
                 ctx.setStrokeColor(folderColor.withAlphaComponent(0.9).cgColor)
                 ctx.setLineWidth(1)
-                ctx.strokeLineSegments(between: [CGPoint(x: x.rounded() + 0.5, y: r.minY), CGPoint(x: x.rounded() + 0.5, y: r.maxY)])
+                ctx.strokeLineSegments(between: [CGPoint(x: x.rounded() + 0.5, y: band.maxY), CGPoint(x: x.rounded() + 0.5, y: r.maxY)])
             }
-            // The first segment's number goes after the folder's label.
-            let labelX = i == 0 ? x + Self.labelInset + 52 : x + 3
+            let labelX = max(x + 3, labelEnd + 6)
             if g.x(segment.end) - labelX > 18, let n = numbers[segment.take] {
                 CanvasPainter.withAppKitContext(ctx) {
                     ("T\(n)" as NSString).draw(at: CGPoint(x: labelX, y: r.minY + 1), withAttributes: smallAttributes)
                 }
-            }
-        }
-        drawDisclosure(ctx, takes.disclosureRect(p, geometry: g), expanded: expanded)
-        if r.width > Self.labelInset + 40 {
-            CanvasPainter.withAppKitContext(ctx) {
-                ("Takes \(p.folder.takes.count)" as NSString).draw(at: CGPoint(x: r.minX + Self.labelInset, y: r.minY), withAttributes: labelAttributes)
             }
         }
         ctx.resetClip()

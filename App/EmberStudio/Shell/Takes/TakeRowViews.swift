@@ -65,7 +65,7 @@ private struct TakeRowHeader: View {
         }
         .padding(.horizontal, 8)
         .padding(.leading, 6)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .background(Color(nsColor: TakeFolderPainter.takeRowColor))
     }
 }
