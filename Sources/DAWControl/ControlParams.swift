@@ -383,6 +383,9 @@ public struct DeviceStateResult: Codable, Hashable, Sendable {
 
 public struct UISnapshotParams: Codable, Hashable, Sendable {
     public var path: String?
+    /// PLUG-017 (T-063, additive): snapshot this device slot's open plugin editor panel instead of
+    /// the main window.
+    public var pluginEditor: NodeIDValue? = nil
 }
 
 public struct UIPerformParams: Codable, Hashable, Sendable {

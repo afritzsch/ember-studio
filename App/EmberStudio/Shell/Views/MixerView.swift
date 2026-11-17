@@ -97,10 +97,24 @@ private struct MixerStripView: View, Equatable {
     /// UI-030: read-only until the insert-chain commands exist (DW-149).
     private var inserts: some View {
         VStack(alignment: .leading, spacing: 1) {
+            // PLUG-017 (T-063): a plugin instrument, with its editor toggle.
+            if let instrument = strip.instrument, instrument.isPlugin {
+                HStack(spacing: 2) {
+                    Text("♪ \(instrument.name)").foregroundStyle(.secondary).lineLimit(1)
+                    Spacer(minLength: 0)
+                    editorToggle("\(strip.controlPrefix).instrument.editor")
+                }
+            }
             ForEach(strip.inserts.prefix(Self.insertRows)) { insert in
-                Text(insert.bypass ? "⊘ \(insert.name)" : insert.name)
-                    .foregroundStyle(insert.bypass ? .tertiary : .secondary)
-                    .lineLimit(1)
+                HStack(spacing: 2) {
+                    Text(insert.bypass ? "⊘ \(insert.name)" : insert.name)
+                        .foregroundStyle(insert.bypass ? .tertiary : .secondary)
+                        .lineLimit(1)
+                    if insert.isPlugin {  // PLUG-017 (T-063): "Open Editor"
+                        Spacer(minLength: 0)
+                        editorToggle("\(strip.controlPrefix).insert.\(insert.id).editor")
+                    }
+                }
             }
             if strip.inserts.count > Self.insertRows {
                 Text("+\(strip.inserts.count - Self.insertRows) more").foregroundStyle(.tertiary)
@@ -115,6 +129,16 @@ private struct MixerStripView: View, Equatable {
     }
 
     private static let insertRows = 3
+
+    /// PLUG-017 (T-063): the strip's editor toggle with `id`, drawn small.
+    @ViewBuilder
+    private func editorToggle(_ id: String) -> some View {
+        if let control = strip.editorControls.first(where: { $0.id == id }) {
+            ControlToggle(control: control, face: "Edit")
+                .controlSize(.mini)
+                .font(.system(size: 8))
+        }
+    }
 
     /// UI-030: each send's target, level and tap, then the add menu. A fixed height, so the faders
     /// line up across strips; the sends scroll inside it if there are many.

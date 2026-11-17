@@ -111,7 +111,7 @@ public enum ControlMethod: String, CaseIterable, Hashable, Sendable {
         case .midiInputs: "MIDI input sources (REC-010) → {inputs: [{uniqueID, name, connected}]}"
         case .midiInject: "Feed MIDI messages as if from a controller (test seam, realtime engines) {events: [{sample | framesFromNow, status, data1?, data2?}]} → {accepted}"
         case .uiState: "UI state dump (attach only)"
-        case .uiSnapshot: "Window snapshot as PNG {path?} → {pngPath} (attach only)"
+        case .uiSnapshot: "Window snapshot as PNG {path?, pluginEditor?: slot} → {pngPath} (attach only)"
         case .uiPerform: "Click or toggle a control {accessibilityId, action} (attach only)"
         case .testFixture: "Build a fixture project from its script {name}"
         }

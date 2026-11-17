@@ -50,6 +50,8 @@ struct MixerStripModel: Identifiable, Equatable {
         var sends: [MixerSendValues]
         var sendTargets: [MixerRouteChoice]
         var inserts: [MixerInsert]
+        /// PLUG-017 (T-063): a MIDI track's instrument (nil: none or not a track).
+        var instrument: MixerInsert? = nil
     }
 
     let values: Values
@@ -72,6 +74,9 @@ struct MixerStripModel: Identifiable, Equatable {
     let sends: [MixerSendModel]
     /// `<prefix>.send.add.<bus>`.
     let sendAddControls: [UIControl]
+    /// PLUG-017 (T-063): `<prefix>.insert.<slot>.editor` per AU/VST3 insert and
+    /// `<prefix>.instrument.editor` for a plugin instrument (toggles, on while the editor is open).
+    var editorControls: [UIControl] = []
 
     nonisolated var id: NodeIDValue { values.id }
     var faderPosition: Double { FaderTaper.position(gain: values.gain) }
@@ -86,6 +91,7 @@ struct MixerStripModel: Identifiable, Equatable {
     var ownControls: [UIControl] {
         var controls = [faderUp, faderDown, faderReset, panLeft, panRight, panCenter, clipReset] + outputControls + sendAddControls
         controls += sends.flatMap(\.controls)
+        controls += editorControls  // T-063
         if header == nil {
             controls.append(muteControl)
             if let soloControl { controls.append(soloControl) }
@@ -138,4 +144,7 @@ struct MixerInsert: Equatable, Sendable, Identifiable {
     var id: NodeIDValue
     var name: String
     var bypass: Bool
+    /// PLUG-017 (T-063): an AU or VST3 (it has an editor to open), and whether that editor is open.
+    var isPlugin: Bool = false
+    var editorOpen: Bool = false
 }

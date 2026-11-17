@@ -134,6 +134,8 @@ final class ProjectWindowModel: Identifiable {
     let exportDialog = ExportModel()
     /// DW-230 (T-090): warns when a track monitors the built-in mic through the built-in speakers.
     let feedbackGuard = FeedbackGuard()
+    /// PLUG-017 (T-063): open plugin editors (floating panels).
+    let pluginEditors = PluginEditorModel()
 
     init(id: Int, store: ProjectStore, toasts: ToastCenter = ToastCenter()) {
         self.id = id
@@ -145,6 +147,7 @@ final class ProjectWindowModel: Identifiable {
         mixer.window = self
         exportDialog.window = self
         feedbackGuard.window = self
+        pluginEditors.window = self  // T-063
         audioPrefs.refreshDevices()
         // UI-004: device toasts name devices (also ones that are gone) and offer the audio settings.
         toasts.deviceName = { [weak self] id in self?.audioPrefs.name(of: id) }
@@ -162,6 +165,7 @@ final class ProjectWindowModel: Identifiable {
     /// Dispatcher); the window now shows `store`. Selection and transport belong to the old one.
     func replace(store: ProjectStore) {
         guard store !== self.store else { return }
+        pluginEditors.closeAll()  // T-063: the old document's plugins
         arrange.finishDrag()
         pianoRoll.close()  // UI-021: its note-offs go to the old engine, before the swap
         mixer.documentReplaced()
@@ -182,6 +186,7 @@ final class ProjectWindowModel: Identifiable {
     /// DW-156 (T-090): the app is about to take this window's engine away (the live engine goes to
     /// the window in front). Notes auditioned on it get their note-offs first (UI-021).
     func engineWillChange() {
+        pluginEditors.engineWillChange()  // T-063: editors belong to the old engine; they reopen on the new
         pianoRoll.stopAudition()
         mixer.documentReplaced()  // a fader drag ends; meters start over on the next engine
     }
@@ -197,6 +202,7 @@ final class ProjectWindowModel: Identifiable {
         audioPrefs.engineReplaced()
         feedbackGuard.devicesChanged()
         pollTransport()
+        pluginEditors.engineDidChange()  // T-063
     }
 
     /// Whether this window's engine is the app's live one (it opens the audio device). `AppModel`
@@ -465,6 +471,7 @@ final class ProjectWindowModel: Identifiable {
         audioPrefs.engineEventsArrived(events)
         toasts.handle(events)
         arrange.engineEventsArrived(events)
+        pluginEditors.engineEventsArrived(events)  // T-063: a crashed plugin's editor closes
     }
 
     func pollTransport() {
@@ -483,5 +490,6 @@ final class ProjectWindowModel: Identifiable {
             }
         }
         feedbackGuard.check()  // DW-230 (T-090)
+        pluginEditors.refresh()  // T-063 (PLUG-017): removed slots, safe mode, sizes, replaced instances
     }
 }
