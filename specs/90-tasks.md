@@ -121,7 +121,7 @@ DSP effects (T-070..073) depend only on the Node API and can be **pulled forward
 | Task | Lane | Title | Requirements | Depends on | Status |
 |---|---|---|---|---|---|
 | T-080 | E+M | Loop recording takes, TakeFolder, comp model, flattening | REC-030..034 | T-052, T-035 | done |
-| T-081 | U | Take folder / comp editing UI | UI-016 | T-080, T-033 | wip(t-081-take-ui) |
+| T-081 | U | Take folder / comp editing UI | UI-016 | T-080, T-033 | done |
 | T-082 | U | Export dialog | UI-042 | T-009, T-032 | done |
 | T-083 | U | Crash recovery dialog | UI-043 | T-031, T-064 | done |
 | T-084 | E | Sanitizer CI jobs, perf smoke, GitHub Actions | TEST-007, 008, BUILD-009 | T-077 | done |
@@ -473,3 +473,8 @@ Recorded by the lead from worker reports.
 | DW-266 | T-083 | Safe mode enables plugins only for the whole project (banner "Enable Plugins"); enabling a single slot (load one suspect plugin at a time) needs a per-slot override in `EngineSync`/`GraphDescriptionBuilder` + a UI entry | U + M | todo |
 | DW-267 | T-083 | Specs 07 and 13 don't cross-reference T-083's additions (`ProjectStore.hasNewerAutosave(at:)` in 10's delta; ui.state `crashRecovery`/`safeMode` in 12's delta) | lead (docs) | todo |
 | DW-268 | T-083 | "Enable Plugins" in the live app took > 1.5 s before AUDelay showed as loaded (V2 AU instantiation on daw.compile); check if it shows elsewhere | P | todo |
+| DW-269 | T-081 | `UIControl` has no parameterised kind: the take swipe is a special `ui.perform` action resolved by id pattern in `AppControlProvider`; a generic range/value control kind would unify it with sliders. Spec 13's `ui.perform` row doesn't mention `start`/`end` (see 12 "Contract delta (T-081)") | U + lead (13) | todo |
+| DW-270 | T-081 | `ProjectWindowModel.visibleTracks` (ui.state) counts one row per track, ignoring automation lane rows (T-075) and take rows (T-081) | U | todo |
+| DW-271 | T-081 | The track header's "A / + Lane" overlay overlaps the "Mon: Auto" menu at the default header width (220 pt) (from T-075) | U | todo |
+| DW-272 | T-081 | The bottom pane's "Comp Editor" tab is empty (comping lives in the arrange view): host a larger editor or remove it | U | todo |
+| DW-273 | T-081 | Take folders can only be comped, expanded or deleted: no move/trim of a folder, per-take gain/fades, or "promote comp to clips" commands/UI | M + U | todo |
