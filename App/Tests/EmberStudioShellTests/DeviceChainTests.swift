@@ -260,16 +260,16 @@ struct DeviceChainTests {
         let (window, _, a, _, _, _, _, _) = try chainWindow()
         window.perform(InsertDevice(channel: a, device: .vst3(VST3Descriptor(identifier: "/x.vst3#01", name: "Plain"))))
         let slot = window.project.track(a)!.inserts.last!.id
-        var loaded = false
+        let loaded = Flag()
         window.deviceChain.readPluginInfo = { id in
             guard id == slot else { return "" }
-            return loaded
+            return loaded.on
                 ? #"{"slot":\#(id),"loaded":true,"params":[{"index":0,"id":"7","name":"Gain","unit":"","min":0,"max":1,"value":0.25},{"index":1,"id":"8","name":"Tone","unit":"","min":0,"max":1,"value":0.5}]}"#
                 : #"{"slot":\#(id),"loaded":false}"#
         }
         try window.control("track.\(a).automation").action()
         #expect(!window.controls.contains { $0.id.hasPrefix("track.\(a).automation.add.device.\(slot).") })
-        loaded = true
+        loaded.on = true
         let add = try window.control("track.\(a).automation.add.device.\(slot).1")
         #expect(add.label == "Add Plain Tone Lane")
         add.action()
@@ -288,7 +288,7 @@ struct DeviceChainTests {
         let plugin = try card(window, au)
         #expect(plugin.safeModeBypassed && plugin.isBypassed && !plugin.bypass)
         let toggle = try window.control("deviceChain.device.\(au).bypass")
-        #expect(toggle.isOn == true && !toggle.isEnabled && toggle.label == "AUDelay Bypassed by Safe Mode")
+        #expect(toggle.isOn == true && !toggle.isEnabled && toggle.label == "AUDelay Disabled by Safe Mode")
         #expect(try !(card(window, eq)).safeModeBypassed && (window.control("deviceChain.device.\(eq).bypass")).isEnabled)
         #expect(try window.control("deviceChain.device.\(au).editor").isEnabled == false, "no editors in safe mode")
         window.bottomPane = .mixer
@@ -298,6 +298,40 @@ struct DeviceChainTests {
         #expect(mixerToggle.isOn == true && !mixerToggle.isEnabled)
         window.store.isSafeMode = false
         #expect(try window.control("mixer.track.\(a).insert.\(au).bypass").isOn == false)
+    }
+
+    @Test("DW-226, T-083: on a real engine, safe mode builds AUDelay without its plugin: the card shows it disabled (pluginInfoJSON `disabled`), and after Enable Plugins it is loaded with its params")
+    func safeModeRealEngine() async throws {
+        try registerBuiltinCatalog()
+        let store = ProjectStore(project: Project(name: "Safe"))
+        store.autosavePolicy = nil
+        let engine = try EngineClient(.offline(sampleRate: 48_000))
+        let sync = try store.attachEngine(engine, debounce: .zero)
+        let window = ProjectWindowModel(id: 1, store: store)
+        window.pluginPanel.manager = try emptyManager()
+        window.perform(AddTrack(name: "A", kind: .audio))
+        let a = window.project.tracks[0].id
+        window.perform(InsertDevice(channel: a, device: .au(AUDescriptor(identifier: "aufx:dely:appl", name: "AUDelay"))))
+        let slot = window.project.track(a)!.inserts[0].id
+        window.selectedTracks = [a]
+        window.bottomPane = .deviceChain
+        store.isSafeMode = true
+        sync.flush()
+        func waitFor(_ condition: () -> Bool) async throws {
+            for _ in 0..<300 where !condition() { try await Task.sleep(for: .milliseconds(10)) }
+        }
+        try await waitFor { engine.pluginInfoJSON(slot: slot).contains(#""disabled":true"#) }
+        var card = try EmberStudioShellTests.card(window, slot)
+        #expect(card.disabled && card.safeModeBypassed && card.loaded == false && card.params.isEmpty)
+        #expect(UIStateDumper.dump(window.deviceChain)["devices"]?[0]?["disabled"] == true)
+        // Enable Plugins (T-083's banner): the slot loads, and info read in safe mode isn't reused.
+        window.enablePlugins()
+        sync.flush()
+        try await waitFor { window.deviceChain.devices.first { $0.id == slot }?.loaded == true }
+        card = try EmberStudioShellTests.card(window, slot)
+        #expect(!card.disabled && !card.safeModeBypassed && card.loaded == true && card.params.count == 4)
+        #expect(try window.control("deviceChain.device.\(slot).bypass").isEnabled)
+        await store.close()
     }
 
     @Test("DW-250: the mixer's inserts are editable: add from the picker (built-ins and scanned plugins; the master too), bypass, up/down, remove, show in the Device Chain tab")
@@ -419,4 +453,9 @@ struct DeviceChainTests {
             }
         }
     }
+}
+
+/// A flag a test flips while a closure reads it.
+private final class Flag: @unchecked Sendable {
+    var on = false
 }

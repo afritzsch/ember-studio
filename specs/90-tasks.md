@@ -121,9 +121,9 @@ DSP effects (T-070..073) depend only on the Node API and can be **pulled forward
 | Task | Lane | Title | Requirements | Depends on | Status |
 |---|---|---|---|---|---|
 | T-080 | E+M | Loop recording takes, TakeFolder, comp model, flattening | REC-030..034 | T-052, T-035 | done |
-| T-081 | U | Take folder / comp editing UI | UI-016 | T-080, T-033 | wip(t-081-take-ui) |
+| T-081 | U | Take folder / comp editing UI | UI-016 | T-080, T-033 | done |
 | T-082 | U | Export dialog | UI-042 | T-009, T-032 | done |
-| T-083 | U | Crash recovery dialog | UI-043 | T-031, T-064 | wip(t-083-crash-dialog) |
+| T-083 | U | Crash recovery dialog | UI-043 | T-031, T-064 | done |
 | T-084 | E | Sanitizer CI jobs, perf smoke, GitHub Actions | TEST-007, 008, BUILD-009 | T-077 | done |
 | T-091 | D | DSP performance for TEST-008: compressor gain computer block-wise (vForce or fast dB, skip below threshold − knee), EQ per-sample coefficient path; perf job ≥ 10× (target 20×) | TEST-008, DSP-031, DSP-030 | T-084 | wip(t-091-dsp-perf) |
 
@@ -348,7 +348,7 @@ Recorded by the lead from worker reports.
 | DW-141 | T-041 | `EngineFacade::paramInfoJSON` publishes only channelStrip, so the model gives the sampler `numParams` 0 (default ADSR). Publish `Sampler::kParamInfo` (and GainNode's), ideally via `NodeRegistry::paramInfo` (DSP-041) | E/B | done (T-070) |
 | DW-142 | T-041 | DSP-040 NaN guard: Telemetry has no NaN counter for processors; the sampler doesn't guard against a NaN asset yet | E (core), then D | done (T-070: `nanBlocks` telemetry for EQ, compressor, delay, reverb, sampler) |
 | DW-143 | T-031 | MODEL-043 rest: instantiate hosted plugins on open, then `store.restorePluginStates()` with `store.pluginStateProvider = EnginePluginStates(engine:)`; real facade `getPluginState` and a round trip through a real plugin | P | done (T-061: Dispatcher + app set `pluginStateProvider`; slot state reaches the AU via configJSON on open) |
-| DW-144 | T-031 | App: offer recovery when `loadReport.recoveryAvailable` (reopen with `recover: true`), call `close()` on a clean quit, show `offlineAssets` and `repairs` | U (T-032 / T-083) | done (T-032 app part: recovery toast, close() on window close/quit; T-083 dialog still todo) |
+| DW-144 | T-031 | App: offer recovery when `loadReport.recoveryAvailable` (reopen with `recover: true`), call `close()` on a clean quit, show `offlineAssets` and `repairs` | U (T-032 / T-083) | done (T-032 app part: recovery toast, close() on window close/quit; T-083 dialog done) |
 | DW-145 | T-031 | A project that was never saved has no folder and isn't autosaved; crash safety for it needs an autosave location such as Application Support | M | todo |
 | DW-146 | T-035, T-025 | dawmcp/dawctl `test.fixture` resolves a fixture's relative `asset.import` paths against the server's cwd, not the fixture's folder, so every fixture that imports an asset (`wav_playback_resampled`, `pan_law`, `bus_send_sum`, `pdc_alignment_null`, `clip_overlap_crossfade`) fails in dawmcp unless an `assets` symlink exists | B (T-032 or later) | done (T-032: fixture-relative inputs resolve against the fixture folder) |
 | DW-147 | T-035 | A dawmcp server started by the MCP client keeps the engine it was built with; `scripts/dawmcp.sh` rebuilds only at launch, so an agent can't verify engine changes through `daw_render_offline` without a client restart. Add a `--rebuild`/restart hint to the CTL-025 tooling | B | todo |
@@ -428,9 +428,9 @@ Recorded by the lead from worker reports.
 | DW-221 | T-082 | `AppModel.export(_:to:)` is only used by the UI-001 test now that File > Export… opens the dialog; remove it with UI-001's Status text | U | todo |
 | DW-222 | T-082 | Export dialog "Choose…" (NSSavePanel) is covered only by a stubbed test; check it by hand in the app | U (manual) | todo |
 | DW-223 | T-082 | UI-010's perf smoke (`perFrame < 16 ms`) fails whenever the machine is loaded (53–104 ms under four workers or other apps, 9–12 ms alone); make it load-tolerant or move it to a perf-only job (DW-172) | U | todo; done (T-090) |
-| DW-224 | T-064 | Safe mode still instantiates and prepares every plugin (only processing is bypassed), so a plugin that crashes in instantiation/prepare/state restore still takes the app down. Option: build plugin slots as absent in safe mode (keep stored state), load on enable | P (with T-083) | todo |
+| DW-224 | T-064 | Safe mode still instantiates and prepares every plugin (only processing is bypassed), so a plugin that crashes in instantiation/prepare/state restore still takes the app down. Option: build plugin slots as absent in safe mode (keep stored state), load on enable | P (with T-083) | done (T-083: safe mode builds AU/VST3 slots as absent, never instantiated) |
 | DW-225 | T-064 | Bypassing an instrument plugin stops its MIDI, so held notes can hang until it is enabled again; send all-notes-off (or the held note-offs) on a bypass toggle | P | todo |
-| DW-226 | T-064 | Mixer inserts can now toggle bypass with `SetDeviceBypass` (12 still says read-only until DW-149); in safe mode the UI shows the document's bypass, not the forced one; T-083 should show safe mode (e.g. `ui.state`); `ToastCenter` treats `pluginMisbehaved` like `pluginCrashed` | U (T-065/T-083) | todo |
+| DW-226 | T-064 | Mixer inserts can now toggle bypass with `SetDeviceBypass` (12 still says read-only until DW-149); in safe mode the UI shows the document's bypass, not the forced one; T-083 should show safe mode (e.g. `ui.state`); `ToastCenter` treats `pluginMisbehaved` like `pluginCrashed` | U (T-065/T-083) | partial: T-083 safe-mode banner, ui.state `safeMode`, own `pluginMisbehaved` toast; mixer inserts showing the forced bypass → T-065 |
 | DW-227 | T-054 | The mixer strip's monitor menu (`MixerView`) doesn't show the monitoring latency line (only the track header does) | U | todo |
 | DW-228 | T-054 | When playback starts with monitoring active, the MIX-023 pre-roll has no input to give, so a monitored track behind L samples of PDC has an L-frame gap (silence chosen over clip leak); a short input history could fill it | E | todo |
 | DW-229 | T-054 | `monitoringLatency` includes the device input latency only once input runs (armed track or `on` monitoring); an unarmed `auto` track shows output + graph only. Query the input device's latency with input off (IO-005) | E (io) | todo |
@@ -470,3 +470,11 @@ Recorded by the lead from worker reports.
 | DW-263 | T-063 | A plugin-side edit without a begin (menu, preset) has no "before" value, so undoing it leaves the plugin at the edited value (the first-edit baseline covers only gestured edits) | P+M | todo |
 | DW-264 | T-063 | A VST3 without its own editor gets none (generic ParamInfo UI is T-065); editor panel positions aren't remembered; third-party VSTGUI/JUCE VST3 and AUv3 out-of-process editors untried | U/P (T-065) | todo |
 | DW-265 | T-063 | Check that dawmcp's `daw_ui_snapshot` tool schema exposes the new `pluginEditor` param | B (small) | todo |
+| DW-266 | T-083 | Safe mode enables plugins only for the whole project (banner "Enable Plugins"); enabling a single slot (load one suspect plugin at a time) needs a per-slot override in `EngineSync`/`GraphDescriptionBuilder` + a UI entry | U + M | todo |
+| DW-267 | T-083 | Specs 07 and 13 don't cross-reference T-083's additions (`ProjectStore.hasNewerAutosave(at:)` in 10's delta; ui.state `crashRecovery`/`safeMode` in 12's delta) | lead (docs) | todo |
+| DW-268 | T-083 | "Enable Plugins" in the live app took > 1.5 s before AUDelay showed as loaded (V2 AU instantiation on daw.compile); check if it shows elsewhere | P | todo |
+| DW-269 | T-081 | `UIControl` has no parameterised kind: the take swipe is a special `ui.perform` action resolved by id pattern in `AppControlProvider`; a generic range/value control kind would unify it with sliders. Spec 13's `ui.perform` row doesn't mention `start`/`end` (see 12 "Contract delta (T-081)") | U + lead (13) | todo |
+| DW-270 | T-081 | `ProjectWindowModel.visibleTracks` (ui.state) counts one row per track, ignoring automation lane rows (T-075) and take rows (T-081) | U | todo |
+| DW-271 | T-081 | The track header's "A / + Lane" overlay overlaps the "Mon: Auto" menu at the default header width (220 pt) (from T-075) | U | todo |
+| DW-272 | T-081 | The bottom pane's "Comp Editor" tab is empty (comping lives in the arrange view): host a larger editor or remove it | U | todo |
+| DW-273 | T-081 | Take folders can only be comped, expanded or deleted: no move/trim of a folder, per-take gain/fades, or "promote comp to clips" commands/UI | M + U | todo |

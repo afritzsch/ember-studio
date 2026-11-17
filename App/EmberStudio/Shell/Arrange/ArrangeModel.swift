@@ -74,6 +74,8 @@ final class ArrangeModel {
             g.trackRows = layout.trackRows
             g.rowTotal = layout.rowTotal
         }
+        // UI-016 (T-081): take rows of expanded take folders, under their track's row.
+        if let takes = window?.takes { g.takeBands = takes.bands(geometry: g) }
         return g
     }
 
@@ -162,6 +164,11 @@ final class ArrangeModel {
     /// A press at `point`: selects (shift toggles), and arms a drag of the clip zone under it or a marquee.
     func mouseDown(at point: CGPoint, modifiers: CanvasModifiers = []) {
         finishDrag()
+        // UI-016 (T-081): a press on a take row swipes; on a folder's triangle expands it.
+        if let takes = window?.takes,
+           takes.mouseDown(at: point, modifiers: modifiers, geometry: geometry, snap: { [grid, snap] in grid.snap($0, snap) }) {
+            return
+        }
         // UI-015 (T-075): a press on an automation lane row edits the lane.
         if let lanes = window?.automation,
            lanes.mouseDown(at: point, modifiers: modifiers, geometry: geometry, snap: { [grid, snap] in grid.snap($0, snap) }) {
@@ -189,6 +196,10 @@ final class ArrangeModel {
     @discardableResult
     func doubleClick(at point: CGPoint) -> Bool {
         if window?.automation.doubleClick(at: point, geometry: geometry) == true { return true }  // UI-015
+        // UI-016: the first click of the pair already acted on a take row or a triangle.
+        if let takes = window?.takes, takes.takeRowHit(point, geometry: geometry) != nil || takes.disclosureHit(point, geometry: geometry) != nil {
+            return true
+        }
         guard let hit = hitTest(point), case .midi = project.clip(hit.clipID) else { return false }
         finishDrag()
         selection = [hit.clipID]
@@ -197,6 +208,10 @@ final class ArrangeModel {
     }
 
     func mouseDragged(to point: CGPoint, modifiers: CanvasModifiers = []) {
+        if let takes = window?.takes, takes.isDragging {  // UI-016
+            takes.mouseDragged(to: point, modifiers: modifiers, geometry: geometry, snap: { [grid, snap] in grid.snap($0, snap) })
+            return
+        }
         if let lanes = window?.automation, lanes.isDragging {  // UI-015
             lanes.mouseDragged(to: point, modifiers: modifiers, geometry: geometry, snap: { [grid, snap] in grid.snap($0, snap) })
             return
@@ -229,6 +244,11 @@ final class ArrangeModel {
     }
 
     func mouseUp(at point: CGPoint, modifiers: CanvasModifiers = []) {
+        if let takes = window?.takes, takes.isDragging {  // UI-016: the swipe's one SetCompSelection
+            takes.mouseUp()
+            finishDrag()
+            return
+        }
         if let drag, !drag.started, case .clip(let hit) = drag.kind, hit.zone == .body, !modifiers.contains(.shift),
            selection.count > 1 {
             // A click (no drag) on one clip of a multi-selection selects just that clip.
@@ -240,6 +260,7 @@ final class ArrangeModel {
     /// Ends the drag in progress: its gesture becomes one undo entry (none if it changed nothing).
     func finishDrag() {
         window?.automation.finishDrag()  // UI-015
+        window?.takes.cancelSwipe()  // UI-016: a swipe ends only through mouseUp
         if let drag, drag.started, case .clip = drag.kind { store?.endGesture() }
         drag = nil
         marquee = nil
@@ -480,7 +501,7 @@ final class ArrangeModel {
     func scroll(dx: Double, dy: Double) {
         guard let window else { return }
         window.scrollX = max(window.scrollX + dx, 0)
-        let content = Double(geometry.rowCount(tracks: tracks.count)) * ProjectWindowModel.trackHeight
+        let content = Double(geometry.slotCount(tracks: tracks.count)) * ProjectWindowModel.trackHeight  // UI-016: take rows too
         let visible = max(viewSize.height - TimelineGeometry.rulerHeight, 0)
         window.scrollY = min(max(window.scrollY + dy, 0), max(content - visible, 0))
     }
@@ -509,7 +530,37 @@ final class ArrangeModel {
             WaveformMesh.append(clip: clip, rect: g.rect(start: clip.start, length: clip.length, row: entry.row), peaks: peaks,
                                 geometry: g, tempoMap: map, color: color, into: &bars)
         }
+        takeWaveformBars(geometry: g, into: &bars)  // UI-016
         return bars
+    }
+
+    /// UI-016 (T-081): the waveforms of visible take folders: the comp on the track's row, and on
+    /// take rows each take cut at the comp's boundaries, the parts the comp plays bright.
+    private func takeWaveformBars(geometry g: TimelineGeometry, into bars: inout [WaveformBar]) {
+        guard let takes = window?.takes, tracks.contains(where: { !$0.takeFolders.isEmpty }) else { return }
+        let map = project.tempoMap
+        let visible = takes.visible(geometry: g)
+        func append(_ clip: Clip, rect: CGRect, color: SIMD4<Float>) {
+            guard case .audio(let audio) = clip,
+                  let peaks = peakLevel(audio.assetID, samplesPerPixel: WaveformMesh.samplesPerPixel(at: audio.start, geometry: g, tempoMap: map))
+            else { return }
+            WaveformMesh.append(clip: audio, rect: rect, peaks: peaks, geometry: g, tempoMap: map, color: color, into: &bars)
+        }
+        for placement in visible.folders {
+            for clip in placement.folder.flattened(tempo: map) {
+                append(clip, rect: g.rect(start: clip.start, length: clip.length, row: placement.trackIndex), color: [0.08, 0.1, 0.14, 0.8])
+            }
+        }
+        for row in visible.rows {
+            guard let folder = project.takeFolder(row.folderID) else { continue }
+            let r = takes.takeRect(row, geometry: g)
+            for piece in TakeFoldersModel.pieces(of: row.take, in: folder) {
+                guard let clip = TakeFoldersModel.cut(row.take.clip, from: piece.start, to: piece.end, tempo: map) else { continue }
+                let x0 = g.x(clip.start), x1 = g.x(clip.end)
+                append(clip, rect: CGRect(x: x0, y: r.minY, width: max(x1 - x0, 1), height: r.height),
+                       color: piece.inComp ? [0.05, 0.06, 0.09, 0.9] : [0.08, 0.1, 0.14, 0.35])
+            }
+        }
     }
 
     /// The mipmap level `clip` is drawn with now, or nil if its peaks aren't there (ui.state).

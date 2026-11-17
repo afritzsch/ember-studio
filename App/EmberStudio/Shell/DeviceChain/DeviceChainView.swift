@@ -89,8 +89,9 @@ private struct DeviceCardView: View {
         VStack(alignment: .leading, spacing: 6) {
             header
             if card.safeModeBypassed {
-                // PLUG-021, DW-226: the slot is bypassed by safe mode, whatever the document says.
-                Label("Bypassed by safe mode", systemImage: "exclamationmark.shield")
+                // PLUG-021, DW-226, T-083: safe mode builds the slot without its plugin (it passes its
+                // input through), whatever the document's bypass says; its settings are kept.
+                Label("Disabled by safe mode", systemImage: "exclamationmark.shield")
                     .font(.caption)
                     .foregroundStyle(.orange)
                     .accessibilityIdentifier("\(card.controlPrefix).safeMode")
@@ -174,7 +175,9 @@ private struct DeviceCardView: View {
         ScrollView(.vertical) {
             VStack(alignment: .leading, spacing: 5) {
                 if card.params.isEmpty {
-                    Text(card.isPlugin ? "No parameters reported" : "No parameters").font(.caption).foregroundStyle(.secondary)
+                    Text(card.safeModeBypassed ? "Not loaded in safe mode; its settings are kept."
+                         : card.isPlugin ? "No parameters reported" : "No parameters")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
                 ForEach(card.params) { param in
                     DeviceParamRow(param: param, card: card, model: model)

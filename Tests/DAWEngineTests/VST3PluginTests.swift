@@ -39,4 +39,8 @@ struct VST3PluginTests {
 
     @Test("PLUG-018: a latent VST3 host-bypassed nulls against its input on the timeline; slot writes toggle it; same instance and state")
     func hostBypass() { expectPasses(daw.testing.vst3HostBypass()) }
+
+    // T-083 (DW-224).
+    @Test("DW-224, PLUG-021: a disabled (safe mode) VST3 slot never loads its plugin, passes its input, keeps its state")
+    func safeModeSlots() { expectPasses(daw.testing.vst3SafeModeSlots()) }
 }

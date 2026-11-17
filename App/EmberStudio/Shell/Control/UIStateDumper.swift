@@ -26,8 +26,9 @@ import Foundation
 ///                                      midi: "notes"}],
 ///                    "selection", "marquee", "gesture", "playhead": {"tick", "x"}},
 ///        "pianoRoll": {…}, "audioPreferences": {…}, "mixer": {…}, "export": {…},
-///        "engine": {"live", "mode"} | null, "feedbackWarning": {…} | null}],
-///      "liveWindow": id | null}
+///        "engine": {"live", "mode"} | null, "feedbackWarning": {…} | null,
+///        "safeMode": {"on", "plugins": [{"slot", "format", "identifier", "name"}]}}],
+///      "liveWindow": id | null, "crashRecovery": {…} | null}
 @MainActor
 enum UIStateDumper {
     static func dump(_ app: AppModel) -> JSONValue {
@@ -36,7 +37,45 @@ enum UIStateDumper {
             "windows": .array(app.windows.map { dump($0, isMain: $0.id == app.mainWindowID) }),
             // DW-156 (T-090): the window holding the app's live engine (null with --engine offline).
             "liveWindow": app.liveWindow.map { .int(Int64($0.id)) } ?? .null,
+            // UI-043 (T-083): the crash-recovery dialog while it is presented.
+            "crashRecovery": app.crashRecovery.map(dump) ?? .null,
         ]
+    }
+
+    /// UI-043 (T-083): the crash-recovery dialog.
+    ///
+    ///     {"presented", "opening", "title", "message", "choice": "openSafe"|"openNormally"|"dontOpen"|null,
+    ///      "sessions": [{"pid", "launched"}],
+    ///      "projects": [{"id", "name", "path"|null, "canOpen", "recoveryAvailable", "recover",
+    ///                    "plugins": [{"slot", "format", "identifier", "name"}]}],
+    ///      "failures": [{"name", "error"}], "controls": [ids]}
+    static func dump(_ crash: CrashRecoveryModel) -> JSONValue {
+        let iso = ISO8601DateFormatter()
+        return [
+            "presented": .bool(crash.isPresented), "opening": .bool(crash.isOpening),
+            "title": .string(crash.title), "message": .string(crash.message),
+            "choice": crash.choice.map { .string($0.rawValue) } ?? .null,
+            "sessions": .array(crash.sessions.map {
+                ["pid": .int(Int64($0.processID)), "launched": .string(iso.string(from: $0.launched))]
+            }),
+            "projects": .array(crash.entries.map { entry in
+                [
+                    "id": .int(Int64(entry.id)), "name": .string(entry.name), "path": entry.path.map(JSONValue.string) ?? .null,
+                    "canOpen": .bool(entry.canOpen), "recoveryAvailable": .bool(entry.recoveryAvailable),
+                    "recover": .bool(entry.recover), "plugins": plugins(entry.plugins),
+                ]
+            }),
+            "failures": .array(crash.failures.map { ["name": .string($0.name), "error": .string($0.error)] }),
+            "controls": .array(crash.controls.map { .string($0.id) }),
+        ]
+    }
+
+    /// T-083: plugin slots as the running marker lists them.
+    static func plugins(_ plugins: [CrashMarker.Plugin]) -> JSONValue {
+        .array(plugins.map {
+            ["slot": .int(Int64(bitPattern: $0.slotID)), "format": .string($0.format), "identifier": .string($0.identifier),
+             "name": .string($0.name)]
+        })
     }
 
     static func dump(_ window: ProjectWindowModel, isMain: Bool) -> JSONValue {
@@ -94,11 +133,14 @@ enum UIStateDumper {
             "mixer": dump(window.mixer),
             "export": dump(window.exportDialog),  // T-082
             "automation": dump(window.automation),  // T-075 (UI-015)
+            "takes": dump(window.takes),  // T-081 (UI-016)
             "engine": engine(window),  // T-090 (DW-156)
             "feedbackWarning": dump(window.feedbackGuard),  // T-090 (DW-230)
             "pluginEditors": dump(window.pluginEditors),  // T-063 (PLUG-017)
             "deviceChain": dump(window.deviceChain),  // T-065 (UI-032)
             "pluginManager": dump(window.pluginPanel),  // T-065 (UI-041)
+            // T-083 (PLUG-021, DW-226): safe mode, with the plugin slots it keeps from loading.
+            "safeMode": ["on": .bool(store.isSafeMode), "plugins": plugins(window.safeModePlugins)],
         ]
     }
 
@@ -165,6 +207,57 @@ enum UIStateDumper {
                 ["lane": .int(Int64(bitPattern: pass.laneID)), "target": target(pass.target), "mode": .string(pass.mode.rawValue),
                  "from": .int(pass.from.raw), "lastTick": .int(pass.lastTick.raw), "points": .int(Int64(pass.points.count)),
                  "held": .bool(pass.held)]
+            }),
+        ]
+    }
+
+    /// UI-016 (T-081): take folders and their take rows:
+    /// `{expandedFolders: [ids], gesture, swipe: {folder, take, start, end, started} | null,
+    /// folders: [{id, track, trackName, start, end, expanded, row, rect, disclosure, comp: [{start,
+    /// end, take}], takes: [{id, number, start, end, inComp, pieces: [{start, end, inComp}], band,
+    /// rect (null while collapsed), swipe (the ui.perform id), controls}], controls}]}`. Rects are in
+    /// canvas view points.
+    static func dump(_ takes: TakeFoldersModel) -> JSONValue {
+        guard let window = takes.window else { return .null }
+        let g = window.arrange.geometry
+        let rows = takes.rows(geometry: g)
+        func rect(_ r: CGRect) -> JSONValue {
+            ["x": .double(r.minX), "y": .double(r.minY), "width": .double(r.width), "height": .double(r.height)]
+        }
+        func id(_ v: ModelID) -> JSONValue { .int(Int64(bitPattern: v)) }
+        let folders = takes.placements(geometry: g)
+        let swipe: JSONValue = takes.swipe.map { s in
+            ["folder": id(s.folderID), "take": id(s.takeID), "start": .int(s.range.start.raw), "end": .int(s.range.end.raw),
+             "started": .bool(s.started)]
+        } ?? .null
+        return [
+            "expandedFolders": ids(takes.expanded.filter { window.project.takeFolder($0) != nil }.sorted()),
+            "gesture": takes.activeGesture.map { .string($0) } ?? .null,
+            "swipe": swipe,
+            "folders": .array(folders.map { p in
+                let folder = p.folder
+                let trackName = window.project.tracks[p.trackIndex].name
+                return [
+                    "id": id(folder.id), "track": id(p.trackID), "trackName": .string(trackName),
+                    "start": .int(folder.start.raw), "end": .int(folder.end.raw), "expanded": .bool(takes.expanded.contains(folder.id)),
+                    "row": .int(Int64(p.row)), "rect": rect(takes.folderRect(p, geometry: g)),
+                    "disclosure": rect(takes.disclosureRect(p, geometry: g)),
+                    "comp": .array(folder.comp.map { ["start": .int($0.start.raw), "end": .int($0.end.raw), "take": id($0.take)] }),
+                    "takes": .array(folder.takes.enumerated().map { n, take in
+                        let row = rows.first { $0.folderID == folder.id && $0.take.id == take.id }
+                        let pieces = TakeFoldersModel.pieces(of: take, in: folder)
+                        return [
+                            "id": id(take.id), "number": .int(Int64(n + 1)), "start": .int(take.clip.start.raw),
+                            "end": .int(take.clip.end.raw), "inComp": .bool(pieces.contains { $0.inComp }),
+                            "pieces": .array(pieces.map { ["start": .int($0.start.raw), "end": .int($0.end.raw), "inComp": .bool($0.inComp)] }),
+                            "band": row.map { .int(Int64($0.band)) } ?? .null,
+                            "rect": row.map { rect(takes.takeRect($0, geometry: g)) } ?? .null,
+                            "swipe": .string(TakeFoldersModel.swipeID(folder: folder.id, take: take.id)),
+                            "controls": .array((takes.expanded.contains(folder.id) ? ["takeFolder.\(folder.id).take.\(take.id).select"] : []).map { .string($0) }),
+                        ]
+                    }),
+                    "controls": .array(takes.folderControls(folder, trackName: trackName).map { .string($0.id) }),
+                ]
             }),
         ]
     }

@@ -35,6 +35,12 @@ Result<PluginConfigFields> parsePluginConfigFields(std::string_view configJSON) 
                 fields.state.assign(p, p + bytes.length);
             }
         }
+        // T-083 (DW-224): safe mode builds the slot without its plugin.
+        id disabled = dict[@"disabled"];
+        if (disabled != nil && disabled != [NSNull null]) {
+            if (![disabled isKindOfClass:[NSNumber class]]) return invalid("\"disabled\" is not a bool");
+            fields.disabled = [(NSNumber*)disabled boolValue];
+        }
         return fields;
     }
 }
@@ -53,10 +59,11 @@ Result<AUPluginConfig> AUPluginConfig::parse(std::string_view configJSON) {
     config.component = component.value();
     config.identifier = formatAUIdentifier(config.component);
     config.state = std::move(fields->state);
+    config.disabled = fields->disabled;
     return config;
 }
 
-std::string AUPluginConfig::makeJSON(std::string_view identifier, const std::vector<uint8_t>& state) {
+std::string AUPluginConfig::makeJSON(std::string_view identifier, const std::vector<uint8_t>& state, bool disabled) {
     @autoreleasepool {
         NSMutableDictionary* dict = [NSMutableDictionary dictionary];
         dict[@"identifier"] = [[NSString alloc] initWithBytes:identifier.data()
@@ -65,6 +72,7 @@ std::string AUPluginConfig::makeJSON(std::string_view identifier, const std::vec
                                   ?: @"";
         if (!state.empty())
             dict[@"state"] = [[NSData dataWithBytes:state.data() length:state.size()] base64EncodedStringWithOptions:0];
+        if (disabled) dict[@"disabled"] = @YES;
         NSData* data = [NSJSONSerialization dataWithJSONObject:dict
                                                        options:NSJSONWritingSortedKeys | NSJSONWritingWithoutEscapingSlashes
                                                          error:nil];

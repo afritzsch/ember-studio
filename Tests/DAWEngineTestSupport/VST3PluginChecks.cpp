@@ -805,5 +805,59 @@ CheckResult vst3HostBypass() {
     return checks;
 }
 
-} // namespace daw::testing
+// MARK: T-083 (DW-224, PLUG-021 safe mode)
 
+CheckResult vst3SafeModeSlots() {
+    CheckResult checks;
+    DAW_CHECK(RtTrap::install());
+    DAW_CHECK(emberReady());
+    if (!emberReady()) return checks;
+    auto host = std::make_shared<VST3PluginHost>();
+    auto rig = makeRig(host);
+    rig->addAsset(makeAsset(7, 1, 96000, [](uint32_t, int64_t) { return 0.25f; }));
+    const std::string effect = emberIdentifier(kEffectUID);
+    const std::string missing = "/nonexistent/Missing.vst3#84E8DE5F92554F5396FAE4133C935A18";
+    const std::vector<uint8_t> stored{9, 8, 7};  // a state the plugin would refuse: never applied here
+
+    auto graph = [&](const std::string& fx, const std::string& master, uint32_t version) {
+        GraphDescription d = baseDescription();
+        d.nodes.push_back(NodeDesc{10, NodeKind::audioClipPlayer, 1, 0, 0, {}});
+        d.nodes.push_back(NodeDesc{20, NodeKind::vst3Plugin, version, 0, 0, fx});
+        d.nodes.push_back(NodeDesc{30, NodeKind::vst3Plugin, version, 0, 0, master});
+        d.edges.push_back(EdgeDesc{1, 10, 20, EdgeKind::audio, 0});
+        d.edges.push_back(EdgeDesc{2, 20, 30, EdgeKind::audio, 0});
+        d.edges.push_back(EdgeDesc{3, 30, 1, EdgeKind::audio, 0});
+        d.audioClips.push_back(nodes::clip(10, 1, 0, 3840, 7));
+        return d;
+    };
+
+    // Disabled: neither slot loads (EmberTest makes no processor, the missing bundle reports no
+    // failure), the input passes through, the stored state is what getPluginState gives back.
+    const int before = ember().liveProcessors();
+    DAW_CHECK(rig->publish(graph(VST3PluginConfig::makeJSON(effect, stored, true),
+                                 VST3PluginConfig::makeJSON(missing, {}, true), 1)));
+    DAW_CHECK(ember().liveProcessors() == before);
+    DAW_CHECK(host->takeFailures().empty());
+    DAW_CHECK(host->instance(20) == nullptr && host->current(20) == nullptr);
+    DAW_CHECK(host->knows(20));
+    DAW_CHECK(host->state(20).ok() && host->state(20).value() == stored);
+    const std::string info = host->infoJSON(20);
+    DAW_CHECK(info.find("\"loaded\":false") != std::string::npos && info.find("\"disabled\":true") != std::string::npos);
+    DAW_CHECK(rig->transport().locate(0) && rig->transport().play());
+    renderRandom(*rig, 4800, 83);
+    DAW_CHECK(allEqual(rig->left(), 0, 0.25f));
+    DAW_CHECK(rig->violations() == 0);
+
+    // Enabled (the config without "disabled", a new configVersion): the plugin loads now.
+    DAW_CHECK(rig->publish(graph(config(effect), config(missing), 2)));
+    DAW_CHECK(ember().liveProcessors() == before + 1);
+    DAW_CHECK(host->instance(20) != nullptr);
+    auto failures = host->takeFailures();
+    DAW_CHECK(failures.size() == 1 && failures[0].slot == 30);  // only now is the missing bundle tried
+    DAW_CHECK(host->infoJSON(20).find("\"disabled\"") == std::string::npos);
+    renderRandom(*rig, 4800, 84);
+    DAW_CHECK(rig->violations() == 0);
+    return checks;
+}
+
+} // namespace daw::testing

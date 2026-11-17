@@ -45,6 +45,7 @@ final class DeviceChainModel {
     private(set) var pluginInfoRevision = 0
     @ObservationIgnored private var pluginInfos: [NodeIDValue: PluginInfo] = [:]
     @ObservationIgnored private var lastInfoRefresh = Date.distantPast
+    @ObservationIgnored private var cachedInSafeMode = false
     @ObservationIgnored var now: () -> Date = { Date() }
     /// Where plugin info comes from: the window's engine (`pluginInfoJSON`), or a test's stand-in.
     @ObservationIgnored var readPluginInfo: (@MainActor (NodeIDValue) -> String)?
@@ -115,7 +116,7 @@ final class DeviceChainModel {
         var card = DeviceCardModel(
             id: slot.id, name: MixerModel.insertName(slot.kind), format: Self.format(slot.kind), isInstrument: position == nil,
             position: position, bypass: slot.bypass, safeModeBypassed: forced, isPlugin: slot.isPlugin,
-            loaded: info?.loaded, loadError: info?.error,
+            loaded: info?.loaded, loadError: info?.error, disabled: info?.disabled ?? false,
             editorOpen: window?.pluginEditors.isOpen(slot.id) ?? false, noEditor: noEditor.contains(slot.id),
             showsParams: !slot.isPlugin || genericShown.contains(slot.id) || noEditor.contains(slot.id),
             acceptsSidechain: Self.acceptsSidechain(slot, info: info),
@@ -178,6 +179,13 @@ final class DeviceChainModel {
 
     /// A plugin's info from the engine (cached; re-read at the window's poll while the tab shows).
     func pluginInfo(_ slot: NodeIDValue) -> PluginInfo? {
+        // T-083: safe mode builds plugin slots without their plugin (`"disabled": true`); toggling
+        // it changes what the engine reports, so infos read either side of a toggle aren't reused.
+        let safeMode = window?.store.isSafeMode ?? false
+        if safeMode != cachedInSafeMode {
+            cachedInSafeMode = safeMode
+            pluginInfos = [:]
+        }
         if let cached = pluginInfos[slot] { return cached }
         guard let json = pluginInfoJSON(slot), let info = PluginInfo.parse(json) else { return nil }
         // A plugin not loaded yet is asked again next time (its params come with the load).
@@ -236,7 +244,7 @@ final class DeviceChainModel {
         let prefix = "deviceChain.device.\(id)"
         let name = card.name
         var controls: [UIControl] = [
-            .toggle("\(prefix).bypass", card.safeModeBypassed ? "\(name) Bypassed by Safe Mode" : "Bypass \(name)",
+            .toggle("\(prefix).bypass", card.safeModeBypassed ? "\(name) Disabled by Safe Mode" : "Bypass \(name)",
                     isOn: card.bypass || card.safeModeBypassed, enabled: !card.safeModeBypassed) { [weak self] in
                 self?.window?.perform(SetDeviceBypass(slotID: id, bypass: !card.bypass))
             },
@@ -487,6 +495,8 @@ struct DeviceCardModel: Identifiable {
     /// Plugins: whether the engine loaded it (nil: no engine or no info yet), and why not.
     let loaded: Bool?
     let loadError: String?
+    /// T-083: the engine built the slot without its plugin (safe mode), `pluginInfoJSON`'s `disabled`.
+    let disabled: Bool
     let editorOpen: Bool
     /// DW-264: the engine had no editor for it.
     let noEditor: Bool
@@ -554,6 +564,8 @@ struct PluginInfo: Equatable, Sendable {
     }
 
     var loaded: Bool
+    /// T-083 (10 "Contract delta (T-083)"): built without its plugin in safe mode.
+    var disabled: Bool = false
     var error: String?
     var name: String?
     var sidechain: Bool?
@@ -562,13 +574,14 @@ struct PluginInfo: Equatable, Sendable {
     static func parse(_ json: String) -> PluginInfo? {
         struct Raw: Decodable {
             var loaded: Bool?
+            var disabled: Bool?
             var error: String?
             var name: String?
             var sidechain: Bool?
             var params: [Param]?
         }
         guard !json.isEmpty, let raw = try? JSONDecoder().decode(Raw.self, from: Data(json.utf8)) else { return nil }
-        return PluginInfo(loaded: raw.loaded ?? false, error: raw.error, name: raw.name, sidechain: raw.sidechain,
+        return PluginInfo(loaded: raw.loaded ?? false, disabled: raw.disabled ?? false, error: raw.error, name: raw.name, sidechain: raw.sidechain,
                           params: raw.params ?? [])
     }
 }

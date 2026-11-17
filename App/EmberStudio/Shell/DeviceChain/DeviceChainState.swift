@@ -30,6 +30,7 @@ extension UIStateDumper {
             "instrument": .bool(card.isInstrument), "position": card.position.map { .int(Int64($0)) } ?? .null,
             "bypass": .bool(card.bypass), "safeModeBypassed": .bool(card.safeModeBypassed), "plugin": .bool(card.isPlugin),
             "loaded": card.loaded.map(JSONValue.bool) ?? .null, "loadError": card.loadError.map(JSONValue.string) ?? .null,
+            "disabled": .bool(card.disabled),
             "editorOpen": .bool(card.editorOpen), "noEditor": .bool(card.noEditor), "showsParams": .bool(card.showsParams),
             "acceptsSidechain": .bool(card.acceptsSidechain),
             "sidechain": card.sidechain.map { ["source": .int(Int64(bitPattern: $0.source)), "name": .string($0.name)] } ?? .null,

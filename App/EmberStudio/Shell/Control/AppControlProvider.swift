@@ -59,6 +59,7 @@ final class AppControlProvider: ControlUIProvider {
     /// (alias `press`) for buttons and toggles, `toggle`, `on` and `off` for toggles.
     func uiPerform(_ params: UIPerformParams) async throws -> JSONValue {
         let window = try mainWindow()
+        if params.action == "swipe" { return try swipe(params, in: window) }  // UI-016 (T-081)
         guard let action = UIAction(rawValue: params.action) else {
             throw ControlError.invalidParams("action must be one of \(UIAction.allCases.map(\.rawValue).joined(separator: ", "))")
         }
@@ -87,6 +88,25 @@ final class AppControlProvider: ControlUIProvider {
             result["isOn"] = .bool(isOn)
         }
         return .object(result)
+    }
+
+    /// UI-016 (T-081): `ui.perform {accessibilityId: "takeFolder.<folder>.take.<take>.swipe",
+    /// action: "swipe", start, end}`: the swipe gesture on a take row, as ticks. Returns
+    /// `{accessibilityId, kind: "takeRow", action, start, end, comp: [{start, end, take}]}`.
+    private func swipe(_ params: UIPerformParams, in window: ProjectWindowModel) throws -> JSONValue {
+        guard let start = params.start, let end = params.end else {
+            throw ControlError.invalidParams("swipe needs start and end (ticks)")
+        }
+        guard let (folderID, _) = TakeFoldersModel.swipeTarget(params.accessibilityId) else {
+            throw ControlError.invalidParams("swipe works on take rows: takeFolder.<folder>.take.<take>.swipe, not \"\(params.accessibilityId)\"")
+        }
+        try window.takes.performSwipe(params.accessibilityId, start: Tick(start), end: Tick(end))
+        let comp = window.project.takeFolder(folderID)?.comp ?? []
+        return [
+            "accessibilityId": .string(params.accessibilityId), "kind": "takeRow", "action": "swipe",
+            "start": .int(start), "end": .int(end),
+            "comp": .array(comp.map { ["start": .int($0.start.raw), "end": .int($0.end.raw), "take": .int(Int64(bitPattern: $0.take))] }),
+        ]
     }
 
     private func mainWindow() throws -> ProjectWindowModel {

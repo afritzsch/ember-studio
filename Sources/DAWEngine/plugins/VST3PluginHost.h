@@ -84,6 +84,7 @@ private:
         std::optional<Error> error;                // the latest failure
         std::shared_ptr<PluginHealth> health;      // PLUG-022: the latest node's
         bool healthReported = false;
+        bool disabled = false;  // T-083 (DW-224): the latest node was built without its plugin (safe mode)
     };
 
     mutable std::mutex mutex_;

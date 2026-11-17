@@ -155,7 +155,7 @@ final class MixerModel {
             let prefix = "\(values.controlPrefix).insert.\(insert.id)"
             let slot = insert.id
             return [
-                .toggle("\(prefix).bypass", insert.safeModeBypassed ? "\(insert.name) Bypassed by Safe Mode" : "Bypass \(insert.name)",
+                .toggle("\(prefix).bypass", insert.safeModeBypassed ? "\(insert.name) Disabled by Safe Mode" : "Bypass \(insert.name)",
                         isOn: insert.isBypassed, enabled: !insert.safeModeBypassed) { [weak self] in
                     self?.window?.perform(SetDeviceBypass(slotID: slot, bypass: !insert.bypass))
                 },

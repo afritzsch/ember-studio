@@ -142,6 +142,11 @@ final class ProjectWindowModel: Identifiable {
     let deviceChain = DeviceChainModel()
     /// UI-041 (T-065): the plugin manager panel (the app's scanned plugins, blocked list, rescan).
     let pluginPanel = PluginManagerPanelModel()
+    /// UI-043 (T-083): the app's crash-recovery dialog while it is presented (`AppModel` sets it on
+    /// every window). The window shows it under the toolbar and lists its controls.
+    var crashRecovery: CrashRecoveryModel?
+    /// UI-016 (T-081): take folders in the arrange view (expand, swipe comping, delete).
+    let takes = TakeFoldersModel()
 
     init(id: Int, store: ProjectStore, toasts: ToastCenter = ToastCenter()) {
         self.id = id
@@ -157,6 +162,7 @@ final class ProjectWindowModel: Identifiable {
         automation.window = self  // T-075
         deviceChain.window = self  // T-065
         pluginPanel.window = self  // T-065
+        takes.window = self  // T-081
         audioPrefs.refreshDevices()
         // UI-004: device toasts name devices (also ones that are gone) and offer the audio settings.
         toasts.deviceName = { [weak self] id in self?.audioPrefs.name(of: id) }
@@ -164,6 +170,8 @@ final class ProjectWindowModel: Identifiable {
         // UI-004 (T-055): recording toasts name the track and say whether the take is in the project.
         toasts.trackName = { [weak self] id in self?.project.track(id)?.name }
         toasts.takeImported = { [weak self] take in self?.containsTake(take) ?? false }
+        // DW-226 (T-083): plugin toasts name the device slot.
+        toasts.slotName = { [weak self] id in self?.deviceSlotName(id) }
     }
 
     var project: Project { store.project }
@@ -180,6 +188,7 @@ final class ProjectWindowModel: Identifiable {
         mixer.documentReplaced()
         automation.documentReplaced()  // T-075: passes end uncommitted, before the swap
         deviceChain.documentReplaced()  // T-065
+        takes.documentReplaced()  // T-081
         self.store = store
         arrange.peaks.invalidate(nil)
         selectedTracks = []
@@ -368,9 +377,12 @@ final class ProjectWindowModel: Identifiable {
         controls += automation.controls  // T-075 (UI-015)
         controls += deviceChain.controls  // T-065 (UI-032)
         controls += pluginPanel.controls  // T-065 (UI-041)
+        controls += takes.controls  // T-081 (UI-016)
         controls += pianoRoll.controls
         controls += audioPrefs.controls
         controls += exportDialog.controls  // T-082
+        controls += crashRecovery?.controls ?? []  // T-083 (UI-043)
+        controls += safeModeControls  // T-083 (PLUG-021)
         controls += toasts.controls
         return controls
     }
