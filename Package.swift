@@ -100,7 +100,7 @@ let cxxInterop: [SwiftSetting] = [
 ]
 
 let package = Package(
-    name: "macDAW",
+    name: "EmberStudio",
     platforms: [.macOS(.v15)],
     products: [
         .library(name: "DAWEngine", targets: ["DAWEngine"]),
