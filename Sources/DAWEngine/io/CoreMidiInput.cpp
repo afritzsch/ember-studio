@@ -130,7 +130,7 @@ struct CoreMidiInput::Impl {
         // New.
         for (const auto& [id, source] : seen) {
             if (connections.count(id) != 0) continue;
-            const int slot = router.openInput();
+            const int slot = router.openInput(id);  // T-093: tracks name it by its unique ID
             if (slot < 0) continue;  // all slots in use; a later scan tries again
             void* refCon = reinterpret_cast<void*>(static_cast<intptr_t>(slot + 1));
             if (MIDIPortConnectSource(port, source.endpoint, refCon) != noErr) {
