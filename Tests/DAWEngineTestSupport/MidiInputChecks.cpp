@@ -920,6 +920,32 @@ CheckResult midiThroughFacade() {
     DAW_CHECK(after.midiInputDrops == 0);
     DAW_CHECK(after.rtViolations == 0);
 
+    // T-093: the track's input filter through the facade. Filtered to source 5150: the plain seam
+    // (no source) isn't heard, the seam posing as 5150 is; retargeting while the key is held ends
+    // it (no hanging note); the default filter hears everything again.
+    DAW_CHECK(silent());  // the recorded note's tail has died away
+    facade->setMidiInputFilter(5, false, 5150, 0);
+    DAW_CHECK(facade->injectMidi(0, true, kOn, kNote, 127, 3).ok());
+    std::this_thread::sleep_for(50ms);
+    DAW_CHECK(level() < 1e-4f);
+    DAW_CHECK(facade->injectMidi(0, true, kOff, kNote, 0, 3).ok());
+    DAW_CHECK(facade->injectMidiFromSource(5150, 0, true, kOn, kNote, 127, 3).ok());
+    DAW_CHECK(sounds());
+    facade->setMidiInputFilter(5, false, 5151, 0);
+    DAW_CHECK(silent());
+    DAW_CHECK(facade->injectMidiFromSource(5150, 0, true, kOff, kNote, 0, 3).ok());
+    facade->setMidiInputFilter(5, false, 5150, 2);  // channel 2 only: a channel-1 note isn't heard
+    DAW_CHECK(facade->injectMidiFromSource(5150, 0, true, kOn, kNote, 127, 3).ok());
+    std::this_thread::sleep_for(50ms);
+    DAW_CHECK(level() < 1e-4f);
+    DAW_CHECK(facade->injectMidiFromSource(5150, 0, true, kOff, kNote, 0, 3).ok());
+    facade->setMidiInputFilter(5, true, 0, 0);
+    DAW_CHECK(facade->injectMidi(0, true, kOn, kNote, 127, 3).ok());
+    DAW_CHECK(sounds());
+    DAW_CHECK(facade->injectMidi(0, true, kOff, kNote, 0, 3).ok());
+    DAW_CHECK(silent());
+    DAW_CHECK(facade->telemetry().rtViolations == 0);
+
     // Offline: no input at all.
     {
         DriverConfigPOD offlineConfig;
@@ -928,6 +954,7 @@ CheckResult midiThroughFacade() {
         DAW_CHECK(offline != nullptr);
         if (offline) {
             DAW_CHECK(offline->injectMidi(0, true, kOn, 60, 100, 3).code == FacadeErrorCode::unsupported);
+            DAW_CHECK(offline->injectMidiFromSource(1, 0, true, kOn, 60, 100, 3).code == FacadeErrorCode::unsupported);
             releaseFacade(offline);
         }
     }

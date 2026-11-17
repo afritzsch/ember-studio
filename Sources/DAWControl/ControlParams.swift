@@ -367,6 +367,10 @@ public struct MidiInjectParams: Codable, Hashable, Sendable {
         public var status: UInt8
         public var data1: UInt8?
         public var data2: UInt8?
+        /// T-093 (additive): the CoreMIDI unique ID it arrives from, as `midi.inputs` reports it,
+        /// so a track's MIDI input filter can be tested. Left out: the plain seam, which only
+        /// tracks hearing all sources hear. At most 4 distinct IDs per engine.
+        public var source: Int32? = nil
     }
     public var events: [Event]
 }
