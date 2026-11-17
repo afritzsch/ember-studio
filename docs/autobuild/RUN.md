@@ -12,6 +12,7 @@ Unattended phases started by `/autobuild` (see `.claude/skills/autobuild/SKILL.m
 | 6 | T-053, T-062, T-070, T-076 | all 4 (T-076, T-062, T-070, T-053) + DW-214 AU crash fix | 1 → 20 | New run (week reset). M5 needs only T-054; VST3 + EQ + mixer done; `NodeRegistry::paramInfo` and `nanBlocks` telemetry; a production AU teardown crash found and fixed; one 5-hour pause (~4 h, T-076 merged during it) |
 | 7 | T-054, T-064, T-074, T-082 | all 4 (T-082, T-064, T-054, T-074) | 20 → 42 | Final phase (user asked to stop after it). M5 complete (input monitoring); host bypass + NaN guard + safe mode; automation lanes + player; export dialog with normalize. Two 5-hour pauses (~3.7 h, ~4 h); T-082/T-064 merged during the second. UI-010 perf smoke failed in most full runs (load, DW-223) |
 | 8 | T-077, T-088, T-089, T-090 | all 4 (T-077, T-089, T-090, T-088) | 43 → 61 | New run; last phase (week ≥ 50 mid-phase). User follow-ups as T-088..T-090: insert-chain commands + lane cascade, tick-keeping tempo edits / short loops / repeatable exports / queued play, one live engine + feedback guard; M7 goldens. One 5-hour pause (~4.2 h). Every trial merge 12/12 and swift test 2× green |
+| 9 | T-075, T-063, T-080, T-084 | all 4 (T-075, T-080, T-084, T-063) | 0 → 24 | New run (week reset). M7 complete (automation recording + lanes); loop takes/comping (T-081 ready); GitHub Actions CI + sanitizer/perf jobs (TEST-008 at ~4×, T-091 added); plugin editors + plugin → model edits (T-065 ready). Two worker setups failed on a git config lock (started in one batch), recovered by hand. One 5-hour pause (~4.2 h). Every trial merge 12/12 + swift test green |
 
 ## Phase notes
 
@@ -134,6 +135,8 @@ Unattended phases started by `/autobuild` (see `.claude/skills/autobuild/SKILL.m
 - T-063 asked about undoing a first plugin-side edit; decided (c) (DECISIONS "T-063 first-edit undo").
 - T-084 asked two questions; decided (DECISIONS "T-084 sanitizer findings", "T-084 TEST-008 perf"): the worker fixed the two fixture findings and a test warning; TEST-008 keeps its bound and T-091 (D, DSP performance) was added as ready.
 - T-084 merged (fb3423b): test.sh 12/12, swift test green. Worker closed.
+- T-063 merged (54fefc1): test.sh 12/12, swift test green. Worker closed. T-065 is ready.
+- End: 4/4 merged, main green, week 24%, five-hour window 80%. No worker session left open. main pushed (first push with CI).
 
 ## Summary for the user
 
