@@ -65,6 +65,14 @@ struct VST3ParamInfo {
     float min = 0, max = 1;
     float value = 0;       // when read (VST3Instance::params(true)), else at instantiation
     bool writable = true;  // false: read-only (a meter); the host doesn't push it
+    // DW-213 (T-094): ParameterInfo::stepCount (0 continuous; n: n + 1 values k / n, as 06's
+    // ParamInfo::steps). `labels` (steps + 1 getParamStringByValue strings in value order) and
+    // `display` (the string of `value`) are filled by params(true) only; labels only for
+    // steps ≤ kMaxLabelledSteps.
+    uint32_t steps = 0;
+    std::vector<std::string> labels;
+    std::string display;
+    static constexpr uint32_t kMaxLabelledSteps = 128;
 };
 
 class VST3Instance {
@@ -97,6 +105,10 @@ public:
     // PLUG-015. Fixed when instantiated; `current` re-reads every value (non-RT).
     const std::vector<VST3ParamInfo>& params() const { return params_; }
     std::vector<VST3ParamInfo> params(bool current) const;
+    // DW-213 (T-094), non-RT: the plugin's display string of parameter `index` at `normalized`
+    // (IEditController::getParamStringByValue), without the unit. Empty for an unknown index or a
+    // plugin without a controller.
+    std::string displayString(uint32_t index, float normalized) const;
 
     // PLUG-016, non-RT: the state container (above) and back. setState fails with invalidArgument
     // for bytes that aren't a container, or that the plugin refuses.

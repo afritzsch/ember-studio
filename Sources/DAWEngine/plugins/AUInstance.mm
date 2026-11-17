@@ -312,6 +312,10 @@ struct AUInstance::Impl {
     bool hadTransport = false;
     Tick lastEndTick = 0;
     std::vector<uint64_t> addresses;               // params_[i].address
+    // DW-213 (T-094): each stepped parameter's value names, read once on the first params(true)
+    // (not at instantiation, which runs on daw.compile), under `mutex`.
+    std::vector<std::vector<std::string>> labels;
+    bool labelsRead = false;
     // DW-204: the automation observer and the tree it is on. A V2 bridge builds a new tree when
     // the AU reports a parameter-list change (setting its formats or state can), so the observer
     // moves to the unit's current tree after every non-RT step that may change it.
@@ -390,6 +394,78 @@ struct AUInstance::Impl {
     }
 };
 
+namespace {
+
+// DW-213 (T-094): what the AU's parameter units read as, for parameters without a unitName.
+std::string unitSymbol(AudioUnitParameterUnit unit) {
+    switch (unit) {
+    case kAudioUnitParameterUnit_Percent: return "%";
+    case kAudioUnitParameterUnit_Seconds: return "s";
+    case kAudioUnitParameterUnit_Milliseconds: return "ms";
+    case kAudioUnitParameterUnit_Hertz: return "Hz";
+    case kAudioUnitParameterUnit_Cents:
+    case kAudioUnitParameterUnit_AbsoluteCents: return "cents";
+    case kAudioUnitParameterUnit_RelativeSemiTones: return "st";
+    case kAudioUnitParameterUnit_Decibels: return "dB";
+    case kAudioUnitParameterUnit_Degrees: return "°";
+    case kAudioUnitParameterUnit_BPM: return "BPM";
+    case kAudioUnitParameterUnit_Beats: return "beats";
+    case kAudioUnitParameterUnit_Octaves: return "oct";
+    case kAudioUnitParameterUnit_Ratio: return ":1";
+    case kAudioUnitParameterUnit_SampleFrames: return "samples";
+    default: return {};
+    }
+}
+
+// DW-213: a Boolean parameter is a switch (1 step); an Indexed one, or one whose valueStrings name
+// every integer of its range, has max − min steps.
+uint32_t stepsOf(AUParameter* p) {
+    const double span = static_cast<double>(p.maxValue) - static_cast<double>(p.minValue);
+    if (!(span > 0)) return 0;
+    if (p.unit == kAudioUnitParameterUnit_Boolean) return 1;
+    const double rounded = std::round(span);
+    const bool integral = std::fabs(span - rounded) < 1e-6 && rounded <= 1e6;
+    if (!integral) return 0;
+    if (p.unit == kAudioUnitParameterUnit_Indexed) return static_cast<uint32_t>(rounded);
+    if (p.valueStrings.count >= 2 && static_cast<double>(p.valueStrings.count - 1) == rounded)
+        return static_cast<uint32_t>(rounded);
+    return 0;
+}
+
+// DW-213: steps + 1 value names, or none: the AU's valueStrings when they fit, else its string for
+// each step (parameters with kAudioUnitParameterFlag_ValuesHaveStrings).
+std::vector<std::string> valueNames(AUParameter* p, uint32_t steps) {
+    std::vector<std::string> names;
+    if (steps == 0 || steps > AUParamInfo::kMaxLabelledSteps) return names;
+    NSArray<NSString*>* strings = p.valueStrings;
+    if (strings.count == steps + 1) {
+        for (NSString* s in strings) names.push_back(str(s));
+        return names;
+    }
+    if ((p.flags & kAudioUnitParameterFlag_ValuesHaveStrings) == 0) return names;
+    for (uint32_t k = 0; k <= steps; ++k) {
+        const AUValue v = p.minValue + (p.maxValue - p.minValue) * static_cast<AUValue>(k) / static_cast<AUValue>(steps);
+        NSString* s = [p stringFromValue:&v];
+        if (s.length == 0) return {};
+        names.push_back(str(s));
+    }
+    return names;
+}
+
+// DW-213: the AU's string for `value`: a step's name, else its string-from-value (when it has
+// strings). Empty otherwise (the host formats the number).
+std::string displayOf(AUParameter* p, float value, uint32_t steps, const std::vector<std::string>& labels) {
+    if (steps > 0 && labels.size() == steps + 1 && p.maxValue > p.minValue) {
+        const double k = std::round((value - p.minValue) / (p.maxValue - p.minValue) * steps);
+        return labels[static_cast<std::size_t>(std::clamp(k, 0.0, static_cast<double>(steps)))];
+    }
+    if ((p.flags & kAudioUnitParameterFlag_ValuesHaveStrings) == 0) return {};
+    const AUValue v = value;
+    return str([p stringFromValue:&v]);
+}
+
+} // namespace
+
 AUInstance::AUInstance(const AUComponentID& component)
     : component_(component), impl_(new Impl), latency_(std::make_shared<LatencyState>()),
       edits_(std::make_shared<EditState>()) {}
@@ -457,11 +533,13 @@ Result<std::shared_ptr<AUInstance>> AUInstance::instantiate(const AUComponentID&
             info.identifier = str(p.identifier);
             info.name = str(p.displayName);
             info.unit = str(p.unitName);
+            if (info.unit.empty()) info.unit = unitSymbol(p.unit);  // DW-213: Hz, dB, ms…
             info.min = p.minValue;
             info.max = p.maxValue;
             info.value = p.value;
             info.canRamp = (p.flags & kAudioUnitParameterFlag_CanRamp) != 0;
             info.writable = (p.flags & kAudioUnitParameterFlag_IsWritable) != 0;
+            info.steps = stepsOf(p);  // DW-213
             instance->params_.push_back(std::move(info));
             impl.addresses.push_back(p.address);
         }
@@ -642,9 +720,36 @@ std::vector<AUParamInfo> AUInstance::params(bool current) const {
         std::lock_guard lock(impl_->mutex);
         std::vector<AUParamInfo> out = params_;
         AUParameterTree* tree = impl_->unit.parameterTree;
-        for (AUParamInfo& p : out)
-            if (AUParameter* live = [tree parameterWithAddress:p.address]) p.value = live.value;
+        // DW-213 (T-094): value names of stepped parameters, read once.
+        if (!impl_->labelsRead) {
+            impl_->labelsRead = true;
+            impl_->labels.resize(out.size());
+            for (std::size_t i = 0; i < out.size(); ++i)
+                if (AUParameter* live = [tree parameterWithAddress:out[i].address])
+                    impl_->labels[i] = valueNames(live, out[i].steps);
+        }
+        for (std::size_t i = 0; i < out.size(); ++i) {
+            AUParamInfo& p = out[i];
+            AUParameter* live = [tree parameterWithAddress:p.address];
+            if (live == nil) continue;
+            p.value = live.value;
+            p.labels = impl_->labels[i];
+            p.display = displayOf(live, p.value, p.steps, p.labels);
+        }
         return out;
+    }
+}
+
+std::string AUInstance::displayString(uint32_t index, float value) const {
+    @autoreleasepool {
+        std::lock_guard lock(impl_->mutex);
+        if (index >= params_.size() || !std::isfinite(value)) return {};
+        const AUParamInfo& p = params_[index];
+        AUParameter* live = [impl_->unit.parameterTree parameterWithAddress:p.address];
+        if (live == nil) return {};
+        static const std::vector<std::string> none;
+        const auto& labels = index < impl_->labels.size() ? impl_->labels[index] : none;
+        return displayOf(live, std::clamp(value, p.min, p.max), p.steps, labels);
     }
 }
 

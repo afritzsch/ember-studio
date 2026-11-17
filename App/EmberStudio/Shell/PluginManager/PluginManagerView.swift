@@ -49,6 +49,9 @@ struct PluginManagerPanel: View {
                             }
                             Spacer(minLength: 0)
                             if let retry = controls["prefs.plugins.blocked.\(n).retry"] { ControlButton(control: retry, face: "Retry") }
+                            if let long = controls["prefs.plugins.blocked.\(n).retryLong"] {
+                                ControlButton(control: long, face: "Retry (\(Int(PluginManagerModel.retryTimeout)) s)")
+                            }
                         }
                     }
                     if let all = controls["prefs.plugins.blocked.retry"], !blocked.isEmpty {

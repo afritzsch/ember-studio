@@ -770,6 +770,9 @@ public protocol EngineProtocol: AnyObject, Sendable {
     func setPluginState(slot: NodeIDValue, _ state: Data)
     /// PLUG-010/015 (T-061): see the extension at the end of this file (default: "").
     func pluginInfoJSON(slot: NodeIDValue) -> String
+    /// DW-213 (T-094): a plugin's display string for a value; see the extension at the end of this
+    /// file (default: "").
+    func paramDisplay(slot: NodeIDValue, index: Int, value: Float) -> String
     /// PLUG-017 (T-063): plugin editors; see the extension at the end of this file (default: none).
     func createPluginView(slot: NodeIDValue) -> UnsafeMutableRawPointer?
     func destroyPluginView(slot: NodeIDValue)
@@ -1104,4 +1107,14 @@ extension EngineProtocol {
     /// loop recording becomes a take folder (one take per pass) instead of one merged clip.
     /// Engines without recording ignore it.
     public func setRecordOptions(midiLoopTakes: Bool) {}
+}
+
+/// T-094 additions to `EngineProtocol` (08 "Contract delta (T-094)"), with defaults so test doubles
+/// compile unchanged.
+extension EngineProtocol {
+    /// DW-213: the hosted plugin's own display string of param `index` of device slot `slot` at
+    /// `value` (VST3: normalized; AU: in the parameter's range), without the unit
+    /// (`EngineFacade::paramDisplay`). "" when the engine has no string for it (no loaded plugin, an
+    /// unknown index, a parameter without strings, engines without plugin hosting).
+    public func paramDisplay(slot: NodeIDValue, index: Int, value: Float) -> String { "" }
 }

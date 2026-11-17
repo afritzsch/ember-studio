@@ -6,8 +6,9 @@ import Observation
 ///
 /// Control ids (UI-052): `prefs.plugins` (toggle, always listed). While open: `prefs.plugins.close`,
 /// `prefs.plugins.scan`, `prefs.plugins.rescan`, `prefs.plugins.blocked.retry` (all blocked) and
-/// `prefs.plugins.blocked.<n>.retry` (the n-th blocked plugin, as `ui.state` lists them); scans are
-/// disabled while one runs.
+/// `prefs.plugins.blocked.<n>.retry` (the n-th blocked plugin, as `ui.state` lists them) and, for a
+/// plugin whose scan timed out, `prefs.plugins.blocked.<n>.retryLong` ("Retry (120 s)", DW-275);
+/// scans are disabled while one runs.
 @Observable
 @MainActor
 final class PluginManagerPanelModel {
@@ -42,6 +43,12 @@ final class PluginManagerPanelModel {
             controls.append(.button("prefs.plugins.blocked.\(n).retry", "Retry \(plugin.name)", enabled: idle) {
                 manager.retryBlocked([plugin.identifier])
             })
+            if plugin.isTimedOut {  // T-094 (DW-275)
+                let seconds = Int(PluginManagerModel.retryTimeout)
+                controls.append(.button("prefs.plugins.blocked.\(n).retryLong", "Retry \(plugin.name) (\(seconds) s)", enabled: idle) {
+                    manager.retryBlocked([plugin.identifier], timeout: PluginManagerModel.retryTimeout)
+                })
+            }
         }
         return controls
     }

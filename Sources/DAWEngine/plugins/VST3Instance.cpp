@@ -322,6 +322,10 @@ struct VST3Instance::Impl {
     std::vector<float> syncedToController;
 
     std::vector<ParamID> paramIDs;
+    // DW-213 (T-094): each stepped parameter's value names, read once on the first params(true)
+    // (not at instantiation, which runs on daw.compile), under `mutex`.
+    std::vector<std::vector<std::string>> labels;
+    bool labelsRead = false;
 
     ~Impl() {
         if (latencyTimer != nullptr) {
@@ -548,6 +552,7 @@ Result<std::shared_ptr<VST3Instance>> VST3Instance::instantiate(const VST3Plugin
             info.unit = string128(pi.units);
             info.value = static_cast<float>(impl->controller->getParamNormalized(pi.id));
             info.writable = (pi.flags & ParameterInfo::kIsReadOnly) == 0;
+            info.steps = static_cast<uint32_t>(std::max<int32>(0, pi.stepCount));  // DW-213
             instance->params_.push_back(std::move(info));
             impl->paramIDs.push_back(pi.id);
         }
@@ -762,9 +767,44 @@ std::vector<VST3ParamInfo> VST3Instance::params(bool current) const {
     std::lock_guard lock(impl.mutex);
     if (!impl.controller) return out;
     impl.syncController();
-    for (std::size_t i = 0; i < out.size(); ++i)
-        out[i].value = static_cast<float>(impl.controller->getParamNormalized(impl.paramIDs[i]));
+    // DW-213 (T-094): value names of stepped parameters, read once.
+    if (!impl.labelsRead) {
+        impl.labelsRead = true;
+        impl.labels.resize(out.size());
+        for (std::size_t i = 0; i < out.size(); ++i) {
+            const uint32_t steps = out[i].steps;
+            if (steps == 0 || steps > VST3ParamInfo::kMaxLabelledSteps) continue;
+            std::vector<std::string> names;
+            names.reserve(steps + 1);
+            for (uint32_t k = 0; k <= steps; ++k) {
+                String128 text{};
+                if (impl.controller->getParamStringByValue(impl.paramIDs[i], static_cast<ParamValue>(k) / steps, text) !=
+                    kResultOk)
+                    break;
+                names.push_back(string128(text));
+            }
+            if (names.size() == steps + 1) impl.labels[i] = std::move(names);
+        }
+    }
+    for (std::size_t i = 0; i < out.size(); ++i) {
+        const ParamValue value = impl.controller->getParamNormalized(impl.paramIDs[i]);
+        out[i].value = static_cast<float>(value);
+        String128 text{};
+        if (impl.controller->getParamStringByValue(impl.paramIDs[i], value, text) == kResultOk)
+            out[i].display = string128(text);
+        if (i < impl.labels.size()) out[i].labels = impl.labels[i];
+    }
     return out;
+}
+
+std::string VST3Instance::displayString(uint32_t index, float normalized) const {
+    Impl& impl = *impl_;
+    std::lock_guard lock(impl.mutex);
+    if (!impl.controller || index >= impl.paramIDs.size() || !std::isfinite(normalized)) return {};
+    String128 text{};
+    const ParamValue value = std::clamp(static_cast<ParamValue>(normalized), 0.0, 1.0);
+    if (impl.controller->getParamStringByValue(impl.paramIDs[index], value, text) != kResultOk) return {};
+    return string128(text);
 }
 
 namespace {

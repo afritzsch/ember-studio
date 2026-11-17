@@ -53,7 +53,7 @@ extension UIStateDumper {
 
     /// `{open, scanning, loaded, cachePath, scannerPath | null, lastScan{scanned, unchanged, removed} | null,
     ///   error | null, plugins[{format, identifier, name, vendor, version, instrument, sidechain, numParams}],
-    ///   blocked[{n, format, identifier, name, reason}]}`
+    ///   blocked[{n, format, identifier, name, reason, timedOut}]}` (`timedOut`: T-094, DW-275)
     static func dump(_ panel: PluginManagerPanelModel) -> JSONValue {
         let manager = panel.manager
         let open = panel.isOpen
@@ -71,7 +71,7 @@ extension UIStateDumper {
             "plugins": .array(manager.isLoaded ? manager.usable.map(dump) : []),
             "blocked": .array(manager.isLoaded ? manager.blocked.enumerated().map { n, plugin in
                 ["n": .int(Int64(n)), "format": .string(plugin.format.rawValue), "identifier": .string(plugin.identifier),
-                 "name": .string(plugin.name), "reason": .string(plugin.blockedReason ?? "")]
+                 "name": .string(plugin.name), "reason": .string(plugin.blockedReason ?? ""), "timedOut": .bool(plugin.isTimedOut)]
             } : []),
         ]
     }

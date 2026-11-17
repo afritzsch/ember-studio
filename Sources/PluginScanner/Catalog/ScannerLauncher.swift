@@ -5,13 +5,26 @@ public protocol PluginScanning: Sendable {
     /// Returns the descriptors to cache for `candidate`, blocked ones included. Throws only when
     /// the scan could not be attempted at all, so nothing should be cached.
     func scan(_ candidate: PluginCandidate) throws(PluginCatalogError) -> [PluginDescriptor]
+    /// PLUG-001 (T-094, DW-275): the same with a time limit of its own, for a retry of a plugin
+    /// that timed out. Scanners without a time limit ignore it (the default implementation).
+    func scan(_ candidate: PluginCandidate, timeout: TimeInterval) throws(PluginCatalogError) -> [PluginDescriptor]
+}
+
+extension PluginScanning {
+    public func scan(_ candidate: PluginCandidate, timeout: TimeInterval) throws(PluginCatalogError) -> [PluginDescriptor] {
+        try scan(candidate)
+    }
 }
 
 /// PLUG-001: runs the `PluginScanner` executable once per candidate and turns a crash, a timeout
 /// or unusable output into a `blocked` descriptor with a reason.
 public struct ScannerLauncher: PluginScanning {
-    /// PLUG-001: a scan that takes longer than this is killed and the plugin blocked.
-    public static let defaultTimeout: TimeInterval = 10
+    /// PLUG-001: a scan that takes longer than this is killed and the plugin blocked. 30 s since
+    /// T-094 (DW-275: FabFilter, AmpliTube and others need more than 10 s on their first load,
+    /// licence checks included).
+    public static let defaultTimeout: TimeInterval = 30
+    /// PLUG-001 (T-094, DW-275): the limit of a retry the user asks for, for a plugin that timed out.
+    public static let retryTimeout: TimeInterval = 120
 
     public var executableURL: URL
     public var timeout: TimeInterval
@@ -32,10 +45,14 @@ public struct ScannerLauncher: PluginScanning {
     }
 
     public func scan(_ candidate: PluginCandidate) throws(PluginCatalogError) -> [PluginDescriptor] {
-        let result = try run(arguments: candidate.scannerArguments)
+        try scan(candidate, timeout: timeout)
+    }
+
+    public func scan(_ candidate: PluginCandidate, timeout: TimeInterval) throws(PluginCatalogError) -> [PluginDescriptor] {
+        let result = try run(arguments: candidate.scannerArguments, timeout: timeout)
         switch result.termination {
         case .timedOut:
-            return [.blocked(candidate, reason: "timed out after \(Self.format(timeout)) s")]
+            return [.timedOut(candidate, after: timeout)]
         case .signaled(let signal):
             return [.blocked(candidate, reason: "scanner crashed (\(Self.signalName(signal)))")]
         case .exited(let status) where status != 0:
@@ -68,7 +85,7 @@ public struct ScannerLauncher: PluginScanning {
     /// Output goes to temp files rather than pipes: a plugin that forks a helper could keep a pipe
     /// open after the scanner dies, and a full pipe could stall the scanner (CONV §9: the names
     /// are unique per run).
-    func run(arguments: [String]) throws(PluginCatalogError) -> RunResult {
+    func run(arguments: [String], timeout: TimeInterval) throws(PluginCatalogError) -> RunResult {
         let fileManager = FileManager.default
         let scratch = fileManager.temporaryDirectory
             .appending(path: "emberstudio-scan-\(UUID().uuidString)", directoryHint: .isDirectory)
@@ -127,7 +144,7 @@ public struct ScannerLauncher: PluginScanning {
         return lastLine.isEmpty ? "" : ": " + String(lastLine.prefix(200))
     }
 
-    static func format(_ seconds: TimeInterval) -> String {
+    public static func format(_ seconds: TimeInterval) -> String {
         seconds == seconds.rounded() ? String(Int(seconds)) : String(seconds)
     }
 }

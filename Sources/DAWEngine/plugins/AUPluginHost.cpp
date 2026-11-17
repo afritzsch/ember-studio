@@ -249,7 +249,8 @@ std::string AUPluginHost::infoJSON(NodeID slotID) const {
                     ",\"id\":" + pluginJSONString(p.identifier) + ",\"name\":" + pluginJSONString(p.name) +
                     ",\"unit\":" + pluginJSONString(p.unit) + ",\"min\":" + pluginJSONNumber(p.min) +
                     ",\"max\":" + pluginJSONNumber(p.max) + ",\"value\":" + pluginJSONNumber(p.value) +
-                    ",\"canRamp\":" + (p.canRamp ? "true" : "false") + "}";
+                    ",\"canRamp\":" + (p.canRamp ? "true" : "false") +
+                    pluginJSONParamExtras(p.steps, p.labels, p.display) + "}";
         }
         json += "]";
     }

@@ -242,7 +242,7 @@ std::string VST3PluginHost::infoJSON(NodeID slotID) const {
                     ",\"id\":" + pluginJSONString(std::to_string(p.id)) + ",\"name\":" + pluginJSONString(p.name) +
                     ",\"unit\":" + pluginJSONString(p.unit) + ",\"min\":" + pluginJSONNumber(p.min) +
                     ",\"max\":" + pluginJSONNumber(p.max) + ",\"value\":" + pluginJSONNumber(p.value) +
-                    ",\"canRamp\":false}";
+                    ",\"canRamp\":false" + pluginJSONParamExtras(p.steps, p.labels, p.display) + "}";
         }
         json += "]";
     }
