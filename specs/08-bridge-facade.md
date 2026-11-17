@@ -320,6 +320,25 @@ struct DeviceInfoPOD {
 
 Affected: T-090 only. Tests: `FeedbackGuardTests` (`deviceInfoFields`: the defaults decode, and the real engine on the fake driver).
 
+### Contract delta (T-080), accepted (autobuild, see docs/autobuild/DECISIONS.md "T-080 takes model"; pre-accepted in T-080's briefing)
+09's REC-030/034 need the passes of a loop recording, which only the engine knows (wrap samples, short loops, latency). Everything is **additive and defaulted**; a take recorded without a wrap reports what it did before.
+```cpp
+struct RecordedNotePOD { /* T-053 */ int32_t pass = 0; };          // the loop pass its note-on was heard in
+using PassStartVector = std::vector<int64_t>;
+struct RecordingPOD { /* T-052, T-053 */
+  uint32_t passes = 1;                 // loop passes the take spans (1: no wrap)
+  int64_t loopStart = 0, loopEnd = 0;  // the loop's timeline samples (0 for one pass)
+  PassStartVector passStarts;          // audio: file frame of each pass's start, [0] == 0; empty for one pass
+  bool midiLoopTakes = false; };       // MIDI: the record option when the take ended
+struct TransportPOD { /* … */ bool midiLoopTakes = false; };
+void setRecordOptions(bool midiLoopTakes);   // REC-034: not persisted, not in undo; transport() reads it back
+```
+- **Audio passes (REC-030).** A take stays one continuous file per armed track. The recorder logs the session frame of every loop wrap; pass i ≥ 1 starts at file frame `wrap + D` (D = input + output latency, REC-003), the frame holding the loop start, and the D frames before it still end the pass before. Passes starting at or past the file's end are dropped, so a partial last pass is a pass. `takeIndex` stays 0.
+- **DW-243.** With a loop shorter than the device block, `Engine::render` lays the block out in several passes and `Transport::block()` keeps only the last one. The recorder now captures the whole block (the loop on means no punch) and rebuilds the earlier wraps from the last pass's start, the loop length and where the previous block left off. Its "stale block" check (the transport didn't advance) also counts a block of a whole number of loop lengths and a play start without a position change as new.
+- **MIDI passes (REC-034).** Each note carries the pass its note-on was heard in (the latency-compensated position, so a note struck just after a wrap that the player still heard at the loop end belongs to the pass before). Notes keep their transport positions as before; a note held across a wrap still ends at the loop end.
+- **Option.** `setRecordOptions` stores `midiLoopTakes` in the facade; it is stamped on MIDI takes when they end. The engine records the same either way; the model decides (09).
+- Swift: `RecordedTake.passes/loopStartSample/loopEndSample/passStarts/midiLoopTakes`, `RecordedMidiNote.pass`, `TransportState.midiLoopTakes`, and the `EngineProtocol` requirement `setRecordOptions(midiLoopTakes:)` with a no-op default; `FakeEngine` records `.setRecordOptions` and reads it back.
+
 ## Status
 | ID | status | test |
 |---|---|---|

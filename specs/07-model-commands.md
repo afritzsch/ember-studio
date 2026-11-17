@@ -158,6 +158,12 @@ Additive; nothing in the Interfaces above changes. Closes DW-149 (insert-chain c
 - **No minimum loop length** (DW-125, user decision; asked by the lead with T-089). *SetLoop* no longer refuses an enabled loop shorter than 4096 samples (the DW-060 workaround in *Clip, tempo and loop commands* above is superseded): the transport plays loops shorter than a block since T-089. `SetLoop` and `RestoreLoop` both check only the range (non-empty, non-negative, within `Tick.timelineEnd`); `LoopRange.minLengthSamples` is gone.
 - **Velocity 0 on open** (DW-150, user decision). *Validation on open* (DW-111) also repairs a note velocity of 0 to 1 and lists it in `ProjectLoadReport.repairs` (`"set the velocity of note N from 0 to 1 (DW-150)"`). Every other broken invariant is still `invalidProject`, and the velocity invariant for commands stays 1…127.
 
+### Contract delta (T-080), accepted (autobuild, see docs/autobuild/DECISIONS.md "T-080 takes model"; pre-accepted in T-080's briefing)
+MODEL-005's `CreateTakeFolder` and `SetCompSelection` (types and invariants in 09 "Contract delta (T-080)"):
+- **`CreateTakeFolder {trackID, takes: [{start, length, assetID?, sourceOffsetSamples?, gain?, notes?}]}`** puts a folder with new IDs on the track: the folder, then per take its ID, its clip's and its notes' (in the order given). Audio takes need an existing `assetID` and take no notes; MIDI takes take only `notes` (`AddNotes.NoteSpec`, starts relative to the take). The range is the takes' union, the comp the default (REC-031). Inverse: `RemoveTakeFolder {folderID}`, whose inverse `RestoreTakeFolder {trackID, index, folder}` puts the folder back with all its IDs (checked like any input: unused IDs, kind, assets, comp).
+- **`SetCompSelection {folderID, start, end, takeID}`** (REC-033): `[start, end)` inside the folder range plays `takeID`, a take of that folder; segments are cut at both ends and neighbours of the same take merge. Inverse: `RestoreComp {folderID, comp}` (the exact old comp; checked like any input, and its own inverse). Label "Select Take".
+- `RemoveAsset` and `SetSessionSampleRate` don't know take clips yet (T-080 discovered work): `validate()` rejects a removed asset a take uses (Debug), and take offsets aren't rescaled.
+
 ## Status
 | ID | status | test |
 |---|---|---|
