@@ -52,4 +52,10 @@ CheckResult vst3NanGuard();
 // and the plugin's state unchanged. 0 RT violations.
 CheckResult vst3HostBypass();
 
+// T-083 (DW-224, PLUG-021 safe mode): a slot whose config is "disabled" builds as absent without
+// loading its plugin (no EmberTest processor made, no failure for a missing bundle), passes its
+// input through, and keeps its configured state for getPluginState; without the flag the plugin
+// loads. 0 RT violations.
+CheckResult vst3SafeModeSlots();
+
 } // namespace daw::testing

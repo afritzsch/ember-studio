@@ -382,6 +382,14 @@ void setRecordOptions(bool midiLoopTakes);   // REC-034: not persisted, not in u
 - **Option.** `setRecordOptions` stores `midiLoopTakes` in the facade; it is stamped on MIDI takes when they end. The engine records the same either way; the model decides (09).
 - Swift: `RecordedTake.passes/loopStartSample/loopEndSample/passStarts/midiLoopTakes`, `RecordedMidiNote.pass`, `TransportState.midiLoopTakes`, and the `EngineProtocol` requirement `setRecordOptions(midiLoopTakes:)` with a no-op default; `FakeEngine` records `.setRecordOptions` and reads it back.
 
+### Contract delta (T-083), accepted (autobuild, see docs/autobuild/DECISIONS.md "T-083 safe mode slots")
+Additive. Safe mode builds plugin slots without their plugin (10 "Contract delta (T-083)", DW-224).
+- **`configJSON` of `auPlugin`/`vst3Plugin` nodes** gains an optional `"disabled": true`, which builds the slot as absent without instantiating the plugin. It is left out when false, so existing configs and strings are unchanged. `AUPluginConfig`/`VST3PluginConfig` parse it into `disabled`, and `makeJSON(identifier, state, disabled = false)` writes it.
+- **`pluginInfoJSON`** adds `"disabled": true` for such a slot, and `"loaded"` is false. **`getPluginState`** returns the configured state. **`createPluginView`** returns null. No `pluginCrashed` event is raised for it.
+- **Swift.** `GraphDescriptionBuilder.build(_:runtime:pluginsDisabled: Bool = false)`. Setting `EngineSync.arePluginsBypassed` now also re-applies the graph, with the plugin slots disabled while it is set; before, it was slot writes only. Nothing in `EngineProtocol`, `EngineClient` or `FakeEngine` changes.
+
+Affected: T-083 only. Tests: `AUPluginTests`/`VST3PluginTests` "safe mode" (`auSafeModeSlots`, `vst3SafeModeSlots`: fake AU / EmberTest instance counters unchanged, no failure, pass-through, state kept); `SafeModeSlotTests` (DAWModelTests).
+
 ## Status
 | ID | status | test |
 |---|---|---|

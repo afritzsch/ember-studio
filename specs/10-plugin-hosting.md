@@ -91,6 +91,16 @@ Additive; the facade side is in 08 "Contract delta (T-063)", the app side in 12 
   - So undoing a first plugin-side edit is still one undo entry, the document goes back to unset, and the plugin goes back to its own value. A later set (redo, another control, automation) works as before.
   - Ungestured edits (no `begin`) have no baseline: undoing one leaves the plugin at the edited value.
 
+### Contract delta (T-083), accepted (autobuild, see docs/autobuild/DECISIONS.md "T-083 safe mode slots")
+Additive; the facade side is in 08 "Contract delta (T-083)", the dialog in 12 "Crash recovery details". Closes DW-224.
+- **Safe mode builds plugin slots without their plugin** (PLUG-021, option (a)). It supersedes the last sentence of the T-064 delta ("Plugins are still instantiated in safe mode"). While `ProjectStore.isSafeMode` is set, every AU/VST3 slot's `configJSON` carries `"disabled": true` (`GraphDescriptionBuilder.build(_:runtime:pluginsDisabled:)`, set by `EngineSync` from `arePluginsBypassed`). `AUPluginHost`/`VST3PluginHost` build such a slot as **absent**: an effect passes its input through, an instrument is silent, and the plugin is never instantiated, its module never loaded, its state never applied. So a plugin that crashes on load, prepare or state restore can't take the app down.
+  - **No failure.** A disabled slot reports no `pluginCrashed` (nothing was tried). `pluginInfoJSON` answers `{"slot", "identifier", "loaded": false, "disabled": true}`. The editor seam (`current`) has no instance, so `createPluginView` returns null.
+  - **State.** The host keeps the configured state, so `getPluginState` returns the stored blob and a save in safe mode writes it back byte for byte. A state set while disabled is held for the slot's first instance; an instance that still exists is kept for when the slot is enabled.
+  - **The document is untouched**: slots, params, bypass and state blobs. Safe mode is session-only: no undo entry, not dirty. The host bypass of T-064 is still written as well, so the in-graph bypass path is unchanged.
+  - **Toggling.** Turning safe mode on or off changes the plugin slots' config strings. The nodes are re-created (`configVersion` bump, DW-140) and the graph is re-applied (debounced like any structural change). Turning it off instantiates the plugins as on a normal open, and a missing one then reports `pluginCrashed`. Enabling single slots stays a separate item (DECISIONS "T-083 safe mode slots").
+- **Recovery check** (MODEL-045, UI-043): `ProjectStore.hasNewerAutosave(at:)` (nonisolated, static) says whether a folder's `autosave/project.json` is newer than its `project.json`, or exists without one. It reads modification dates only, so the dialog can offer recovery before opening anything.
+- **Running marker directory**: the app's `--crash-marker-dir <path>` (12 "Crash recovery details") names where `CrashMarkerSession` reads and writes markers.
+
 ## Status
 | ID | status | test |
 |---|---|---|

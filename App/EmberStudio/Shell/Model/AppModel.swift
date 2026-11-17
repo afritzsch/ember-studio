@@ -22,6 +22,8 @@ final class AppModel {
     private(set) var windows: [ProjectWindowModel] = []
     /// The main window: the one the File menu and attach mode (`ui.*`, the Dispatcher) act on.
     private(set) var mainWindowID: Int?
+    /// UI-043 (T-083): the crash-recovery dialog while it is presented (`presentCrashRecovery`).
+    private(set) var crashRecovery: CrashRecoveryModel?
 
     @ObservationIgnored let engineChoice: EngineChoice
     @ObservationIgnored let dispatcher: Dispatcher
@@ -92,6 +94,7 @@ final class AppModel {
     func addWindow(_ store: ProjectStore) -> ProjectWindowModel {
         let window = ProjectWindowModel(id: nextWindowID, store: store, toasts: ToastCenter(now: now))
         nextWindowID += 1
+        window.crashRecovery = crashRecovery  // T-083
         windows.append(window)
         presenter?.show(window)
         becameMain(window.id)
@@ -173,14 +176,17 @@ final class AppModel {
 
     /// File > Open: the project folder at `url` in its own window (the existing one if it is open
     /// already: one window per project). DW-144: offers recovery, reports offline audio and repairs.
+    /// T-083: `safeMode` opens it with its plugins disabled (PLUG-021, DW-224); `offerRecovery`
+    /// false leaves out the "Unsaved changes found" toast (the crash dialog asked already).
     @discardableResult
-    func open(_ url: URL, recover: Bool = false, into existing: ProjectWindowModel? = nil) async throws(DAWError) -> ProjectWindowModel {
+    func open(_ url: URL, recover: Bool = false, safeMode: Bool = false, offerRecovery: Bool = true,
+              into existing: ProjectWindowModel? = nil) async throws(DAWError) -> ProjectWindowModel {
         if existing == nil, let open = windows.first(where: { $0.store.folderURL?.standardizedFileURL == url.standardizedFileURL }) {
             presenter?.show(open)
             becameMain(open.id)
             return open
         }
-        let store = try await ProjectStore.open(url, recover: recover)
+        let store = try await ProjectStore.open(url, recover: recover, safeMode: safeMode)
         // DW-156: a new window comes to the front; a recovered project replaces its window's.
         let engineError = attachEngine(store, front: existing.map { $0.id == mainWindowID } ?? true, replacing: existing?.store)
         let report = await store.loadAssets()
@@ -199,12 +205,13 @@ final class AppModel {
         }
         if let engineError { window.toasts.post(.error, .error, title: "No audio engine", message: engineError) }
         window.toasts.post(loadReport: report, project: store.project.name)
-        if report.recoveryAvailable {
+        if report.recoveryAvailable && offerRecovery {
             window.toasts.postRecoveryAvailable(project: store.project.name) { [weak self, weak window] in
                 guard let self, let window else { return }
                 Task { @MainActor in
                     do {
-                        try await self.open(url, recover: true, into: window)
+                        // T-083: recovering keeps the window's safe mode.
+                        try await self.open(url, recover: true, safeMode: window.store.isSafeMode, into: window)
                     } catch {
                         window.toasts.post(.error, .error, title: "Recovery failed", message: "\(error)")
                     }
@@ -212,6 +219,49 @@ final class AppModel {
             }
         }
         return window
+    }
+
+    // MARK: Crash recovery (UI-043, T-083)
+
+    /// UI-043: shows the crash-recovery dialog for `sessions` (`CrashMarkerSession.crashedSessions`)
+    /// in every window. Its answers open the projects through `open(_:recover:safeMode:…)`: the
+    /// first one into the main window when that is still an untouched new project, the others in
+    /// windows of their own. Projects that fail to open get an error toast. Nothing happens for no
+    /// sessions.
+    @discardableResult
+    func presentCrashRecovery(_ sessions: [CrashMarker],
+                              hasNewerAutosave: @escaping (URL) -> Bool = { ProjectStore.hasNewerAutosave(at: $0) }) -> CrashRecoveryModel? {
+        guard !sessions.isEmpty else { return nil }
+        let model = CrashRecoveryModel(sessions: sessions, hasNewerAutosave: hasNewerAutosave)
+        model.opener = { [weak self] url, recover, safeMode in
+            guard let self else { return }
+            try await self.open(url, recover: recover, safeMode: safeMode, offerRecovery: false, into: self.untouchedMainWindow)
+        }
+        model.onFinish = { [weak self] model in
+            guard let self else { return }
+            if self.crashRecovery === model { self.setCrashRecovery(nil) }
+            for failure in model.failures {
+                self.mainWindow?.toasts.post(.error, .error, title: "Couldn't open \(failure.name)", message: failure.error)
+            }
+        }
+        setCrashRecovery(model)
+        return model
+    }
+
+    private func setCrashRecovery(_ model: CrashRecoveryModel?) {
+        crashRecovery = model
+        for window in windows { window.crashRecovery = model }
+    }
+
+    /// The main window while it still shows the empty project made at launch (or by File > New):
+    /// never saved, no tracks, nothing to undo, not edited. A project opened from the crash dialog
+    /// takes its place rather than opening next to it.
+    private var untouchedMainWindow: ProjectWindowModel? {
+        guard let window = mainWindow else { return nil }
+        let store = window.store
+        let untouched = store.folderURL == nil && !store.isDirty && !store.canUndo && !store.canRedo
+            && store.project.tracks.isEmpty && store.project.buses.isEmpty
+        return untouched ? window : nil
     }
 
     /// File > Save (`url` nil: where it was opened or last saved) and Save As.

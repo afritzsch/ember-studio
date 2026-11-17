@@ -272,6 +272,14 @@ public final class ProjectStore {
         try await open(url, recover: recover, safeMode: false)
     }
 
+    /// MODEL-045 (T-083, UI-043): whether the project folder at `url` has an autosave newer than its
+    /// `project.json` (or an autosave and no `project.json`), i.e. whether `open(_:recover: true)`
+    /// would open the autosave. Reads only modification dates, so the crash dialog can offer
+    /// recovery before opening anything. False for a folder that doesn't exist.
+    public nonisolated static func hasNewerAutosave(at url: URL) -> Bool {
+        ProjectFolder(url: url).autosaveIsNewer
+    }
+
     /// PLUG-021 (T-064): `open(_:recover:)` with `isSafeMode` set before any engine is attached,
     /// so the project's plugins never render (they are host-bypassed from the first graph).
     public static func open(_ url: URL, recover: Bool, safeMode: Bool) async throws(DAWError) -> ProjectStore {

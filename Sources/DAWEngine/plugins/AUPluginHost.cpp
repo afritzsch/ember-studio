@@ -43,6 +43,25 @@ Result<std::unique_ptr<Node>> AUPluginHost::create(const NodeCreateInfo& info) {
         telemetry = telemetry_;
     }
 
+    // T-083 (DW-224, PLUG-021): safe mode. The slot is built as absent (an effect passes its input
+    // through, an instrument is silent) without instantiating or loading the plugin, so one that
+    // crashes on load can't take the app down. No failure is reported (it is not one). The
+    // configured state is kept for getPluginState, so saving keeps it exactly; a held state
+    // (pending) and an instance that still exists (live, parked) are left for when it is enabled.
+    if (config.disabled) {
+        {
+            std::lock_guard lock(mutex_);
+            Slot& slot = slots_[desc.id];
+            slot.identifier = config.identifier;
+            slot.configState = config.state;
+            slot.error.reset();
+            slot.disabled = true;
+        }
+        return std::unique_ptr<Node>(std::make_unique<AUPluginNode>(
+            desc.id, nullptr, config.component.isInstrument(), desc.firstParam, desc.numParams, info.latency,
+            weak_from_this(), health, telemetry));
+    }
+
     std::shared_ptr<AUInstance> live, parked;
     std::optional<std::vector<uint8_t>> pending;
     std::vector<uint8_t> previousConfigState;
@@ -74,6 +93,7 @@ Result<std::unique_ptr<Node>> AUPluginHost::create(const NodeCreateInfo& info) {
             Slot& slot = slots_[desc.id];
             slot.identifier = config.identifier;
             slot.configState = config.state;
+            slot.disabled = false;
             // The plugin renders as absent; its state is kept for getPluginState (saving).
             return std::unique_ptr<Node>(std::make_unique<AUPluginNode>(
                 desc.id, nullptr, config.component.isInstrument(), desc.firstParam, desc.numParams,
@@ -103,6 +123,7 @@ Result<std::unique_ptr<Node>> AUPluginHost::create(const NodeCreateInfo& info) {
         slot.live = instance;
         if (slot.parked == instance) slot.parked.reset();
         slot.configState = config.state;
+        slot.disabled = false;
         if (pending) slot.pending.reset();
     }
     return std::unique_ptr<Node>(std::make_unique<AUPluginNode>(desc.id, instance, !instance->hasAudioInput(),
@@ -194,6 +215,7 @@ std::string AUPluginHost::infoJSON(NodeID slotID) const {
     std::shared_ptr<AUInstance> instance;
     std::string identifier;
     std::optional<Error> error;
+    bool disabled = false;
     {
         std::lock_guard lock(mutex_);
         auto it = slots_.find(slotID);
@@ -202,10 +224,13 @@ std::string AUPluginHost::infoJSON(NodeID slotID) const {
         if (!instance) instance = it->second.parked;
         identifier = it->second.identifier;
         error = it->second.error;
+        disabled = it->second.disabled;
+        if (disabled) instance.reset();  // T-083: safe mode reports the slot as not loaded
     }
     std::string json = "{\"slot\":" + std::to_string(slotID) + ",\"identifier\":" + pluginJSONString(identifier) +
                        ",\"loaded\":" + (instance ? "true" : "false");
     if (error) json += ",\"error\":" + pluginJSONString(error->message);
+    if (disabled) json += ",\"disabled\":true";  // T-083 (DW-224)
     if (instance) {
         json += ",\"name\":" + pluginJSONString(instance->name());
         json += std::string(",\"instrument\":") + (instance->hasAudioInput() ? "false" : "true");
@@ -264,7 +289,7 @@ std::shared_ptr<PluginEditQueue> AUPluginHost::editQueue() const {
 std::shared_ptr<AUInstance> AUPluginHost::current(NodeID slotID) const {
     std::lock_guard lock(mutex_);
     auto it = slots_.find(slotID);
-    if (it == slots_.end()) return nullptr;
+    if (it == slots_.end() || it->second.disabled) return nullptr;  // T-083: no editor in safe mode
     if (auto live = it->second.live.lock()) return live;
     return it->second.parked;
 }

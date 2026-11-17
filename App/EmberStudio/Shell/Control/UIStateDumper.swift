@@ -26,8 +26,9 @@ import Foundation
 ///                                      midi: "notes"}],
 ///                    "selection", "marquee", "gesture", "playhead": {"tick", "x"}},
 ///        "pianoRoll": {…}, "audioPreferences": {…}, "mixer": {…}, "export": {…},
-///        "engine": {"live", "mode"} | null, "feedbackWarning": {…} | null}],
-///      "liveWindow": id | null}
+///        "engine": {"live", "mode"} | null, "feedbackWarning": {…} | null,
+///        "safeMode": {"on", "plugins": [{"slot", "format", "identifier", "name"}]}}],
+///      "liveWindow": id | null, "crashRecovery": {…} | null}
 @MainActor
 enum UIStateDumper {
     static func dump(_ app: AppModel) -> JSONValue {
@@ -36,7 +37,45 @@ enum UIStateDumper {
             "windows": .array(app.windows.map { dump($0, isMain: $0.id == app.mainWindowID) }),
             // DW-156 (T-090): the window holding the app's live engine (null with --engine offline).
             "liveWindow": app.liveWindow.map { .int(Int64($0.id)) } ?? .null,
+            // UI-043 (T-083): the crash-recovery dialog while it is presented.
+            "crashRecovery": app.crashRecovery.map(dump) ?? .null,
         ]
+    }
+
+    /// UI-043 (T-083): the crash-recovery dialog.
+    ///
+    ///     {"presented", "opening", "title", "message", "choice": "openSafe"|"openNormally"|"dontOpen"|null,
+    ///      "sessions": [{"pid", "launched"}],
+    ///      "projects": [{"id", "name", "path"|null, "canOpen", "recoveryAvailable", "recover",
+    ///                    "plugins": [{"slot", "format", "identifier", "name"}]}],
+    ///      "failures": [{"name", "error"}], "controls": [ids]}
+    static func dump(_ crash: CrashRecoveryModel) -> JSONValue {
+        let iso = ISO8601DateFormatter()
+        return [
+            "presented": .bool(crash.isPresented), "opening": .bool(crash.isOpening),
+            "title": .string(crash.title), "message": .string(crash.message),
+            "choice": crash.choice.map { .string($0.rawValue) } ?? .null,
+            "sessions": .array(crash.sessions.map {
+                ["pid": .int(Int64($0.processID)), "launched": .string(iso.string(from: $0.launched))]
+            }),
+            "projects": .array(crash.entries.map { entry in
+                [
+                    "id": .int(Int64(entry.id)), "name": .string(entry.name), "path": entry.path.map(JSONValue.string) ?? .null,
+                    "canOpen": .bool(entry.canOpen), "recoveryAvailable": .bool(entry.recoveryAvailable),
+                    "recover": .bool(entry.recover), "plugins": plugins(entry.plugins),
+                ]
+            }),
+            "failures": .array(crash.failures.map { ["name": .string($0.name), "error": .string($0.error)] }),
+            "controls": .array(crash.controls.map { .string($0.id) }),
+        ]
+    }
+
+    /// T-083: plugin slots as the running marker lists them.
+    static func plugins(_ plugins: [CrashMarker.Plugin]) -> JSONValue {
+        .array(plugins.map {
+            ["slot": .int(Int64(bitPattern: $0.slotID)), "format": .string($0.format), "identifier": .string($0.identifier),
+             "name": .string($0.name)]
+        })
     }
 
     static func dump(_ window: ProjectWindowModel, isMain: Bool) -> JSONValue {
@@ -97,6 +136,8 @@ enum UIStateDumper {
             "engine": engine(window),  // T-090 (DW-156)
             "feedbackWarning": dump(window.feedbackGuard),  // T-090 (DW-230)
             "pluginEditors": dump(window.pluginEditors),  // T-063 (PLUG-017)
+            // T-083 (PLUG-021, DW-226): safe mode, with the plugin slots it keeps from loading.
+            "safeMode": ["on": .bool(store.isSafeMode), "plugins": plugins(window.safeModePlugins)],
         ]
     }
 
