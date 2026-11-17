@@ -131,7 +131,9 @@ perf)
     prepare
     scratch=.build/perf
     note "release build of the tests into $scratch"
-    swift build --build-tests -c release --scratch-path "$scratch" \
+    # The test targets use @testable imports, which a release build allows only with -enable-testing
+    # (`swift test` adds it itself; `swift build --build-tests` doesn't).
+    swift build --build-tests -c release -Xswiftc -enable-testing --scratch-path "$scratch" \
         >"$logs/perf-build.log" 2>&1 || { tail -n 40 "$logs/perf-build.log"; fail "perf build"; }
     export DAW_PERF_TESTS=1
     # TEST-008 alone, so nothing else competes for the CPU; it writes its ratio and the engine's

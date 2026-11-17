@@ -246,6 +246,7 @@ private func startAndStopDefaultOutput() {
 #endif
 
 import Foundation
+import Testing
 
 /// TEST-007 (T-084): the sanitizer CI jobs (`scripts/ci.sh asan|tsan`) set DAW_SANITIZER to
 /// `address` or `thread`. Both sanitizers replace malloc, so the RT trap's malloc_logger sees no

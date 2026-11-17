@@ -71,6 +71,14 @@ struct PerfSmokeTests {
         return commands
     }
 
+    /// User + system CPU time of this process so far, in seconds.
+    static func processCPUSeconds() -> Double {
+        var usage = rusage()
+        getrusage(RUSAGE_SELF, &usage)
+        func seconds(_ t: timeval) -> Double { Double(t.tv_sec) + Double(t.tv_usec) / 1e6 }
+        return seconds(usage.ru_utime) + seconds(usage.ru_stime)
+    }
+
     @Test("TEST-008: 64 tracks × (EQ + compressor) + 8 reverb buses at 48 kHz / 128 frames render offline ≥ 10× realtime (target 20×)")
     @MainActor func offlineRealtimeRatio() async throws {
         let work = FileManager.default.temporaryDirectory
@@ -90,19 +98,25 @@ struct PerfSmokeTests {
         #expect(project["tracks"]?.arrayValue?.count == Self.tracks)
         #expect(project["buses"]?.arrayValue?.count == Self.buses)
 
+        // CPU seconds the process spent during the render (daw.export plus whatever else ran). Under
+        // load the wall-clock ratio drops while this stays put, so the report shows which it was.
+        let cpuBefore = Self.processCPUSeconds()
         let response = try await dispatcher.call(.renderOffline, [
             "from": 0, "to": .int(Self.seconds * 1920), "path": "perf_smoke.wav",
             "blockSize": .int(Int64(Self.blockSize)), "tail": false,
         ])
         let render = try response.decode(RenderOfflineResult.self)
+        let cpuSeconds = Self.processCPUSeconds() - cpuBefore
+        let cpuRatio = render.durationSec / max(cpuSeconds, 1e-9)
         let telemetry = try await dispatcher.call(.engineTelemetry)
         let ratio = render.durationSec / max(render.renderTimeSec, 1e-9)
 
         print(String(format: "TEST-008: %d tracks × (EQ + comp) + %d reverb buses, %.0f s at %.0f Hz / %u frames: "
-                     + "rendered in %.3f s = %.1f× realtime (target %.0f×, fail < %.0f×; %@)",
+                     + "rendered in %.3f s = %.1f× realtime (target %.0f×, fail < %.0f×; %@); "
+                     + "process CPU %.3f s = %.1f× realtime per CPU second",
                      Self.tracks, Self.buses, render.durationSec, render.sampleRate, Self.blockSize,
                      render.renderTimeSec, ratio, Self.targetRatio, Self.minimumRatio,
-                     Self.strict ? "strict, DAW_PERF_TESTS=1" : "report only"))
+                     Self.strict ? "strict, DAW_PERF_TESTS=1" : "report only", cpuSeconds, cpuRatio))
         if Self.strict && ratio < Self.targetRatio {
             print("TEST-008: warning: \(String(format: "%.1f", ratio))× is below the \(Self.targetRatio)× target")
         }
@@ -112,6 +126,7 @@ struct PerfSmokeTests {
                 "buses": .int(Int64(Self.buses)), "sampleRate": .double(render.sampleRate),
                 "blockSize": .int(Int64(Self.blockSize)), "audioSeconds": .double(render.durationSec),
                 "renderSeconds": .double(render.renderTimeSec), "realtimeRatio": .double(ratio),
+                "cpuSeconds": .double(cpuSeconds), "cpuRealtimeRatio": .double(cpuRatio),
                 "targetRatio": .double(Self.targetRatio), "minimumRatio": .double(Self.minimumRatio),
                 "rtViolations": .int(Int64(render.rtViolations)), "telemetry": telemetry,
             ]
