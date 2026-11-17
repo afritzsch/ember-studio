@@ -35,4 +35,12 @@ CheckResult compressorRobustness();
 // Telemetry; 0 latency.
 CheckResult compressorThroughEngine();
 
+// T-091 (TEST-008, DSP-031): the block-wise paths. dsp/FastDb.h's ln and exp against libm
+// (|Δln| ≤ 1e-12, relative Δexp ≤ 1e-12) over the compressor's range; GainCurve matches
+// compressorGainDb; a key below the knee at rest (the path that skips the curve) outputs the
+// input times the makeup exactly and leaves the envelope at 0 dB, and a burst after it is
+// compressed per the oracle; the chunked passes give the same bits at block sizes around the
+// 64-frame chunk (63, 64, 65, 127, 128, 129) as one frame at a time.
+CheckResult compressorBlockPaths();
+
 } // namespace daw::testing

@@ -24,6 +24,7 @@
 #include "core/RtTrap.h"
 #include "core/Telemetry.h"
 #include "daw/EngineFacade.h"
+#include "dsp/FastDb.h"
 #include "dsp/GainComputer.h"
 #include "nodes/Compressor.h"
 #include "time/TempoMap.h"
@@ -616,6 +617,95 @@ CheckResult compressorThroughEngine() {
     }
     DAW_CHECK(rig.engine().telemetry().snapshot().graphLatency == 0);
     DAW_CHECK(rig.violations() == 0);
+    return checks;
+}
+
+CheckResult compressorBlockPaths() {
+    CheckResult checks;
+    uint64_t violations = 0;
+
+    // FastDb against libm over what the compressor feeds it: float key levels (amplitudes down to
+    // the smallest float, powers down to the RMS snap) and gains from −400 to +50 dB.
+    {
+        std::mt19937_64 rng(91);
+        std::uniform_real_distribution<double> logLevel(std::log(1e-45), std::log(1e10));
+        std::uniform_real_distribution<double> db(-400.0, 50.0);
+        double worstLn = 0, worstExp = 0;
+        for (int i = 0; i < 200000; ++i) {
+            const double x = std::exp(logLevel(rng));
+            worstLn = std::max(worstLn, std::fabs(fastdb::ln(x) - std::log(x)));
+            const double z = db(rng) * fastdb::kNeperPerDb;
+            worstExp = std::max(worstExp, std::fabs(fastdb::exp(z) - std::exp(z)) / std::exp(z));
+        }
+        for (double x : {1.0, 2.0, 0.5, std::numbers::sqrt2, 1.0 / std::numbers::sqrt2, 1e-20, 3.4e38})
+            worstLn = std::max(worstLn, std::fabs(fastdb::ln(x) - std::log(x)));
+        DAW_CHECK(worstLn <= 1e-12);
+        DAW_CHECK(worstExp <= 1e-12);
+        DAW_CHECK(fastdb::exp(0.0) == 1.0 && fastdb::ln(1.0) == 0.0);
+    }
+
+    // GainCurve is the static curve compressorGainDb states (it is how the node computes it).
+    {
+        bool same = true;
+        for (double t : {-60.0, -20.0, 0.0})
+            for (double r : {1.0, 4.0, 20.0})
+                for (double w : {0.0, 6.0, 24.0}) {
+                    const GainCurve curve(t, r, w);
+                    for (double x = -100.0; x <= 20.0; x += 0.0625) same = same && near(curve.gainDb(x), curveDb(x, t, r, w), 1e-9);
+                }
+        DAW_CHECK(same);
+    }
+
+    // A key below the knee at rest: the input times the makeup, exactly; then a burst compresses
+    // per the oracle and the release lets the envelope settle back to exactly 0 dB.
+    for (bool rms : {false, true}) {
+        CompRig rig;
+        Settings s;
+        s.threshold = -24.0f, s.knee = 6.0f, s.makeup = 4.0f, s.attack = 1.0f, s.release = 20.0f, s.rms = rms;
+        rig.apply(s);
+        const size_t quietFrames = 4800, loudFrames = 4800, tailFrames = 48000;
+        const auto quiet = sine(quietFrames, 440, fromDb(-40.0));
+        const auto loud = sine(loudFrames, 440, fromDb(-6.0));
+        std::vector<float> in(quiet);
+        in.insert(in.end(), loud.begin(), loud.end());
+        in.resize(quietFrames + loudFrames + tailFrames, 0.0f);
+        rig.run({in, in}, {}, [] { return 128u; });
+        const auto makeup = static_cast<float>(fromDb(4.0));
+        bool exact = true;
+        for (size_t i = 0; i < quietFrames; ++i) exact = exact && rig.left[i] == in[i] * makeup;
+        DAW_CHECK(exact);
+        Oracle oracle;
+        std::vector<double> gains;
+        for (size_t pos = 0; pos < in.size(); pos += 128) {
+            const auto n = static_cast<uint32_t>(std::min<size_t>(128, in.size() - pos));
+            std::vector<float> k(in.begin() + static_cast<std::ptrdiff_t>(pos), in.begin() + static_cast<std::ptrdiff_t>(pos + n));
+            const auto g = oracle.block({k, k}, n, s);
+            gains.insert(gains.end(), g.begin(), g.end());
+        }
+        DAW_CHECK(maxError(rig.left, in, gains) < 1e-6);
+        DAW_CHECK(rig.node.gainReductionDb() == 0.0);  // settled exactly
+        violations += rig.violations;
+    }
+
+    // The 64-frame chunks don't show: block sizes around them give the bits of 1-frame blocks.
+    for (bool rms : {false, true}) {
+        const size_t total = 30000;
+        const auto l = bursts(total, 11), r = bursts(total, 12);
+        Settings s;
+        s.rms = rms;
+        CompRig single;
+        single.apply(s);
+        single.run({l, r}, {}, [] { return 1u; });
+        violations += single.violations;
+        for (uint32_t size : {63u, 64u, 65u, 127u, 128u, 129u}) {
+            CompRig rig;
+            rig.apply(s);
+            rig.run({l, r}, {}, [size] { return size; });
+            DAW_CHECK(rig.left == single.left && rig.right == single.right);
+            violations += rig.violations;
+        }
+    }
+    DAW_CHECK(violations == 0);
     return checks;
 }
 

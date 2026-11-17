@@ -30,6 +30,7 @@
 #include "core/RtTrap.h"
 #include "core/Telemetry.h"
 #include "daw/EngineFacade.h"
+#include "dsp/Biquad.h"
 #include "graph/NodeRegistry.h"
 #include "nodes/ChannelStrip.h"
 #include "nodes/Compressor.h"
@@ -732,6 +733,62 @@ CheckResult eqThroughEngine() {
             std::filesystem::remove(path, ignored);
             releaseFacade(facade);
         }
+    }
+    return checks;
+}
+
+CheckResult eqStereoBiquad() {
+    CheckResult checks;
+    const double rate = 48000.0;
+    const BiquadCoeffs designs[] = {
+        biquadHighPass(20.0, 10.0, rate),       biquadHighPass(60.0, 0.7071, rate),
+        biquadLowShelf(200.0, 0.7, 5.0, rate),  biquadPeak(1200.0, 3.0, -9.0, rate),
+        biquadPeak(30.0, 10.0, 24.0, rate),     biquadHighShelf(9000.0, 1.0, -4.0, rate),
+        biquadLowPass(16000.0, 1.0, rate),      biquadLowPass(20.0, 0.1, rate),
+    };
+    // Bursts with silent gaps long enough for every section to snap (or not) in between.
+    std::mt19937 rng(91);
+    std::uniform_real_distribution<float> u(-1.0f, 1.0f);
+    const size_t total = 400000;
+    std::vector<float> l(total, 0.0f), r(total, 0.0f);
+    for (size_t i = 0; i < total; ++i) {
+        const bool loud = (i / 20000) % 3 == 0;
+        l[i] = loud ? u(rng) : 0.0f;
+        r[i] = loud && (i / 20000) % 2 == 0 ? 0.25f * u(rng) : 0.0f;  // R also silent while L plays
+    }
+    bool sameTick = true, sameStep = true, snapped = false;
+    for (const BiquadCoeffs& c : designs) {
+        BiquadState sl, sr;
+        BiquadState2 tick, step;
+        for (size_t i = 0; i < total; ++i) {
+            const bool wasZero = sl.isZero();
+            const double yl = sl.tick(l[i], c), yr = sr.tick(r[i], c);
+            const Double2 yt = tick.tick(Double2{l[i], r[i]}, c);
+            const Double2 ys = step.step(Double2{l[i], r[i]}, c);
+            if (__builtin_reduce_min(step.quietness()) < BiquadState::kSnap) step.snap();
+            sameTick = sameTick && yt.x == yl && yt.y == yr && tick.z1.x == sl.z1 && tick.z1.y == sr.z1 &&
+                       tick.z2.x == sl.z2 && tick.z2.y == sr.z2;
+            sameStep = sameStep && ys.x == yl && ys.y == yr && step.z1.x == sl.z1 && step.z2.y == sr.z2;
+            snapped = snapped || (!wasZero && sl.isZero() && l[i] == 0.0f);
+        }
+    }
+    DAW_CHECK(sameTick);
+    DAW_CHECK(sameStep);
+    DAW_CHECK(snapped);  // the signal did reach the snap
+
+    // Flat (a peak at 0 dB): y = x bit for bit and the state stays exactly 0.
+    {
+        const BiquadCoeffs flat = biquadPeak(1000.0, 1.0, 0.0, rate);
+        DAW_CHECK(flat.isIdentity());
+        BiquadState2 s;
+        bool identity = true;
+        for (size_t i = 0; i < 20000; ++i) {
+            const Double2 x{4.0 * l[i], 1e6 * r[i]};
+            const Double2 y = s.tick(x, flat);
+            identity = identity && y.x == x.x && y.y == x.y && s.z1.x == 0.0 && s.z1.y == 0.0 && s.z2.x == 0.0 &&
+                       s.z2.y == 0.0;
+        }
+        DAW_CHECK(identity);
     }
     return checks;
 }

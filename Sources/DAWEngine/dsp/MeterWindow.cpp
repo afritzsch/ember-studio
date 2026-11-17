@@ -13,6 +13,8 @@ void MeterWindow::prepare(double sampleRate) {
 void MeterWindow::reset() DAW_RT {
     chunkPeak_.fill(0.0f);
     chunkSumSq_.fill(0.0);
+    groupPeak_.fill(0.0f);
+    groupSumSq_.fill(0.0);
     next_ = 0;
     partialPeak_ = 0.0f;
     partialSumSq_ = 0.0;
@@ -53,6 +55,15 @@ void MeterWindow::add(const float* left, const float* right, uint32_t numFrames)
         if (partialFrames_ < chunkFrames_) continue;
         chunkPeak_[next_] = partialPeak_;
         chunkSumSq_[next_] = partialSumSq_;
+        const uint32_t first = next_ / kGroup * kGroup;
+        float groupPeak = 0.0f;
+        double groupSum = 0.0;
+        for (uint32_t i = first; i < first + kGroup; ++i) {
+            groupPeak = chunkPeak_[i] > groupPeak ? chunkPeak_[i] : groupPeak;
+            groupSum += chunkSumSq_[i];
+        }
+        groupPeak_[next_ / kGroup] = groupPeak;
+        groupSumSq_[next_ / kGroup] = groupSum;
         next_ = next_ + 1 == kChunks ? 0 : next_ + 1;
         partialPeak_ = 0.0f;
         partialSumSq_ = 0.0;
@@ -61,20 +72,13 @@ void MeterWindow::add(const float* left, const float* right, uint32_t numFrames)
 }
 
 MeterReading MeterWindow::reading() const DAW_RT {
-    // T-091 (TEST-008): every strip reads once per block, so this runs 300 chunks per strip per
-    // block. Four independent maxima and sums (kChunks is a multiple of 4) instead of one serial
-    // chain let the loop vectorize; it still re-adds the chunks each time, so nothing drifts.
-    static_assert(kChunks % 4 == 0);
-    float peaks[4] = {partialPeak_, 0.0f, 0.0f, 0.0f};
-    double sums[4] = {partialSumSq_, 0.0, 0.0, 0.0};
-    for (uint32_t i = 0; i < kChunks; i += 4) {
-        for (uint32_t k = 0; k < 4; ++k) {
-            peaks[k] = chunkPeak_[i + k] > peaks[k] ? chunkPeak_[i + k] : peaks[k];
-            sums[k] += chunkSumSq_[i + k];
-        }
+    // T-091 (TEST-008): every strip reads once per block; the group totals keep that to 15 adds.
+    float peak = partialPeak_;
+    double sumSq = partialSumSq_;
+    for (uint32_t g = 0; g < kGroups; ++g) {
+        peak = groupPeak_[g] > peak ? groupPeak_[g] : peak;
+        sumSq += groupSumSq_[g];
     }
-    const float peak = std::max(std::max(peaks[0], peaks[1]), std::max(peaks[2], peaks[3]));
-    const double sumSq = (sums[0] + sums[1]) + (sums[2] + sums[3]);
     const double frames = static_cast<double>(kChunks) * chunkFrames_ + partialFrames_;
     return MeterReading{peak, static_cast<float>(std::sqrt(std::max(0.0, sumSq) / frames))};
 }

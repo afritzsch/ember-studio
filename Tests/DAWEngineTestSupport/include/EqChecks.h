@@ -32,4 +32,10 @@ CheckResult eqRobustness();
 // the facade's TelemetryPOD.
 CheckResult eqThroughEngine();
 
+// T-091 (TEST-008, DSP-030, DSP-040): the stereo NEON biquad (BiquadState2) is BiquadState::tick
+// per lane, bit for bit, through loud signal, decays into the snap and silence, for every band
+// type, with tick() and with step() plus one snap test per frame (the EQ's steady path); a flat
+// band passes its input bit for bit with its state exactly 0.
+CheckResult eqStereoBiquad();
+
 } // namespace daw::testing
