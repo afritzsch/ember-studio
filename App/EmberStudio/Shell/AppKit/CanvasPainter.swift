@@ -26,13 +26,23 @@ enum CanvasPainter {
         // Geometry y includes the ruler; tiles don't.
         ctx.translateBy(x: 0, y: -TimelineGeometry.rulerHeight)
         let rows = g.rowCount(tracks: model.tracks.count)
-        let firstRow = Int((rect.minY / g.trackHeight).rounded(.down))
-        let lastRow = Int((rect.maxY / g.trackHeight).rounded(.up))
+        // UI-016 (T-081): the tile's bands of `trackHeight` are slots (a row or a take row under
+        // one); without take rows a slot is a row.
+        let firstSlot = Int((rect.minY / g.trackHeight).rounded(.down))
+        let lastSlot = Int((rect.maxY / g.trackHeight).rounded(.up))
+        let slots = (firstSlot..<max(lastSlot, firstSlot)).map { (slot: $0, band: g.rowAndTake(ofSlot: $0)) }
+        let firstRow = g.rowAndTake(ofSlot: firstSlot).row
+        let lastRow = lastSlot > firstSlot ? g.rowAndTake(ofSlot: lastSlot - 1).row + 1 : firstRow
         // UI-015 (T-075): lane rows under expanded tracks.
         let laneRows = model.window.map { lanes in Dictionary(lanes.automation.layout.lanes.map { ($0.row, $0) }, uniquingKeysWith: { a, _ in a }) } ?? [:]
 
         // Row backgrounds (and the empty area below the last track).
-        for row in firstRow..<max(lastRow, firstRow) {
+        for (slot, band) in slots {
+            let row = band.row
+            if band.take > 0 {  // UI-016: a take row
+                TakeFolderPainter.drawRowBackground(ctx, y: g.slotY(slot), width: rect.width, height: g.trackHeight)
+                continue
+            }
             if laneRows[row] != nil {
                 ctx.setFillColor(AutomationLanePainter.laneColor.cgColor)
                 ctx.fill(CGRect(x: 0, y: g.rowY(row), width: rect.width, height: g.trackHeight))
@@ -47,7 +57,7 @@ enum CanvasPainter {
         // Grid (UI-012).
         let from = g.tick(atX: 0), to = Tick(g.tick(atX: rect.width).raw + 1)
         let lines = model.grid.lines(from: from, to: to, minSpacing: minLineSpacing / g.pixelsPerTick, snap: model.snap)
-        let bottom = g.rowY(max(lastRow, rows))
+        let bottom = g.slotY(max(lastSlot, g.slotCount(tracks: model.tracks.count)))
         for line in lines {
             let x = (g.x(line.tick)).rounded() + 0.5
             let color: NSColor = switch line.kind {
@@ -70,10 +80,24 @@ enum CanvasPainter {
                      selected: selection.contains(entry.id), geometry: g, project: model.project)
         }
 
+        // Take folders (UI-016, T-081): the comp on the track's row, the takes on their rows.
+        if let takes = model.window?.takes, tracks.contains(where: { !$0.takeFolders.isEmpty }) {
+            let visible = takes.visible(geometry: g)
+            for placement in visible.folders {
+                TakeFolderPainter.drawFolder(ctx, placement, track: tracks[placement.trackIndex], project: model.project,
+                                             expanded: takes.expanded.contains(placement.folder.id), geometry: g, takes: takes)
+            }
+            for row in visible.rows {
+                guard let folder = tracks[row.trackIndex].takeFolders.first(where: { $0.id == row.folderID }) else { continue }
+                TakeFolderPainter.drawTake(ctx, row, folder: folder, track: tracks[row.trackIndex], project: model.project, geometry: g,
+                                           takes: takes)
+            }
+        }
+
         // Automation lanes (UI-015).
         if let lanes = model.window?.automation {
-            for row in firstRow..<max(lastRow, firstRow) {
-                if let lane = laneRows[row] { AutomationLanePainter.draw(ctx, lane, width: rect.width, geometry: g, lanes: lanes) }
+            for (_, band) in slots where band.take == 0 {
+                if let lane = laneRows[band.row] { AutomationLanePainter.draw(ctx, lane, width: rect.width, geometry: g, lanes: lanes) }
             }
         }
     }

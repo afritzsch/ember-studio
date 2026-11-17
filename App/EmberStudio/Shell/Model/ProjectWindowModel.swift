@@ -138,6 +138,8 @@ final class ProjectWindowModel: Identifiable {
     let pluginEditors = PluginEditorModel()
     /// UI-015, AUTO-006/007 (T-075): automation lanes in the arrange view and the window's recorder.
     let automation = AutomationLanesModel()
+    /// UI-016 (T-081): take folders in the arrange view (expand, swipe comping, delete).
+    let takes = TakeFoldersModel()
 
     init(id: Int, store: ProjectStore, toasts: ToastCenter = ToastCenter()) {
         self.id = id
@@ -151,6 +153,7 @@ final class ProjectWindowModel: Identifiable {
         feedbackGuard.window = self
         pluginEditors.window = self  // T-063
         automation.window = self  // T-075
+        takes.window = self  // T-081
         audioPrefs.refreshDevices()
         // UI-004: device toasts name devices (also ones that are gone) and offer the audio settings.
         toasts.deviceName = { [weak self] id in self?.audioPrefs.name(of: id) }
@@ -173,6 +176,7 @@ final class ProjectWindowModel: Identifiable {
         pianoRoll.close()  // UI-021: its note-offs go to the old engine, before the swap
         mixer.documentReplaced()
         automation.documentReplaced()  // T-075: passes end uncommitted, before the swap
+        takes.documentReplaced()  // T-081
         self.store = store
         arrange.peaks.invalidate(nil)
         selectedTracks = []
@@ -358,6 +362,7 @@ final class ProjectWindowModel: Identifiable {
         controls += trackHeaders.flatMap(\.controls)
         controls += arrange.controls
         controls += automation.controls  // T-075 (UI-015)
+        controls += takes.controls  // T-081 (UI-016)
         controls += pianoRoll.controls
         controls += audioPrefs.controls
         controls += exportDialog.controls  // T-082

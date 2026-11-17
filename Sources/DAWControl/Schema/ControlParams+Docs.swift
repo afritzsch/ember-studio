@@ -150,3 +150,14 @@ extension DeviceSimulateParams: JSONSchemaDocumented {
         ]
     }
 }
+
+extension UIPerformParams: JSONSchemaDocumented {
+    public static var jsonSchemaDocs: [String: String] {
+        [
+            "accessibilityId": "A control id from ui.state (windows[].controls), e.g. track.<id>.mute",
+            "action": "click|press (buttons, toggles), toggle|on|off (toggles); swipe: a take row, with start and end",
+            "start": "UI-016, action swipe: first tick of the range the take plays (clamped to the take and its folder)",
+            "end": "UI-016, action swipe: tick after the range",
+        ]
+    }
+}
