@@ -39,6 +39,10 @@ final class TimelineCanvasView: NSView, SnapshotCompositing {
         /// UI-015 (T-075): which tracks show lanes, so expanding or collapsing redraws.
         var trackRows: [Int] = []
         var expanded: Set<NodeIDValue> = []
+        /// UI-016 (T-081): expanded take folders, their rows, and the swipe in progress.
+        var takeBands: [TimelineGeometry.TakeBand] = []
+        var takesExpanded: Set<ModelID> = []
+        var takeSwipe: TakeFoldersModel.Swipe?
     }
 
     private let tileContainer = CALayer()
@@ -114,6 +118,8 @@ final class TimelineCanvasView: NSView, SnapshotCompositing {
             _ = model.marquee
             _ = model.peaksVersion
             _ = model.window?.automation.expanded  // UI-015 (T-075)
+            _ = model.window?.takes.expanded  // UI-016 (T-081)
+            _ = model.window?.takes.swipe
         } onChange: { [weak self] in
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
@@ -189,7 +195,9 @@ final class TimelineCanvasView: NSView, SnapshotCompositing {
         let key = ContentKey(tracks: model.tracks, assets: model.project.assets, tempoMap: model.project.tempoMap,
                              selection: model.selection, pixelsPerBeat: model.geometry.pixelsPerBeat, snap: model.snap,
                              tileSize: tileSize, trackRows: model.geometry.trackRows,
-                             expanded: model.window?.automation.expanded ?? [])
+                             expanded: model.window?.automation.expanded ?? [],
+                             takeBands: model.geometry.takeBands, takesExpanded: model.window?.takes.expanded ?? [],
+                             takeSwipe: model.window?.takes.swipe)
         let contentChanged = key != contentKey
         contentKey = key
 
@@ -382,6 +390,7 @@ final class TimelineCanvasView: NSView, SnapshotCompositing {
 
     override func menu(for event: NSEvent) -> NSMenu? {
         let p = point(event)
+        if let menu = takeMenu(at: p) { return menu }  // UI-016 (T-081)
         guard let hit = model.hitTest(p) else { return nil }
         if !model.selection.contains(hit.clipID) { model.selection = [hit.clipID] }
         let tick = model.isSnapping(Self.modifiers(event)) ? model.grid.snap(model.geometry.tick(atX: p.x), model.snap)
@@ -393,6 +402,26 @@ final class TimelineCanvasView: NSView, SnapshotCompositing {
         menu.addItem(ClosureMenuItem("Split at Pointer") { [weak self] in self?.model.split(hit.clipID, at: tick) })
         menu.addItem(ClosureMenuItem("Duplicate", key: "d") { [weak self] in self?.model.duplicateSelection() })
         menu.addItem(ClosureMenuItem("Delete") { [weak self] in self?.model.deleteSelection() })
+        return menu
+    }
+
+    /// UI-016 (T-081): on a take row or a folder's comp: show/hide the takes, use the take for the
+    /// whole folder (take rows), delete the folder.
+    private func takeMenu(at p: CGPoint) -> NSMenu? {
+        guard let takes = model.window?.takes else { return nil }
+        let g = model.geometry
+        let row = takes.takeRowHit(p, geometry: g)
+        guard let folderID = row?.folderID ?? (model.hitTest(p) == nil ? takes.folderHit(p, geometry: g)?.folder.id : nil) else { return nil }
+        let menu = NSMenu()
+        let expanded = takes.expanded.contains(folderID)
+        menu.addItem(ClosureMenuItem(expanded ? "Hide Takes" : "Show Takes") { [weak takes] in takes?.toggleExpanded(folderID) })
+        if let row {
+            menu.addItem(ClosureMenuItem("Use Take \(row.number) for the Whole Folder") { [weak takes] in
+                takes?.selectWhole(row.take.id, in: folderID)
+            })
+        }
+        menu.addItem(.separator())
+        menu.addItem(ClosureMenuItem("Delete Take Folder") { [weak takes] in takes?.remove(folderID) })
         return menu
     }
 

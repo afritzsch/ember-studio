@@ -398,6 +398,10 @@ public struct UISnapshotParams: Codable, Hashable, Sendable {
 public struct UIPerformParams: Codable, Hashable, Sendable {
     public var accessibilityId: String
     public var action: String
+    /// UI-016 (T-081, additive): action `swipe` on a take row (`takeFolder.<folder>.take.<take>.swipe`):
+    /// the range `[start, end)` in ticks that the take plays in the comp (one undo entry).
+    public var start: Int64? = nil
+    public var end: Int64? = nil
 }
 
 // MARK: test.fixture

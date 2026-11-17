@@ -21,6 +21,16 @@ struct TimelineGeometry: Equatable, Sendable {
     var trackRows: [Int] = []
     /// UI-015: rows in all (tracks and lanes); nil when `trackRows` is empty.
     var rowTotal: Int?
+    /// UI-016 (T-081): the take rows of expanded take folders, as bands of `trackHeight` right
+    /// under a display row (a track's own row), sorted by row. They take no row numbers, so lane
+    /// rows (T-075) and clip rows keep theirs; they only push later rows down. Empty: none.
+    var takeBands: [TakeBand] = []
+
+    /// UI-016: `count` take rows under display row `row`.
+    struct TakeBand: Equatable, Sendable {
+        var row: Int
+        var count: Int
+    }
 
     var pixelsPerTick: Double { pixelsPerBeat / Double(Tick.ppq) }
 
@@ -44,26 +54,70 @@ struct TimelineGeometry: Equatable, Sendable {
     // MARK: Rows ↔ y
 
     /// The view y of the top of row `index`.
-    func rowY(_ index: Int) -> Double { Self.rulerHeight + Double(index) * trackHeight - scrollY }
+    func rowY(_ index: Int) -> Double { slotY(slot(ofRow: index)) }
 
-    /// The row at view y (may be negative or past the last track); nil inside the ruler.
+    /// The row at view y (may be negative or past the last track); nil inside the ruler. A take
+    /// row (UI-016) counts as the row it is under.
     func row(atY y: Double) -> Int? {
         guard y >= Self.rulerHeight else { return nil }
-        return Int(((y - Self.rulerHeight + scrollY) / trackHeight).rounded(.down))
+        return rowAndTake(ofSlot: slot(atY: y)).row
     }
 
     /// The row at view y without the ruler check (a drag that strays over the ruler stays on row 0 or above).
-    func rowUnclamped(atY y: Double) -> Int {
-        Int(((y - Self.rulerHeight + scrollY) / trackHeight).rounded(.down))
-    }
+    func rowUnclamped(atY y: Double) -> Int { rowAndTake(ofSlot: slot(atY: y)).row }
 
     /// The rows at least partly visible, clamped to `0..<rows`.
     func visibleRows(of rows: Int) -> Range<Int> {
         let top = Int((scrollY / trackHeight).rounded(.down))
         let bottom = Int(((scrollY + max(size.height - Self.rulerHeight, 0)) / trackHeight).rounded(.up))
-        let lo = min(max(top, 0), rows)
-        return lo..<min(max(bottom, lo), rows)
+        guard !takeBands.isEmpty else {
+            let lo = min(max(top, 0), rows)
+            return lo..<min(max(bottom, lo), rows)
+        }
+        // UI-016: through the slots (take rows show their row's track).
+        let lo = min(max(rowAndTake(ofSlot: top).row, 0), rows)
+        let hi = bottom > top ? rowAndTake(ofSlot: bottom - 1).row + 1 : lo
+        return lo..<min(max(hi, lo), rows)
     }
+
+    // MARK: Slots: rows and take rows (UI-016, T-081)
+
+    /// A slot is a band of `trackHeight` counted from the top of the content: each display row
+    /// is one, and each take row under it (`takeBands`) one more.
+    func slot(ofRow row: Int) -> Int {
+        guard !takeBands.isEmpty else { return row }
+        var slot = row
+        for band in takeBands where band.row < row { slot += band.count }
+        return slot
+    }
+
+    /// The display row a slot belongs to, and which band of it: 0 the row itself, k ≥ 1 its k-th
+    /// take row.
+    func rowAndTake(ofSlot slot: Int) -> (row: Int, take: Int) {
+        guard !takeBands.isEmpty, slot >= 0 else { return (slot, 0) }
+        var offset = 0
+        for band in takeBands {
+            if slot <= band.row + offset { return (slot - offset, 0) }
+            if slot <= band.row + offset + band.count { return (band.row, slot - band.row - offset) }
+            offset += band.count
+        }
+        return (slot - offset, 0)
+    }
+
+    /// The view y of the top of slot `slot`.
+    func slotY(_ slot: Int) -> Double { Self.rulerHeight + Double(slot) * trackHeight - scrollY }
+
+    /// The slot at view y (no ruler check).
+    func slot(atY y: Double) -> Int { Int(((y - Self.rulerHeight + scrollY) / trackHeight).rounded(.down)) }
+
+    /// The view y of the top of take row `take` (1-based) under display row `row`.
+    func takeRowY(row: Int, take: Int) -> Double { slotY(slot(ofRow: row) + take) }
+
+    /// Take rows in all.
+    var takeRowTotal: Int { takeBands.reduce(0) { $0 + $1.count } }
+
+    /// Slots in all for `tracks` tracks (rows, lanes and take rows): the content height in rows.
+    func slotCount(tracks: Int) -> Int { rowCount(tracks: tracks) + takeRowTotal }
 
     /// A clip's rectangle in view coordinates (one point of inset between rows); `row` is the
     /// clip's track index.

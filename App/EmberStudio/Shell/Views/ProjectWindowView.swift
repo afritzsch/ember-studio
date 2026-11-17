@@ -209,6 +209,7 @@ private struct TrackHeaderColumn: View {
                         .frame(height: ProjectWindowModel.trackHeight - 1)
                         .overlay(alignment: .bottomTrailing) { AutomationTrackAccessory(model: model.automation, trackID: track.id) }
                     Divider()
+                    TakeRowHeaders(model: model.takes, trackID: track.id)  // UI-016 (T-081): take rows come first
                     AutomationLaneHeaders(model: model.automation, trackID: track.id)  // UI-015 (T-075)
                 }
             }
