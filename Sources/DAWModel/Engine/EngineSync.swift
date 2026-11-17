@@ -86,6 +86,30 @@ public final class EngineSync {
     /// `ProjectStore.attachEngine` points it at the store.
     public let pluginEdits = PluginEditRecorder()
 
+    /// DW-204 (T-063, docs/autobuild/DECISIONS.md "T-063 first-edit undo"): per hosted-plugin param, the
+    /// plugin's own value from before the first editor gesture that set it in the document (the
+    /// gesture's `begin` value). While the document leaves the param unset (NaN, "the plugin keeps its
+    /// value", PLUG-015) this value is written to its slot instead, so undoing a first plugin-side edit
+    /// puts the plugin back where it was, in one undo entry and with no change to the document. The
+    /// param keeps a slot for it. Session-only (kept while the slot is out of the project, since undo
+    /// and redo can bring it back).
+    private var pluginBaselines: [PluginEditRecorder.Key: Float] = [:]
+
+    /// T-063: see `pluginBaselines`. `PluginEditRecorder` calls it for a gesture's `begin` on a param
+    /// the document doesn't set. The newest such value wins.
+    func rememberPluginBaseline(_ key: PluginEditRecorder.Key, _ value: Float) {
+        guard value.isFinite, !isInvalidated else { return }
+        pluginBaselines[key] = value
+    }
+
+    /// T-063: params with a baseline keep a slot even when the document no longer sets them. A slot
+    /// that left the project is skipped but keeps its baselines (an undo or redo can bring it back).
+    private func requirePluginBaselines() {
+        for key in pluginBaselines.keys where PluginEditRecorder.isPlugin(key.slot, in: project) {
+            required[key.slot] = max(required[key.slot] ?? 0, UInt32(key.index) + 1)
+        }
+    }
+
     /// T-052: asset loads of imported takes not yet waited for (`settleLoads`).
     private var pendingLoads: [JobID] = []
     /// REC-001 (T-052): the audio tracks armed in the engine, with their input pair.
@@ -118,6 +142,7 @@ public final class EngineSync {
         self.project = project
         engineSampleRate = project.sessionSampleRate
         required = GraphDescriptionBuilder.paramRequirements(project, catalog: self.catalog)
+        requirePluginBaselines()  // T-063
         try allocateParams()
         writeParams()
         flush()
@@ -136,6 +161,7 @@ public final class EngineSync {
         self.project = project
         pushSessionSampleRate()
         required = GraphDescriptionBuilder.paramRequirements(project, catalog: catalog)
+        requirePluginBaselines()  // T-063
         candidate = nil
         do {
             try allocateParams()
@@ -437,9 +463,15 @@ public final class EngineSync {
 
     /// Writes the slots whose value differs from the last write, in ParamID order.
     private func writeParams() {
-        let values = GraphDescriptionBuilder.paramValues(
+        var values = GraphDescriptionBuilder.paramValues(
             project, runtime: runtime, catalog: catalog, metronomeSuppressed: isMetronomeSuppressed,
             pluginsBypassed: arePluginsBypassed)
+        // T-063 ("T-063 first-edit undo"): a plugin param the document doesn't set gets the plugin's
+        // own value from before its first editor gesture, so undoing that edit reverts the plugin.
+        for (key, baseline) in pluginBaselines {
+            guard let id = runtime.paramID(key.slot, UInt32(key.index)), let value = values[id], value.isNaN else { continue }
+            values[id] = baseline
+        }
         var changed: [(ParamID, Float)] = []
         // Bit patterns, so a NaN ("not set", PLUG-015) that was written isn't written again.
         for (id, value) in values where written[id]?.bitPattern != value.bitPattern { changed.append((id, value)) }

@@ -85,7 +85,11 @@ Additive; the facade side is in 08 "Contract delta (T-063)", the app side in 12 
     - `AUInstance::pushDecision` (RT, atomics only) keeps the node from fighting the editor:
       - while the param's gesture is open, its push is *deferred* (retried each block);
       - after a release or an ungestured edit, the plugin's value is *held* until the model's value matches (that push is *skipped*: the plugin has it) or 300 ms pass.
-- **Known gap** (see the T-063 report). Undoing the first plugin-side edit of a param that had no stored value makes it "not set" again (NaN), which, as T-061 defines it, leaves the plugin at the edited value.
+- **Undo of a first edit** (docs/autobuild/DECISIONS.md "T-063 first-edit undo", option (c)). A gesture's `begin` on a param the document doesn't set carries the plugin's value before the gesture.
+  - `PluginEditRecorder` hands that value to `EngineSync`, which remembers it for the session as the param's *baseline*: the newest such begin wins, and it is kept while the slot is out of the project, since undo and redo can bring it back.
+  - While the document leaves the param unset, EngineSync writes the baseline to the param's slot instead of NaN ("not set"), and keeps a slot for it.
+  - So undoing a first plugin-side edit is still one undo entry, the document goes back to unset, and the plugin goes back to its own value. A later set (redo, another control, automation) works as before.
+  - Ungestured edits (no `begin`) have no baseline: undoing one leaves the plugin at the edited value.
 
 ## Status
 | ID | status | test |

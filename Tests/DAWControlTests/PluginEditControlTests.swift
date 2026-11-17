@@ -41,7 +41,7 @@ private enum EditTestVST3 {
 }
 
 extension VST3PluginControlTests {
-    @Test("DW-204: a VST3 editor's gesture becomes one undoable SetParam; DeviceSlot.params, the render and engine.pluginInfo follow; no echo entry; 0 RT violations")
+    @Test("DW-204: a VST3 editor's gesture becomes one undoable SetParam; DeviceSlot.params, the render and engine.pluginInfo follow; no echo entry; undo reverts the plugin (T-063 first-edit undo); 0 RT violations")
     func pluginEditorGestureIsOneUndo() async throws {
         try EditTestVST3.build()
         let dir = try TempDir()
@@ -80,6 +80,20 @@ extension VST3PluginControlTests {
         let undone = try await d.ok(.projectGet)
         let undoneInserts = undone["project"]?["tracks"]?[0]?["inserts"]?.arrayValue ?? undone["tracks"]?[0]?["inserts"]?.arrayValue ?? []
         #expect(undoneInserts.first { $0["id"]?.int64Value == slot }?["params"]?.arrayValue?.isEmpty == true)
+        // "T-063 first-edit undo": the param is unset again, and the plugin is back at its own value
+        // from before the gesture (Gain 1.0), audibly.
+        let reverted = try await d.ok(.renderOffline, ["from": 0, "to": 96, "path": "c.wav", "tail": false])
+        #expect(reverted["rtViolations"] == 0)
+        let back = try #require(try AudioData(contentsOf: dir.file("c.wav")).channels.first)
+        #expect(abs(back[0] - 0.5) < 1e-5, "click × gain 1.0 × centre pans 0.5, got \(back[0])")
+        let revertedInfo = try await d.ok(.enginePluginInfo, ["slot": .int(slot)])
+        #expect(abs((revertedInfo["params"]?[0]?["value"]?.doubleValue ?? -1) - 1.0) < 1e-6)
+        // Redo sets it again.
+        #expect(try await d.ok(.redo)["label"] == "Set Parameter")
+        _ = try await d.ok(.renderOffline, ["from": 0, "to": 96, "path": "d.wav", "tail": false])
+        let again = try #require(try AudioData(contentsOf: dir.file("d.wav")).channels.first)
+        #expect(abs(again[0] - 0.125) < 1e-5, "got \(again[0])")
+        #expect(try await d.ok(.undo)["label"] == "Set Parameter")
         // The entry before it is the insert itself: one gesture, one entry.
         #expect(try await d.ok(.undo)["label"] == "Insert Device")
     }

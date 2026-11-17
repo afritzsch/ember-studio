@@ -154,3 +154,47 @@ struct PluginEditRecorderTests {
         #expect(!store2.isGestureActive)
     }
 }
+
+// docs/autobuild/DECISIONS.md "T-063 first-edit undo" (option c): undoing the first plugin-side edit of
+// a param the document didn't set writes the plugin's pre-gesture value to its slot.
+extension PluginEditRecorderTests {
+    @Test("DW-204 (T-063 first-edit undo): undo of a first plugin edit writes the plugin's pre-gesture value; redo and later sets still work; one entry, document unset")
+    func firstEditUndoRestoresBaseline() throws {
+        let (store, engine, vst3, _) = try makeStore()
+        let before = undoDepth(store)
+        // The editor's knob was at 0.8 (begin carries it) and moves to 0.3.
+        post(engine, vst3, 0, .begin, 0.8)
+        post(engine, vst3, 0, .value, 0.5)
+        post(engine, vst3, 0, .value, 0.3)
+        post(engine, vst3, 0, .end)
+        _ = store.engineSync?.pollEvents()
+        #expect(undoDepth(store) == before + 1)
+        let sync = try #require(store.engineSync)
+        let id = try #require(sync.runtime.paramID(vst3, 0))
+        func slotValue() -> Float {
+            #expect(sync.runtime.paramID(vst3, 0) == id, "the param keeps its slot")
+            return engine.getParam(sync.runtime.paramID(vst3, 0) ?? id)
+        }
+        #expect(slotValue() == 0.3)
+
+        store.undo()
+        #expect(param(store, vst3, 0) == nil, "the document is unset again")
+        #expect(slotValue() == 0.8, "the plugin goes back to its own value")
+        store.redo()
+        #expect(slotValue() == 0.3)
+
+        // A later set (another control, automation) still works, and undoing it goes back to 0.3.
+        try store.perform(SetParam(target: .device(slot: vst3, index: 0), value: 0.6))
+        #expect(slotValue() == 0.6)
+        store.undo()
+        #expect(slotValue() == 0.3)
+        // A second gesture on a param the document sets keeps the first baseline.
+        post(engine, vst3, 0, .begin, 0.3)
+        post(engine, vst3, 0, .value, 0.1)
+        post(engine, vst3, 0, .end)
+        _ = store.engineSync?.pollEvents()
+        store.undo()
+        store.undo()
+        #expect(param(store, vst3, 0) == nil && slotValue() == 0.8)
+    }
+}

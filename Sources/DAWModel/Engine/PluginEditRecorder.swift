@@ -13,6 +13,9 @@ import os
 ///   as one entry per poll (`finishBatch`), or inside the open gesture if there is one.
 /// - A value the document already holds is skipped: the engine's echo of the model's own value
 ///   never makes a second entry, and an edit that changes nothing makes none.
+/// - Undo of a first edit (docs/autobuild/DECISIONS.md "T-063 first-edit undo"): a `begin` on a param
+///   the document doesn't set hands its value (the plugin's before the gesture) to
+///   `EngineSync.rememberPluginBaseline`, so an undo back to "unset" reverts the plugin too.
 /// - Edits of a slot that isn't a hosted plugin in the project are dropped. Gestures of a slot that
 ///   left the project, or whose editor closed (`endGestures(slot:)`), end; an undo/redo ends the
 ///   store's gesture, and a later value of the same plugin gesture opens a new one.
@@ -44,6 +47,11 @@ public final class PluginEditRecorder {
         let key = Key(slot: slot, index: edit.index)
         switch edit.phase {
         case .begin:
+            // "T-063 first-edit undo": the plugin's value before its first edit of a param the
+            // document doesn't set, which an undo back to "unset" restores (EngineSync).
+            if edit.value.isFinite, Self.stored(store.project, key) == nil {
+                store.engineSync?.rememberPluginBaseline(key, edit.value)
+            }
             openGestures.insert(key)
             ensureGesture(store)
         case .value:
@@ -121,10 +129,13 @@ public final class PluginEditRecorder {
 
     /// The document already has `value` for the param (the engine's echo, or no change).
     static func holds(_ project: Project, _ key: Key, _ value: Float) -> Bool {
-        guard let slot = project.allDeviceSlots.first(where: { $0.id == key.slot }),
-              let stored = slot.params.first(where: { $0.index == key.index })?.value
-        else { return false }
+        guard let stored = stored(project, key) else { return false }
         return abs(stored - value) <= 1e-6 * max(1, abs(value))
+    }
+
+    /// The param's value in the document, nil when it isn't set.
+    static func stored(_ project: Project, _ key: Key) -> Float? {
+        project.allDeviceSlots.first { $0.id == key.slot }?.params.first { $0.index == key.index }?.value
     }
 
     static func isPlugin(_ slot: NodeIDValue, in project: Project) -> Bool {
