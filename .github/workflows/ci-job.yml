@@ -28,16 +28,19 @@ jobs:
           # Vendor/vst3sdk; scripts/bootstrap.sh then fetches only its hosting submodules.
           submodules: true
 
-      - name: Select the newest stable Xcode
+      - name: Select Xcode 27+ (newest stable, else newest beta/RC)
         run: |
-          xcode=$(ls -d /Applications/Xcode_*.app | grep -viE 'beta|_rc|release_candidate' | sort -V | tail -n 1)
+          # DW-261: the code needs Xcode 27 / Swift 6.4 (exit tests, macOS 27 SDK); macos-15 tops out
+          # at Xcode 26.3 and macos-26 (2026-11) at 26.6 stable. Prefer a stable 27+, else a beta/RC 27+.
+          ls -d /Applications/Xcode*.app
+          all=$(ls -d /Applications/Xcode_*.app | sort -V)
+          xcode=$(echo "$all" | grep -viE 'beta|_rc|release_candidate' | grep -E 'Xcode_(2[7-9]|[3-9][0-9])' | tail -n 1)
+          [ -n "$xcode" ] || xcode=$(echo "$all" | grep -E 'Xcode_(2[7-9]|[3-9][0-9])' | tail -n 1)
+          if [ -z "$xcode" ]; then echo "::error::No Xcode 27+ on this runner image; Ember Studio needs Xcode 27 / Swift 6.4 (DW-261)"; exit 1; fi
           echo "DEVELOPER_DIR=$xcode/Contents/Developer" >> "$GITHUB_ENV"
           export DEVELOPER_DIR="$xcode/Contents/Developer"
           xcodebuild -version
           swift --version
-          # DW-261: the code needs Xcode 27 / Swift 6.4 (exit tests, macOS 27 SDK). Fail clearly, not deep in the build.
-          major=$(xcodebuild -version | sed -n 's/^Xcode \([0-9]*\).*/\1/p')
-          if [ "${major:-0}" -lt 27 ]; then echo "::error::Newest Xcode on this runner is $major; Ember Studio needs Xcode 27+ (DW-261)"; exit 1; fi
 
       # Fetched dependencies only (the MCP Swift SDK). Compiled outputs are never cached: the test
       # job must build clean (DW-005), and the weekly jobs gain little from a week-old cache.
