@@ -126,21 +126,30 @@ private struct DeviceCardView: View {
     }
 
     private var header: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 4) {
+                Text(card.isInstrument ? "♪ \(card.name)" : card.name)
+                    .font(.system(size: 12, weight: .semibold))
+                    .lineLimit(1)
+                    .help(card.name)
+                    .draggable(String(card.id))
+                Spacer(minLength: 0)
+                Text(card.format == "builtin" ? "" : card.format.uppercased())
+                    .font(.system(size: 8))
+                    .foregroundStyle(.tertiary)
+            }
+            buttons
+        }
+    }
+
+    private var buttons: some View {
         HStack(spacing: 3) {
-            Text(card.isInstrument ? "♪ \(card.name)" : card.name)
-                .font(.system(size: 12, weight: .semibold))
-                .lineLimit(1)
-                .help(card.name)
-                .draggable(String(card.id))
-            Text(card.format == "builtin" ? "" : card.format.uppercased())
-                .font(.system(size: 8))
-                .foregroundStyle(.tertiary)
-            Spacer(minLength: 0)
             if let bypass = card.control("bypass") { ControlToggle(control: bypass, face: "⏻") }
             if let editor = card.control("editor") { ControlToggle(control: editor, face: "Edit") }
             if let generic = card.control("generic") { ControlToggle(control: generic, face: "⚙") }
             if let up = card.control("moveUp") { ControlButton(control: up, systemImage: "chevron.left").labelStyle(.iconOnly) }
             if let down = card.control("moveDown") { ControlButton(control: down, systemImage: "chevron.right").labelStyle(.iconOnly) }
+            Spacer(minLength: 0)
             if let remove = card.control("remove") { ControlButton(control: remove, systemImage: "xmark").labelStyle(.iconOnly) }
         }
         .controlSize(.mini)
@@ -202,7 +211,7 @@ private struct DeviceParamRow: View {
             switch param.style {
             case "toggle":
                 if let toggle = card.control(prefix) {
-                    ControlToggle(control: toggle, face: param.display, checkbox: true).controlSize(.mini)
+                    ControlToggle(control: toggle, face: "", checkbox: true).controlSize(.mini)
                 }
             case "menu":
                 Menu(param.display) {
