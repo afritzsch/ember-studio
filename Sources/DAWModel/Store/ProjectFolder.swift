@@ -27,6 +27,12 @@ struct ProjectFolder: Sendable {
 
     // MARK: Open
 
+    /// MODEL-045 (T-083): an autosave exists and is newer than `project.json` (or there is none).
+    var autosaveIsNewer: Bool {
+        guard let autosaveDate = Self.modificationDate(autosaveFile) else { return false }
+        return Self.modificationDate(projectFile).map { autosaveDate > $0 } ?? true
+    }
+
     /// Reads the project (MODEL-045: the autosave instead when `recover` is set and it is newer),
     /// migrates (MODEL-042), checks it (DW-111), reads plugin states back into the slots and
     /// reports assets whose file is missing (MODEL-046).

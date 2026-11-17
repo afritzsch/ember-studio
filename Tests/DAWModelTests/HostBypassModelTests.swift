@@ -125,7 +125,9 @@ struct SafeModeTests {
         #expect(bypassValue(sync, engine, au) == 1 && bypassValue(sync, engine, vst3) == 1)
         #expect(bypassValue(sync, engine, eq) == 1 && bypassValue(sync, engine, sampler) == 1)  // their own bypass
         #expect(store.project == p && !store.isDirty && !store.canUndo)
-        #expect(engine.appliedGraphs.count == applied)  // slot writes only
+        // T-083 (DW-224): safe mode also rebuilds the plugin slots without their plugins (one
+        // re-apply); the bypass itself stays a slot write.
+        #expect(engine.appliedGraphs.count == applied + 1)
         // Built-ins follow the document in safe mode; plugins stay bypassed whatever it says.
         try store.perform(SetDeviceBypass(slotID: eq, bypass: false))
         try store.perform(SetDeviceBypass(slotID: au, bypass: false))

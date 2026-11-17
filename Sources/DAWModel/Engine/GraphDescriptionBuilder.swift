@@ -32,9 +32,15 @@ import Foundation
 /// param slot (`bypassParam`, keyed `GraphNodeID.bypass(of: slot)` in the runtime IDs) that the
 /// engine reads to pass the input through, latency-matched. So bypass is a param value: toggling
 /// it never changes the graph (MODEL-021), and a bypassed instrument keeps its clip player.
+///
+/// DW-224 (T-083, docs/autobuild/DECISIONS.md "T-083 safe mode slots"): with `pluginsDisabled`
+/// (safe mode, PLUG-021) every AU/VST3 slot's `configJSON` carries `"disabled": true`, so the engine
+/// builds the slot as absent without instantiating its plugin. The slot, its params and its stored
+/// state are emitted as always; only the config string differs, so turning safe mode on or off
+/// re-creates those nodes (their `configVersion` is bumped like any config change, DW-140).
 public enum GraphDescriptionBuilder {
-    public static func build(_ project: Project, runtime: RuntimeIDs) -> EngineGraph {
-        var b = Emitter(runtime: runtime)
+    public static func build(_ project: Project, runtime: RuntimeIDs, pluginsDisabled: Bool = false) -> EngineGraph {
+        var b = Emitter(runtime: runtime, pluginsDisabled: pluginsDisabled)
         b.graph.tempoEvents = project.tempoMap.tempoEvents
         b.graph.timeSignatures = project.tempoMap.timeSignatures
 
@@ -305,12 +311,15 @@ public enum GraphDescriptionBuilder {
 /// Appends nodes and edges with their params and versions from the runtime IDs.
 private struct Emitter {
     let runtime: RuntimeIDs
+    /// DW-224 (T-083): safe mode, plugin slots are built without their plugin.
+    let pluginsDisabled: Bool
     var graph = EngineGraph()
     /// Device slots that made it into the graph (sidechain targets).
     var emitted = Set<NodeIDValue>()
 
-    init(runtime: RuntimeIDs) {
+    init(runtime: RuntimeIDs, pluginsDisabled: Bool = false) {
         self.runtime = runtime
+        self.pluginsDisabled = pluginsDisabled
     }
 
     mutating func node(_ id: NodeIDValue, _ kind: NodeKind, config: String = "", bypassParam: ParamID? = nil) {
@@ -323,7 +332,7 @@ private struct Emitter {
 
     /// A device slot's node, with its bypass slot (PLUG-018), bypassed or not.
     mutating func device(_ slot: DeviceSlot) {
-        node(slot.id, slot.nodeKind, config: slot.configJSON,
+        node(slot.id, slot.nodeKind, config: slot.configJSON(disabled: pluginsDisabled),
              bypassParam: runtime.paramID(GraphNodeID.bypass(of: slot.id), 0))
     }
 
@@ -365,7 +374,11 @@ extension DeviceSlot {
     /// DW-140: the node's `configJSON`. A sampler with zones gets `{"zones": [...]}` in the
     /// format of 06 "Sampler semantics", keys sorted so equal zones give equal strings (MODEL-021
     /// compares graphs); an AU or VST3 plugin gets its identifier and state (T-061, T-062); every other slot gets "".
-    var configJSON: String {
+    var configJSON: String { configJSON(disabled: false) }
+
+    /// DW-224 (T-083): `disabled` adds `"disabled": true` to an AU/VST3 slot's config (safe mode:
+    /// the engine builds the slot as absent and never instantiates the plugin). Other slots ignore it.
+    func configJSON(disabled: Bool) -> String {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
         // PLUG-010/016 (T-061): an AU slot's identifier and its stored state (base64 of the binary
@@ -380,10 +393,12 @@ extension DeviceSlot {
         }
         if let pluginIdentifier {
             struct PluginConfig: Encodable {
+                var disabled: Bool?
                 var identifier: String
                 var state: String?
             }
-            let config = PluginConfig(identifier: pluginIdentifier, state: pluginState?.base64EncodedString())
+            let config = PluginConfig(disabled: disabled ? true : nil, identifier: pluginIdentifier,
+                                      state: pluginState?.base64EncodedString())
             guard let data = try? encoder.encode(config) else { return "" }
             return String(decoding: data, as: UTF8.self)
         }

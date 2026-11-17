@@ -73,12 +73,17 @@ public final class EngineSync {
     /// PLUG-021 (T-064, docs/autobuild/DECISIONS.md "T-064 crash marker"): safe mode, a
     /// session-only override that host-bypasses every AU and VST3 slot (PLUG-018) whatever the
     /// document says. The slots, their params and their state stay as they are and nothing is
-    /// written to the project; clearing it gives each slot its own bypass again. Slot writes only,
-    /// never a rebuild.
+    /// written to the project; clearing it gives each slot its own bypass again.
+    ///
+    /// DW-224 (T-083, DECISIONS "T-083 safe mode slots"): it also builds those slots as absent
+    /// (`GraphDescriptionBuilder.build(pluginsDisabled:)`), so their plugins are never instantiated
+    /// while it is set. Changing it re-applies the graph (the plugin nodes are re-created).
     public var arePluginsBypassed = false {
         didSet {
             guard arePluginsBypassed != oldValue, !isInvalidated else { return }
             writeParams()
+            candidate = nil
+            scheduleApply()
         }
     }
 
@@ -176,7 +181,7 @@ public final class EngineSync {
         pushArms()
         pushMidiArms()
         pushMonitorInput()
-        let graph = GraphDescriptionBuilder.build(project, runtime: runtime)
+        let graph = GraphDescriptionBuilder.build(project, runtime: runtime, pluginsDisabled: arePluginsBypassed)
         candidate = graph
         if graph != appliedGraph || hasUnusedParams() { scheduleApply() }
     }
@@ -206,7 +211,7 @@ public final class EngineSync {
         pendingApply?.cancel()
         pendingApply = nil
         guard !isInvalidated else { return }
-        var graph = candidate ?? GraphDescriptionBuilder.build(project, runtime: runtime)
+        var graph = candidate ?? GraphDescriptionBuilder.build(project, runtime: runtime, pluginsDisabled: arePluginsBypassed)
         bumpChangedPlayers(&graph)
         if graph != appliedGraph {
             engine.applyGraph(graph)

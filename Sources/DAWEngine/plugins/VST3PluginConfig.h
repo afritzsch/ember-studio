@@ -5,8 +5,10 @@
 // `identifier` (required) is the bundle path and the audio-processor class ID (10 Interfaces),
 // the scanner's format: 32 hex digits, canonically uppercase. `state` (optional) is the blob
 // getPluginState returns (VST3Instance.h: the component and controller state in one container),
-// base64; left out or "" for none. Unknown keys are ignored; anything else malformed is
-// invalidArgument. DAWModel writes it from a `.vst3` DeviceSlot with sorted keys.
+// base64; left out or "" for none. `disabled` (optional bool, T-083, DW-224) builds the slot as
+// absent without loading the plugin, as for an AU (AUPluginConfig.h). Unknown keys are ignored;
+// anything else malformed is invalidArgument. DAWModel writes it from a `.vst3` DeviceSlot with
+// sorted keys.
 
 #include <cstdint>
 #include <string>
@@ -33,10 +35,12 @@ struct VST3PluginConfig {
     std::string identifier;       // canonical (VST3PluginID::identifier)
     VST3PluginID plugin;
     std::vector<uint8_t> state;   // empty: none
+    bool disabled = false;        // T-083 (DW-224): safe mode, the slot is built absent
 
     // Non-RT.
     static Result<VST3PluginConfig> parse(std::string_view configJSON);
-    static std::string makeJSON(std::string_view identifier, const std::vector<uint8_t>& state = {});
+    static std::string makeJSON(std::string_view identifier, const std::vector<uint8_t>& state = {},
+                                bool disabled = false);
 };
 
 } // namespace daw

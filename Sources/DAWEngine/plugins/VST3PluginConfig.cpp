@@ -41,11 +41,12 @@ Result<VST3PluginConfig> VST3PluginConfig::parse(std::string_view configJSON) {
     config.plugin = std::move(plugin).value();
     config.identifier = config.plugin.identifier();
     config.state = std::move(fields->state);
+    config.disabled = fields->disabled;
     return config;
 }
 
-std::string VST3PluginConfig::makeJSON(std::string_view identifier, const std::vector<uint8_t>& state) {
-    return AUPluginConfig::makeJSON(identifier, state);  // the same JSON shape
+std::string VST3PluginConfig::makeJSON(std::string_view identifier, const std::vector<uint8_t>& state, bool disabled) {
+    return AUPluginConfig::makeJSON(identifier, state, disabled);  // the same JSON shape
 }
 
 } // namespace daw

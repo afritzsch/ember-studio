@@ -63,6 +63,12 @@ CheckResult auFailureAndAdoption();
 // AU is a slot write that passes the input through unchanged, same AU instance. 0 RT violations.
 CheckResult auNanGuardAndBypass();
 
+// T-083 (DW-224, PLUG-021 safe mode): an auPlugin config with "disabled" builds the slot as absent
+// without instantiating the AU (no fake AU made, no failure for a state it would refuse): an effect
+// passes its input, an instrument is silent, getPluginState returns the configured state; without
+// the flag the AU is made. 0 RT violations.
+CheckResult auSafeModeSlots();
+
 // DW-214 probes. How long a render-thread parameter event takes to show in AUDelay's parameter
 // tree (the V2 bridge updates the tree from its own event-listener queue): returns the worst
 // observed lag in microseconds over `trials`, or a negative value if a value never arrived.
