@@ -51,6 +51,7 @@
 #include <cstdint>
 #include <memory>
 
+#include "automation/AutomationSuspension.h"
 #include "core/NodePool.h"
 #include "core/LiveMidiInput.h"
 #include "core/ParamSlotTable.h"
@@ -89,6 +90,9 @@ public:
     // slot is handed out again at once.
     ParamSlotTable& params() { return params_; }
     NodePool& nodes() { return nodes_; }  // non-RT
+    // AUTO-006 (T-075): lanes suspended while the user records a gesture on their target; the
+    // automation step skips them (AutomationSuspension.h). Setters non-RT, any thread.
+    AutomationSuspension& automationSuspension() { return automationSuspension_; }
 
     // TIME-004/009: commands and the playhead from any non-RT thread; render() advances it.
     Transport& transport() { return transport_; }
@@ -127,6 +131,7 @@ private:
     Reclaimer reclaimer_{renderEpoch_};
     NodePool nodes_{reclaimer_};
     ParamSlotTable params_;
+    AutomationSuspension automationSuspension_;  // AUTO-006 (T-075)
     // TIME-004..009: advanced at the start of every block that renders a graph.
     Transport transport_;
     // ENG-010/011. seq_cst on both sides, see Reclaimer.h.

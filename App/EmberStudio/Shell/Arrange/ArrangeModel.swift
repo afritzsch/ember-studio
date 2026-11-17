@@ -67,8 +67,14 @@ final class ArrangeModel {
     var tracks: [Track] { project.tracks }
 
     var geometry: TimelineGeometry {
-        TimelineGeometry(pixelsPerBeat: window?.pixelsPerBeat ?? 32, scrollX: window?.scrollX ?? 0,
-                         scrollY: window?.scrollY ?? 0, trackHeight: ProjectWindowModel.trackHeight, size: viewSize)
+        var g = TimelineGeometry(pixelsPerBeat: window?.pixelsPerBeat ?? 32, scrollX: window?.scrollX ?? 0,
+                                 scrollY: window?.scrollY ?? 0, trackHeight: ProjectWindowModel.trackHeight, size: viewSize)
+        // UI-015 (T-075): expanded automation lanes are rows under their track.
+        if let layout = window?.automation.layout, !layout.trackRows.isEmpty {
+            g.trackRows = layout.trackRows
+            g.rowTotal = layout.rowTotal
+        }
+        return g
     }
 
     var grid: SnapGrid { SnapGrid(tempoMap: project.tempoMap) }
@@ -91,15 +97,15 @@ final class ArrangeModel {
     var visibleClips: [ClipIntervalIndex.Entry] {
         let g = geometry
         let range = g.visibleTicks
-        return index.clips(rows: g.visibleRows(of: tracks.count), from: range.from.raw, to: range.to.raw)
+        return index.clips(rows: g.visibleTracks(of: tracks.count), from: range.from.raw, to: range.to.raw)
     }
 
     /// The clips that overlap a rectangle in view coordinates.
     func clips(in rect: CGRect) -> [ClipIntervalIndex.Entry] {
         let g = geometry
         let r = rect.standardized
-        let top = g.rowUnclamped(atY: max(r.minY, TimelineGeometry.rulerHeight))
-        let bottom = g.rowUnclamped(atY: r.maxY) + 1
+        let top = g.trackUnclamped(atY: max(r.minY, TimelineGeometry.rulerHeight))
+        let bottom = g.trackUnclamped(atY: r.maxY) + 1
         return index.clips(rows: top..<bottom, from: g.tick(atX: r.minX).raw, to: g.tick(atX: r.maxX).raw + 1)
             .filter { g.rect(start: $0.clip.start, length: $0.clip.length, row: $0.row).intersects(r) }
     }
@@ -111,7 +117,7 @@ final class ArrangeModel {
     /// The clip and zone under `point`; the topmost (latest drawn) clip wins where clips overlap.
     func hitTest(_ point: CGPoint) -> ClipHit? {
         let g = geometry
-        guard let row = g.row(atY: point.y), row >= 0, row < tracks.count else { return nil }
+        guard let row = g.track(atY: point.y), row >= 0, row < tracks.count else { return nil }
         let tick = g.tick(atX: point.x).raw
         let candidates = index.clips(rows: row..<(row + 1), from: tick - 1, to: tick + 2)
         guard let entry = candidates.last(where: { g.rect(start: $0.clip.start, length: $0.clip.length, row: row).contains(point) })
@@ -156,6 +162,11 @@ final class ArrangeModel {
     /// A press at `point`: selects (shift toggles), and arms a drag of the clip zone under it or a marquee.
     func mouseDown(at point: CGPoint, modifiers: CanvasModifiers = []) {
         finishDrag()
+        // UI-015 (T-075): a press on an automation lane row edits the lane.
+        if let lanes = window?.automation,
+           lanes.mouseDown(at: point, modifiers: modifiers, geometry: geometry, snap: { [grid, snap] in grid.snap($0, snap) }) {
+            return
+        }
         if let hit = hitTest(point) {
             if modifiers.contains(.shift) {
                 if selection.contains(hit.clipID) {
@@ -177,6 +188,7 @@ final class ArrangeModel {
     /// UI-020: a double-click on a MIDI clip opens it in the piano roll. True if it did.
     @discardableResult
     func doubleClick(at point: CGPoint) -> Bool {
+        if window?.automation.doubleClick(at: point, geometry: geometry) == true { return true }  // UI-015
         guard let hit = hitTest(point), case .midi = project.clip(hit.clipID) else { return false }
         finishDrag()
         selection = [hit.clipID]
@@ -185,6 +197,10 @@ final class ArrangeModel {
     }
 
     func mouseDragged(to point: CGPoint, modifiers: CanvasModifiers = []) {
+        if let lanes = window?.automation, lanes.isDragging {  // UI-015
+            lanes.mouseDragged(to: point, modifiers: modifiers, geometry: geometry, snap: { [grid, snap] in grid.snap($0, snap) })
+            return
+        }
         guard var drag else { return }
         if !drag.started {
             guard hypot(point.x - drag.down.x, point.y - drag.down.y) >= Self.dragThreshold else { return }
@@ -223,6 +239,7 @@ final class ArrangeModel {
 
     /// Ends the drag in progress: its gesture becomes one undo entry (none if it changed nothing).
     func finishDrag() {
+        window?.automation.finishDrag()  // UI-015
         if let drag, drag.started, case .clip = drag.kind { store?.endGesture() }
         drag = nil
         marquee = nil
@@ -286,7 +303,7 @@ final class ArrangeModel {
     /// 0 if any clip would land on a track of the other kind (audio ↔ MIDI).
     private func rowDelta(_ drag: DragState, to point: CGPoint) -> Int {
         let g = geometry
-        var delta = g.rowUnclamped(atY: point.y) - g.rowUnclamped(atY: drag.down.y)
+        var delta = g.trackUnclamped(atY: point.y) - g.trackUnclamped(atY: drag.down.y)
         let rows = drag.originals.values.map(\.row)
         guard let lo = rows.min(), let hi = rows.max() else { return 0 }
         delta = min(max(delta, -lo), tracks.count - 1 - hi)
@@ -463,7 +480,7 @@ final class ArrangeModel {
     func scroll(dx: Double, dy: Double) {
         guard let window else { return }
         window.scrollX = max(window.scrollX + dx, 0)
-        let content = Double(tracks.count) * ProjectWindowModel.trackHeight
+        let content = Double(geometry.rowCount(tracks: tracks.count)) * ProjectWindowModel.trackHeight
         let visible = max(viewSize.height - TimelineGeometry.rulerHeight, 0)
         window.scrollY = min(max(window.scrollY + dy, 0), max(content - visible, 0))
     }

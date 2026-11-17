@@ -3,7 +3,9 @@ import os
 
 /// REC-004 (T-052): turns a finished take (`recordingFinalized`, `RecordedTake`) into one undoable
 /// edit: `ImportAsset` of the take's file plus `AddClip` on its track, as a single
-/// `CompositeCommand` ("Record"). Undo removes both; the file stays on disk.
+/// `CompositeCommand` ("Record"). Undo removes both; the file stays on disk. REC-030 (T-080): a
+/// loop recording of two passes or more gets `CreateTakeFolder` in place of `AddClip`, in the same
+/// composite (one undo step), one take per pass, all of them views into the one file.
 ///
 /// Placement (REC-003). The engine reports `startSample`, the timeline sample of the file's first
 /// frame, latency already compensated. Clips start on ticks, so the clip starts at the first tick
@@ -16,6 +18,10 @@ public enum RecordingImport {
     /// that would play (no file, no frames, or everything before 0).
     public static func command(for take: RecordedTake, asset: AssetRef, in project: Project) -> CompositeCommand? {
         guard !take.file.isEmpty, take.frames > 0, take.sampleRate > 0 else { return nil }
+        // REC-030 (T-080): a loop recording of two passes or more becomes a take folder.
+        if let folder = takeFolderCommand(for: take, asset: asset, in: project) {
+            return CompositeCommand("Record", [ImportAsset(asset: asset), folder])
+        }
         let rate = project.sessionSampleRate
         // The session rate can have changed since the take was recorded (the asset is converted
         // to it in RAM, D-27); its timeline position scales with it.
@@ -73,6 +79,85 @@ public enum RecordingImport {
             AddNotes(clipID: project.ids.next, notes: specs),  // AddClip claims this ID
         ])
     }
+
+    /// REC-030 (T-080): the take folder of an audio loop recording, or nil when it has fewer than
+    /// two passes that land on the timeline. Pass i is the file's frames `[passStarts[i],
+    /// passStarts[i + 1])` (the last one to the end of the file, possibly partial); the first plays
+    /// from `startSample`, every other one from the loop start. Each becomes a take: a clip view
+    /// into the file placed like a plain take (the first tick at or after its sample, the offset
+    /// skipping the frames before it), ending at the first tick at or after its last frame.
+    public static func takeFolderCommand(for take: RecordedTake, asset: AssetRef, in project: Project) -> CreateTakeFolder? {
+        guard take.passStarts.count >= 2, take.frames > 0, take.sampleRate > 0 else { return nil }
+        let rate = project.sessionSampleRate
+        let map = project.tempoMap
+        func scaled(_ sample: SamplePos) -> SamplePos {
+            take.sampleRate == rate ? sample : SamplePos((Double(sample) * rate / take.sampleRate).rounded())
+        }
+        func tickAtOrAfter(_ sample: SamplePos) -> Tick {
+            sample <= 0 ? Tick(0) : Tick(map.sampleToTick(sample - 1).raw + 1)
+        }
+        let frames = scaled(take.frames)
+        var specs: [CreateTakeFolder.TakeSpec] = []
+        for (i, passStart) in take.passStarts.enumerated() {
+            let from = scaled(passStart)
+            let until = i + 1 < take.passStarts.count ? scaled(take.passStarts[i + 1]) : frames
+            let at = i == 0 ? scaled(take.startSample) : scaled(take.loopStartSample)  // timeline sample of `from`
+            let start = tickAtOrAfter(at)
+            let offset = from + map.tickToSample(start) - at
+            guard until > from, offset >= from, offset < until else { continue }  // all before 0 (or empty)
+            let end = tickAtOrAfter(at + (until - from))
+            specs.append(CreateTakeFolder.TakeSpec(start: start, length: Tick(max(end.raw - start.raw, 1)),
+                                                   assetID: asset.id, sourceOffsetSamples: offset))
+        }
+        guard specs.count >= 2 else { return nil }
+        return CreateTakeFolder(trackID: take.track, takes: specs)
+    }
+
+    /// REC-034 (T-080): with the `midiLoopTakes` record option, a MIDI loop recording of two passes
+    /// or more becomes a take folder, one take per pass (a pass without notes is an empty take).
+    /// Pass 0 runs from the record start, every other one from the loop start; all but the last end
+    /// at the loop end, the last at the stop. Each take is placed like a merged MIDI take
+    /// (`midiCommand`): notes and the take's ends at their nearest ticks, the take at least one
+    /// tick long and long enough for its notes. nil without the option or with one pass; then
+    /// `midiCommand` merges (the default).
+    public static func midiTakeFolderCommand(for take: RecordedTake, in project: Project) -> CompositeCommand? {
+        guard take.midiLoopTakes, take.passes >= 2, let recorded = take.notes, take.sampleRate > 0 else { return nil }
+        let rate = project.sessionSampleRate
+        let map = project.tempoMap
+        func scaled(_ sample: SamplePos) -> SamplePos {
+            take.sampleRate == rate ? sample : SamplePos((Double(sample) * rate / take.sampleRate).rounded())
+        }
+        func nearestTick(_ sample: SamplePos) -> Int64 {
+            guard sample > 0 else { return 0 }
+            let before = map.sampleToTick(sample)
+            let after = Tick(before.raw + 1)
+            return abs(map.tickToSample(after) - sample) < abs(map.tickToSample(before) - sample) ? after.raw : before.raw
+        }
+        let last = take.passes - 1
+        var specs: [CreateTakeFolder.TakeSpec] = []
+        for pass in 0...last {
+            let from = pass == 0 ? scaled(take.startSample) : scaled(take.loopStartSample)
+            let until = pass == last ? scaled(take.endSample ?? take.startSample) : scaled(take.loopEndSample)
+            var notes: [(start: Int64, length: Int64, note: RecordedMidiNote)] = []
+            for note in recorded where note.pass == pass {
+                let end = scaled(note.end)
+                guard end > 0 else { continue }
+                let start = nearestTick(max(scaled(note.start), 0))
+                notes.append((start, max(nearestTick(end) - start, 1), note))
+            }
+            guard until > 0 || !notes.isEmpty else { continue }  // a pass wholly before the timeline
+            let clipStart = min(nearestTick(max(from, 0)), notes.map(\.start).min() ?? .max)
+            let clipEnd = max(nearestTick(until), notes.map { $0.start + $0.length }.max() ?? 0)
+            specs.append(CreateTakeFolder.TakeSpec(
+                start: Tick(clipStart), length: Tick(max(clipEnd - clipStart, 1)),
+                notes: notes.map {
+                    AddNotes.NoteSpec(start: Tick($0.start - clipStart), length: Tick($0.length), pitch: $0.note.pitch,
+                                      velocity: $0.note.velocity, channel: $0.note.channel)
+                }))
+        }
+        guard specs.count >= 2 else { return nil }
+        return CompositeCommand("Record", [CreateTakeFolder(trackID: take.track, takes: specs)])
+    }
 }
 
 extension ProjectStore {
@@ -104,11 +189,17 @@ extension ProjectStore {
 
     /// REC-012 (T-053): turns a MIDI take into a clip with its notes (one undo entry). Returns the
     /// clip's ID, or nil when no note lands on the timeline. Throws if the track is gone or isn't a
-    /// MIDI track.
+    /// MIDI track. REC-034 (T-080): a loop take recorded with `midiLoopTakes` becomes a take folder
+    /// instead (`RecordingImport.midiTakeFolderCommand`); the folder's ID is returned.
     @discardableResult
     public func importMidiRecording(_ take: RecordedTake) throws(DAWError) -> ModelID? {
         guard let track = project.track(take.track) else { throw .notFound(kind: "track", id: take.track) }
         guard track.kind == .midi else { throw .invalidArgument("track \(take.track) isn't a MIDI track") }
+        if let folder = RecordingImport.midiTakeFolderCommand(for: take, in: project) {
+            let folderID = project.ids.next  // CreateTakeFolder allocates it first
+            try perform(folder)
+            return folderID
+        }
         guard let command = RecordingImport.midiCommand(for: take, in: project) else { return nil }
         let clipID = project.ids.next
         try perform(command)

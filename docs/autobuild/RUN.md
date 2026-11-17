@@ -126,6 +126,12 @@ Unattended phases started by `/autobuild` (see `.claude/skills/autobuild/SKILL.m
 - New run (week reset). Wave: T-075 automation recording + lane UI (U+M, completes M7), T-063 plugin editors (P+U, M6), T-080 loop takes/comping (E+M, M8), T-084 CI/sanitizers/perf (E). T-083 waits for phase 10. Pre-decisions in DECISIONS.md (phase 9 rows).
 - Start: week 0%, five-hour window 1%.
 - Repo check: `gh` reports `afritzsch/ember-studio` as PUBLIC (the handover said private).
+- Worker start: T-063 and T-080 were started in the same tool batch as T-084 and their `.patchbay.json` setup failed ("could not lock config file .git/config", submodule URL registration). Re-ran the setup in each shell one at a time, then launched claude with Patchbay's flags; both ran normally afterwards. Start workers one by one.
+- 5-hour window hit 92% at 1794868460 (epoch), ~35 min into the phase (week 12%). All four workers paused until the reset at 1794883800 + 120 s.
+- Resumed all four at 1794883965 (five-hour window 0%, week 13%).
+- T-075 merged (57bb306): trial merge test.sh 12/12 and swift test green while three workers ran. Worker closed. M7 complete.
+- T-080 merged (c21c6ea): add-only conflicts with T-075 (CommandRegistry + tests, EngineProtocol, specs 07/08) kept both sides; test.sh 12/12, swift test green. Worker closed. T-081 is ready.
+- T-063 asked about undoing a first plugin-side edit; decided (c) (DECISIONS "T-063 first-edit undo").
 
 ## Summary for the user
 

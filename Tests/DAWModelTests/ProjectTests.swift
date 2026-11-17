@@ -36,7 +36,10 @@ struct ProjectTests {
                 id: project.ids.allocate(), name: "Gtr", kind: .audio,
                 clips: [.audio(AudioClip(id: project.ids.allocate(), assetID: asset, start: 960, length: 1920,
                                          sourceOffsetSamples: 100, gain: 0.5, fadeIn: 10, fadeOut: 20))],
-                takeFolders: [TakeFolder(id: project.ids.allocate())], inserts: [comp, au],
+                takeFolders: [TakeFolder(id: project.ids.allocate(), takes: [  // T-080: a folder with a take
+                    Take(id: project.ids.allocate(),
+                         clip: .audio(AudioClip(id: project.ids.allocate(), assetID: asset, start: 0, length: 960)))])],
+                inserts: [comp, au],
                 sends: [Send(id: project.ids.allocate(), target: bus.id, level: 0.7, tap: .preFader)],
                 output: .bus(bus.id), armed: true, monitoring: .on,
                 automation: [AutomationLane(

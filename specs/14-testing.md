@@ -42,7 +42,7 @@
 | `midi_locate_no_stuck_notes` | M4 | DSP-003, DW-103 (chase at a render start), DW-063 (no held note survives a render start). Live locate note-off and release: `MidiClipPlayerTests` "locateAndStop", "noStuckNotesFuzz" |
 | `midi_loop_wrap` | M4 | DSP-003 (loop-wrap note-offs, chase at the loop start: DW-101, DW-103) |
 | `record_loopback_alignment` | M5 | REC-003 |
-| `comp_crossfade` | M8 | REC-032 |
+| `comp_crossfade` | M8 | REC-032: three takes, comp T2 \| T3 \| T1; both boundaries crossfade over 64 samples with DSP-002's equal-power curve (`CompGoldenTests` checks it sample by sample) |
 | `vst3_again_gain` | M6 | PLUG-011 |
 | `automation_ramp` | M7 | AUTO-002 |
 | `sidechain_compressor` | M7 | DSP-031, MIX-008 |

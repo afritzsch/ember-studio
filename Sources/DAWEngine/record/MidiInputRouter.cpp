@@ -223,7 +223,8 @@ std::vector<FinalizedMidiTake> MidiInputRouter::collect() {
     std::array<std::array<std::deque<size_t>, 128>, 16> open;
 
     // A note whose on and off are on different loop passes runs to the end of the first pass, so
-    // it doesn't end before it starts (notes keep their transport ticks, one clip; REC-034 is T-080).
+    // it doesn't end before it starts (notes keep their transport ticks, one clip; with REC-034
+    // takes, T-080, the note stays in the take of its start's pass).
     const auto noteEnd = [this](int64_t start, int32_t startPass, int64_t end, int32_t endPass) {
         if (endPass != startPass) end = recLoopEnd_;
         return std::max(end, start + 1);
@@ -234,7 +235,7 @@ std::vector<FinalizedMidiTake> MidiInputRouter::collect() {
         std::deque<size_t>& held = open[e.channel][e.pitch];
         if (e.on) {
             held.push_back(notes.size());
-            notes.push_back(RecordedMidiNote{e.sample, e.sample, e.pitch, e.velocity, e.channel});
+            notes.push_back(RecordedMidiNote{e.sample, e.sample, e.pitch, e.velocity, e.channel, e.pass});
             passes.push_back(e.pass);
         } else if (!held.empty()) {
             const size_t note = held.front();
@@ -263,6 +264,11 @@ std::vector<FinalizedMidiTake> MidiInputRouter::collect() {
         take.sampleRate = sessionRate_;
         take.droppedEvents = recDropped_.load(std::memory_order_relaxed);
         take.notes = notes;
+        if (recLastPass_ > 0) {  // REC-034 (T-080)
+            take.passes = static_cast<uint32_t>(recLastPass_) + 1;
+            take.loopStart = recLoopStart_;
+            take.loopEnd = recLoopEnd_;
+        }
         takes.push_back(std::move(take));
     }
     return takes;
@@ -323,6 +329,7 @@ void MidiInputRouter::beginBlock(const Transport& transport, uint32_t numFrames,
             if (loopEnd > info.loopStart) {
                 info.loopOn = true;
                 info.loopLength = loopEnd - info.loopStart;
+                recLoopStart_ = info.loopStart;
                 recLoopEnd_ = loopEnd;
             }
         }

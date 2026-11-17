@@ -25,13 +25,21 @@ enum CanvasPainter {
         g.size = CGSize(width: rect.width, height: rect.height + TimelineGeometry.rulerHeight)
         // Geometry y includes the ruler; tiles don't.
         ctx.translateBy(x: 0, y: -TimelineGeometry.rulerHeight)
-        let rows = model.tracks.count
+        let rows = g.rowCount(tracks: model.tracks.count)
         let firstRow = Int((rect.minY / g.trackHeight).rounded(.down))
         let lastRow = Int((rect.maxY / g.trackHeight).rounded(.up))
+        // UI-015 (T-075): lane rows under expanded tracks.
+        let laneRows = model.window.map { lanes in Dictionary(lanes.automation.layout.lanes.map { ($0.row, $0) }, uniquingKeysWith: { a, _ in a }) } ?? [:]
 
         // Row backgrounds (and the empty area below the last track).
         for row in firstRow..<max(lastRow, firstRow) {
-            let color = row >= rows || row < 0 ? emptyColor : row % 2 == 0 ? rowColor : rowAltColor
+            if laneRows[row] != nil {
+                ctx.setFillColor(AutomationLanePainter.laneColor.cgColor)
+                ctx.fill(CGRect(x: 0, y: g.rowY(row), width: rect.width, height: g.trackHeight))
+                continue
+            }
+            let track = g.track(ofRow: row) ?? row
+            let color = row >= rows || row < 0 ? emptyColor : track % 2 == 0 ? rowColor : rowAltColor
             ctx.setFillColor(color.cgColor)
             ctx.fill(CGRect(x: 0, y: g.rowY(row), width: rect.width, height: g.trackHeight))
         }
@@ -55,9 +63,18 @@ enum CanvasPainter {
         // Clips, through the interval index (UI-010).
         let selection = model.selection
         let tracks = model.tracks
-        model.index.forEachClip(rows: max(firstRow, 0)..<min(lastRow, rows), from: from.raw, to: to.raw) { entry in
+        let trackCount = model.tracks.count
+        let firstTrack = g.owningTrack(ofRow: max(firstRow, 0)), lastTrack = g.owningTrack(ofRow: max(lastRow - 1, 0)) + 1
+        model.index.forEachClip(rows: min(firstTrack, trackCount)..<min(max(lastTrack, firstTrack), trackCount), from: from.raw, to: to.raw) { entry in
             drawClip(ctx, entry.clip, track: tracks[entry.row], rect: g.rect(start: entry.clip.start, length: entry.clip.length, row: entry.row),
                      selected: selection.contains(entry.id), geometry: g, project: model.project)
+        }
+
+        // Automation lanes (UI-015).
+        if let lanes = model.window?.automation {
+            for row in firstRow..<max(lastRow, firstRow) {
+                if let lane = laneRows[row] { AutomationLanePainter.draw(ctx, lane, width: rect.width, geometry: g, lanes: lanes) }
+            }
         }
     }
 

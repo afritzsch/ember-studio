@@ -57,6 +57,14 @@ struct Recorder::Session {
     std::vector<std::unique_ptr<Take>> takes;
     std::map<NodeID, uint32_t> armed;  // what it was made for
     std::atomic<bool> started{false};
+    // REC-030 (T-080). The audio thread's while active; the others' after deactivate() (its
+    // handshake orders them).
+    int64_t rtFrames = 0;  // frames offered to every take so far (all takes start together)
+    int64_t latency = 0;   // REC-003's D at the first frame (a device change ends the take)
+    std::vector<int64_t> wraps = std::vector<int64_t>(kMaxWraps);  // session frames of the wraps
+    uint32_t numWraps = 0;
+    bool wrapsFrozen = false;  // the loop changed mid-take: later wraps stay in the last pass
+    SamplePos loopStart = 0, loopEnd = 0;
     // daw.diskwrite scratch.
     std::vector<RecordFrame> frames = std::vector<RecordFrame>(kDiskBatch);
     std::vector<float> left = std::vector<float>(kDiskBatch);
@@ -234,6 +242,19 @@ void Recorder::diskLoop() {
             r.sampleRate = request->sampleRate;
             r.droppedFrames = t.dropped.load(std::memory_order_acquire);
             r.error = t.error;
+            // REC-030: each wrap's pass starts D frames later in the file (Recorder.h).
+            if (request->numWraps > 0 && r.frames > 0) {
+                std::vector<int64_t> starts{0};
+                for (uint32_t i = 0; i < request->numWraps; ++i) {
+                    const int64_t p = request->wraps[i] + request->latency;
+                    if (p > starts.back() && p < r.frames) starts.push_back(p);
+                }
+                if (starts.size() >= 2) {
+                    r.passStarts = std::move(starts);
+                    r.loopStart = request->loopStart;
+                    r.loopEnd = request->loopEnd;
+                }
+            }
             if (t.error && !t.path.empty()) {
                 std::error_code ec;
                 std::filesystem::remove(t.path, ec);  // a broken file helps nobody
@@ -310,18 +331,76 @@ void Recorder::drainTake(Session& session, Take& take) {
     }
 }
 
-// MARK: RT (REC-001, REC-003, REC-005)
+// MARK: RT (REC-001, REC-003, REC-005, REC-030)
+
+void Recorder::logWrap(Session& session, int64_t at, SamplePos loopStart, SamplePos loopEnd) DAW_RT {
+    if (session.wrapsFrozen) return;
+    if (session.numWraps == 0) {
+        session.loopStart = loopStart;
+        session.loopEnd = loopEnd;
+    } else if (loopStart != session.loopStart || loopEnd != session.loopEnd) {
+        session.wrapsFrozen = true;  // a loop or tempo edit mid-take: one range per take
+        return;
+    }
+    if (session.numWraps >= kMaxWraps) return;
+    session.wraps[session.numWraps++] = at;
+}
+
+void Recorder::capture(Session& session, const AudioBufferView& input, uint32_t from, uint32_t n,
+                       SamplePos first, int64_t latency, std::atomic<uint64_t>& dropped) DAW_RT {
+    if (n == 0) return;
+    for (auto& takePtr : session.takes) {  // ≤ kMaxTracks (CONV-RT-04)
+        Take& take = *takePtr;
+        const uint32_t l = take.inputPair * 2, r = l + 1;
+        const float* left = l < input.numChannels && input.numFrames >= from + n ? input.channels[l] + from : nullptr;
+        const float* right = r < input.numChannels && input.numFrames >= from + n ? input.channels[r] + from : nullptr;
+        const int64_t at = take.offered.load(std::memory_order_relaxed);
+        if (!take.fifo->write(left, right, n, at)) {
+            take.dropped.fetch_add(n, std::memory_order_relaxed);
+            dropped.fetch_add(n, std::memory_order_relaxed);
+        }
+        if (!take.started.load(std::memory_order_relaxed)) {
+            take.startSample.store(first, std::memory_order_relaxed);
+            take.started.store(true, std::memory_order_release);
+        }
+        take.offered.store(at + n, std::memory_order_release);
+    }
+    if (session.rtFrames == 0) session.latency = latency;
+    session.rtFrames += n;
+    session.started.store(true, std::memory_order_release);
+}
 
 void Recorder::captureBlock(const Transport& transport, const AudioBufferView& input, uint32_t numFrames) DAW_RT {
-    // The transport didn't advance (no graph published): this block was laid out already.
+    // The transport didn't advance (no graph published, or an oversize block): this block was
+    // laid out already. DW-243: inside a loop, a block of a whole number of loop lengths leaves
+    // the position where it was, too, so such a block counts as new while the loop plays (a stale
+    // one then would be recorded twice; Transport has no block counter to tell).
     const SamplePos pos = transport.samplePos();
-    const bool advanced = !hasLastPos_ || pos != lastPos_;
-    lastPos_ = pos;
-    hasLastPos_ = true;
-
+    const bool wholeLoops = prevLoopLength_ > 0 && SamplePos{numFrames} % prevLoopLength_ == 0;
     const TransportBlock& block = transport.block();
-    if (numFrames == 0 || !advanced || !block.playing || !block.recording || block.numSegments == 0 ||
-        block.tempo == nullptr)
+    // A stale block is the last one again, flags included (play can start where it stopped).
+    const bool advanced = !hasLastPos_ || pos != lastPos_ || block.playing != lastPlaying_ ||
+                          block.recording != lastRecording_ || wholeLoops;
+    const bool hadLastPos = hasLastPos_;
+    const SamplePos prevPos = lastPos_;
+    lastPos_ = pos;
+    lastPlaying_ = block.playing;
+    lastRecording_ = block.recording;
+    hasLastPos_ = true;
+    if (!advanced) return;
+
+    // DW-243: where the block before this one left off, for a block in several passes.
+    const bool hadPrevEnd = hasPrevEnd_;
+    const SamplePos prevEnd = prevEnd_;
+    hasPrevEnd_ = block.playing && block.numSegments > 0;
+    if (hasPrevEnd_) {
+        const TransportSegment& last = block.seg[std::min<uint8_t>(block.numSegments, 2) - 1];
+        prevEnd_ = last.startSample + SamplePos{last.numFrames};
+    }
+    prevLoopLength_ = hasPrevEnd_ && block.tempo != nullptr && transport.loopEnabled()
+                          ? block.tempo->tickToSample(transport.loopEnd()) - block.tempo->tickToSample(transport.loopStart())
+                          : 0;
+    if (numFrames == 0 || !block.playing || !block.recording || block.numSegments == 0 || block.tempo == nullptr)
         return;
 
     rtBusy_.store(true, std::memory_order_seq_cst);
@@ -339,10 +418,61 @@ void Recorder::captureBlock(const Transport& transport, const AudioBufferView& i
         std::atomic_thread_fence(std::memory_order_acquire);
         if (punchSeq_.load(std::memory_order_relaxed) == seq) rtPunch_ = p;
     }
-    const bool punched = rtPunch_.enabled && !transport.loopEnabled() && rtPunch_.out > rtPunch_.in;
+    const bool loopOn = transport.loopEnabled();
+    const bool punched = rtPunch_.enabled && !loopOn && rtPunch_.out > rtPunch_.in;
     const SamplePos punchIn = punched ? block.tempo->tickToSample(rtPunch_.in) : 0;
     const SamplePos punchOut = punched ? block.tempo->tickToSample(rtPunch_.out) : 0;
     const auto latency = static_cast<SamplePos>(latency_.load(std::memory_order_relaxed));
+    // REC-030: the loop the wraps go back to.
+    const SamplePos loopStart = loopOn ? block.tempo->tickToSample(transport.loopStart()) : 0;
+    const SamplePos loopEnd = loopOn ? block.tempo->tickToSample(transport.loopEnd()) : 0;
+    const SamplePos loopLength = loopEnd - loopStart;
+
+    // DW-243: block() is the block's last pass (in the block's frames). The frames before it were
+    // earlier passes (a loop shorter than the block, or the MIX-023 look-ahead's limit); with the
+    // loop on nothing is punched, so they are all captured. Playback is continuous inside a block,
+    // so their positions run up to the last pass's start position q, wrapping every loop length.
+    // They begin where the previous block left off when that leads to q; else the block is taken
+    // to have run inside the loop all along (e.g. after a tempo edit moved the samples).
+    const uint32_t lastPass = std::min(block.seg[0].frameOffset, numFrames);
+    if (lastPass > 0) {
+        const SamplePos frames = SamplePos{lastPass};
+        const SamplePos q = block.seg[0].startSample;
+        SamplePos first = q - frames;  // no wrap before the last pass
+        SamplePos firstWrap = frames;  // the first wrap frame before it (none: frames)
+        if (loopOn && loopLength > 0) {
+            // Where frame `frames` lands from a start at `from` (`wrapAt0`: frame 0 is a wrap).
+            auto land = [&](SamplePos from, bool wrapAt0, SamplePos& wrap) {
+                if (!wrapAt0 && from >= loopEnd) {
+                    wrap = frames;
+                    return from + frames;
+                }
+                wrap = wrapAt0 ? 0 : loopEnd - from;
+                return wrap > frames ? from + frames : loopStart + (frames - wrap) % loopLength;
+            };
+            bool fits = false;
+            if (hadPrevEnd || hadLastPos) {
+                const bool wrapAt0 = hadPrevEnd && prevEnd == loopEnd;  // the block before ended on the loop end
+                const SamplePos from = wrapAt0 ? loopStart : hadPrevEnd ? prevEnd : prevPos;
+                SamplePos wrap = 0;
+                if (land(from, wrapAt0, wrap) == q) {
+                    fits = true;
+                    first = from;
+                    firstWrap = wrap;
+                }
+            }
+            if (!fits && q >= loopStart && q - loopStart <= frames) {
+                firstWrap = (frames - (q - loopStart)) % loopLength;
+                first = firstWrap > 0 ? loopEnd - firstWrap : loopStart;
+            }
+        }
+        const int64_t base = session->rtFrames;
+        capture(*session, input, 0, lastPass, first - latency, latency, dropped_);
+        // CONV-RT-04: at most lastPass / loopLength + 1 wraps. A wrap at the last pass's own
+        // start is its segment's (below); frame 0 of a take starts its first pass.
+        for (SamplePos w = firstWrap; loopLength > 0 && w < frames; w += loopLength)
+            if (base + w > 0) logWrap(*session, base + w, loopStart, loopEnd);
+    }
 
     // CONV-RT-04: two segments at most, takes ≤ kMaxTracks.
     for (uint8_t s = 0; s < block.numSegments && s < 2; ++s) {
@@ -357,25 +487,11 @@ void Recorder::captureBlock(const Transport& transport, const AudioBufferView& i
             b = std::clamp<SamplePos>(punchOut - first, 0, segFrames);
         }
         if (a >= b) continue;
-        const uint32_t from = seg.frameOffset + static_cast<uint32_t>(a);
-        const auto n = static_cast<uint32_t>(b - a);
-        for (auto& takePtr : session->takes) {
-            Take& take = *takePtr;
-            const uint32_t l = take.inputPair * 2, r = l + 1;
-            const float* left = l < input.numChannels && input.numFrames >= from + n ? input.channels[l] + from : nullptr;
-            const float* right = r < input.numChannels && input.numFrames >= from + n ? input.channels[r] + from : nullptr;
-            const int64_t at = take.offered.load(std::memory_order_relaxed);
-            if (!take.fifo->write(left, right, n, at)) {
-                take.dropped.fetch_add(n, std::memory_order_relaxed);
-                dropped_.fetch_add(n, std::memory_order_relaxed);
-            }
-            if (!take.started.load(std::memory_order_relaxed)) {
-                take.startSample.store(first + a, std::memory_order_relaxed);
-                take.started.store(true, std::memory_order_release);
-            }
-            take.offered.store(at + n, std::memory_order_release);
-        }
-        session->started.store(true, std::memory_order_release);
+        // REC-030: a wrap inside the take starts a new pass at this frame of the file.
+        if (seg.afterWrap && loopOn && loopLength > 0 && session->rtFrames > 0)
+            logWrap(*session, session->rtFrames, loopStart, loopEnd);
+        capture(*session, input, seg.frameOffset + static_cast<uint32_t>(a), static_cast<uint32_t>(b - a), first + a,
+                latency, dropped_);
     }
     rtBusy_.store(false, std::memory_order_release);
 }

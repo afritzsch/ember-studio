@@ -64,6 +64,10 @@ public final class EngineClient: EngineProtocol {
     public func freeParams(_ first: ParamID, count: UInt32) { facade.freeParams(first, count) }
     public func setParam(_ id: ParamID, _ value: Float) { facade.setParam(id, value) }
     public func getParam(_ id: ParamID) -> Float { facade.getParam(id) }
+    /// AUTO-006 (T-075). A 65th lane at once is refused by the engine and keeps playing.
+    public func setAutomationSuspended(laneID: ModelID, _ suspended: Bool) {
+        _ = facade.setAutomationSuspended(laneID, suspended)
+    }
 
     // MARK: Transport
 
@@ -87,11 +91,15 @@ public final class EngineClient: EngineProtocol {
         state.punchIn = Tick(t.punchIn)
         state.punchOut = Tick(t.punchOut)
         state.playPending = t.playPending  // IO-033 (T-089)
+        state.midiLoopTakes = t.midiLoopTakes  // REC-034 (T-080)
         return state
     }
 
     /// REC-005 (T-052).
     public func setPunch(enabled: Bool, start: Tick, end: Tick) { facade.setPunch(enabled, start.raw, end.raw) }
+
+    /// REC-034 (T-080).
+    public func setRecordOptions(midiLoopTakes: Bool) { facade.setRecordOptions(midiLoopTakes) }
 
     // MARK: Assets & jobs
 
@@ -463,6 +471,15 @@ public final class EngineClient: EngineProtocol {
                         let n = r.notes[i]
                         return RecordedMidiNote(start: n.start, end: n.end, pitch: n.pitch, velocity: n.velocity, channel: n.channel)
                     } : nil)
+            // REC-030/034 (T-080): the loop passes.
+            event.recording?.passes = r.passes
+            event.recording?.loopStartSample = r.loopStart
+            event.recording?.loopEndSample = r.loopEnd
+            event.recording?.passStarts = (0..<r.passStarts.size()).map { Int64(r.passStarts[$0]) }
+            event.recording?.midiLoopTakes = r.midiLoopTakes
+            if r.midi {
+                for i in 0..<r.notes.size() { event.recording?.notes?[i].pass = UInt32(max(r.notes[i].pass, 0)) }
+            }
         }
         return event
     }

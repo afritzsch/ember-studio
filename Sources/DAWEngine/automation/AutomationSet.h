@@ -22,6 +22,11 @@
 // A slot is written only when its value changes, so the slot generation (and with it a plugin's
 // param push, PLUG-015/AUTO-009) moves only when automation actually changes something.
 //
+// AUTO-006 (T-075): a lane in `suspended` (the user is recording a gesture on its target) is
+// skipped, playing or stopped, so the control's own slot writes stand. Its stopped position stays
+// marked as written, so resuming while stopped doesn't overwrite a value the gesture left there
+// until the playhead moves or playback starts (DW-237).
+//
 // AUTO-010 / MIX-025: automation is not latency compensated. It runs on the transport's block,
 // not the look-ahead block timeline nodes get, so a param behind L samples of latency changes L
 // samples early.
@@ -31,6 +36,7 @@
 #include <vector>
 
 #include "automation/AutomationPlayer.h"
+#include "automation/AutomationSuspension.h"
 #include "core/ParamSlotTable.h"
 #include "core/Realtime.h"
 #include "time/TransportBlock.h"
@@ -44,7 +50,9 @@ public:
     AutomationSet& operator=(const AutomationSet&) = delete;
 
     // RT, the render thread, once per block. `block.tempo` must be set (Transport::advance does).
-    void apply(const TransportBlock& block, ParamSlotTable& params) DAW_RT;
+    // `suspended` (may be null) is the engine's AutomationSuspension (AUTO-006, T-075).
+    void apply(const TransportBlock& block, ParamSlotTable& params,
+               const AutomationSuspension* suspended = nullptr) DAW_RT;
 
     uint32_t size() const DAW_RT { return static_cast<uint32_t>(players_.size()); }
     const AutomationPlayer& player(uint32_t i) const { return players_[i]; }

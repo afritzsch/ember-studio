@@ -38,6 +38,8 @@ public final class FakeEngine: EngineProtocol {
         case injectMidi(atSample: Int64, relativeToNow: Bool, status: UInt8, data1: UInt8, data2: UInt8)
         /// T-054 (DW-067 extension).
         case setMonitorInput(Bool)
+        /// T-080 (REC-034).
+        case setRecordOptions(midiLoopTakes: Bool)
     }
 
     private struct State {
@@ -63,6 +65,8 @@ public final class FakeEngine: EngineProtocol {
         var midiInputs: [MidiInputInfo] = []
         var exportSpecs: [ExportSpec] = []  // T-082
         var failNextRender: DAWError?  // T-082
+        var suspendedLanes: Set<ModelID> = []  // T-075 (AUTO-006)
+        var suspensionLog: [(lane: ModelID, suspended: Bool)] = []  // T-075
     }
 
     private let state = Mutex(State())
@@ -292,6 +296,14 @@ public final class FakeEngine: EngineProtocol {
     public var recordingDirectory: String { state.withLock { $0.recordingDirectory } }
 
     /// T-052 (REC-005): like the facade, an enabled empty range is ignored.
+    /// T-080 (REC-034): recorded, and read back by `transport()`.
+    public func setRecordOptions(midiLoopTakes: Bool) {
+        state.withLock { s in
+            s.calls.append(.setRecordOptions(midiLoopTakes: midiLoopTakes))
+            s.transport.midiLoopTakes = midiLoopTakes
+        }
+    }
+
     public func setPunch(enabled: Bool, start: Tick, end: Tick) {
         state.withLock { s in
             s.calls.append(.setPunch(enabled: enabled, start: start, end: end))
@@ -436,4 +448,24 @@ public final class FakeEngine: EngineProtocol {
             post(.finished, done: total)
         }
     }
+}
+
+// MARK: T-075 (AUTO-006)
+
+extension FakeEngine {
+    /// Records the call; the lane's slot is then left to `setParam` (nothing here plays lanes).
+    public func setAutomationSuspended(laneID: ModelID, _ suspended: Bool) {
+        state.withLock { s in
+            s.suspensionLog.append((laneID, suspended))
+            if suspended { s.suspendedLanes.insert(laneID) } else { s.suspendedLanes.remove(laneID) }
+        }
+    }
+
+    /// The lanes suspended now.
+    public var suspendedLanes: Set<ModelID> { state.withLock { $0.suspendedLanes } }
+    /// Every `setAutomationSuspended` call, oldest first.
+    public var suspensionLog: [(lane: ModelID, suspended: Bool)] { state.withLock { $0.suspensionLog } }
+
+    /// Test seam: moves the fake transport's playhead without a `locate` call (as playback does).
+    public func setPlayhead(_ tick: Tick) { state.withLock { $0.transport.tick = tick } }
 }

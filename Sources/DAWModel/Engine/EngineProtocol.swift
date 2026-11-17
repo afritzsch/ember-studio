@@ -294,6 +294,8 @@ public struct TransportState: Hashable, Sendable, Codable {
     /// IO-033 (T-089): `play()` came while assets re-convert after a session-rate change; the
     /// transport starts when they are done unless `stop()` cancels it. `playing` is false until then.
     public var playPending: Bool = false
+    /// REC-034 (T-080): the record option (`setRecordOptions`).
+    public var midiLoopTakes: Bool = false
 
     public init(sample: SamplePos = 0, tick: Tick = 0, playing: Bool = false, recording: Bool = false,
                 loopEnabled: Bool = false, loopStart: Tick = 0, loopEnd: Tick = 0) {
@@ -714,6 +716,10 @@ public protocol EngineProtocol: AnyObject, Sendable {
     /// ENG-023: writes the slot only; no graph is rebuilt.
     func setParam(_ id: ParamID, _ value: Float)
     func getParam(_ id: ParamID) -> Float
+    /// AUTO-006 (T-075, 08 "Contract delta (T-075)"): suspends or resumes automation lane `laneID`
+    /// while the user records a gesture on its target, so `setParam` on its slot stands (no graph
+    /// rebuild; the engine's lock-free table survives graph swaps). Default: ignored.
+    func setAutomationSuspended(laneID: ModelID, _ suspended: Bool)
 
     // Transport (TIME-004/009)
     func play()
@@ -724,6 +730,8 @@ public protocol EngineProtocol: AnyObject, Sendable {
     func transport() -> TransportState
     /// REC-005 (T-052): see the extension at the end of this file (default: ignored).
     func setPunch(enabled: Bool, start: Tick, end: Tick)
+    /// REC-034 (T-080): see the extension at the end of this file (default: ignored).
+    func setRecordOptions(midiLoopTakes: Bool)
     /// UI-021 (T-043): auditions `pitch` on `track`'s instrument (a MIDI track's sampler or plugin),
     /// whether the transport plays or not. Every note-on needs its note-off; `stop` and `locate`
     /// end any still on. Non-RT; queued lock-free for the audio thread.
@@ -915,7 +923,7 @@ public struct RecordedTake: Hashable, Sendable, Codable {
     public var file: String
     public var startSample: SamplePos
     public var frames: Int64
-    /// REC-030 (T-080): 0 until loop takes exist.
+    /// 0: one file per track and take (REC-030's passes are `passStarts`).
     public var takeIndex: UInt32
     public var channels: UInt32
     public var sampleRate: Double
@@ -929,6 +937,19 @@ public struct RecordedTake: Hashable, Sendable, Codable {
 
     /// A MIDI take (T-053).
     public var isMidi: Bool { notes != nil }
+
+    /// REC-030/034 (T-080): the loop passes the take spans (1: no wrap). `loopStartSample` and
+    /// `loopEndSample` are the loop's timeline samples (0 for one pass). Audio: `passStarts[i]` is
+    /// the file frame where pass i starts (`[0] == 0`; pass i ≥ 1 holds the loop start there),
+    /// empty for one pass. MIDI: each note's `pass`; pass 0 starts at `startSample`, the others
+    /// at the loop start, and the last ends at `endSample`.
+    public var passes: UInt32 = 1
+    public var loopStartSample: SamplePos = 0
+    public var loopEndSample: SamplePos = 0
+    public var passStarts: [Int64] = []
+    /// REC-034 (T-080): the record option when the MIDI take ended (`setRecordOptions`): each
+    /// pass becomes a take of a take folder. Off: one merged clip.
+    public var midiLoopTakes: Bool = false
 
     public init(track: NodeIDValue, file: String, startSample: SamplePos, frames: Int64, takeIndex: UInt32 = 0,
                 channels: UInt32 = 2, sampleRate: Double, inputPair: UInt32 = 0, droppedFrames: UInt64 = 0,
@@ -974,6 +995,8 @@ public struct RecordedMidiNote: Hashable, Sendable, Codable {
     public var pitch: UInt8
     public var velocity: UInt8
     public var channel: UInt8
+    /// REC-034 (T-080): the loop pass its note-on was heard in (0 without a wrap).
+    public var pass: UInt32 = 0
 
     public init(start: SamplePos, end: SamplePos, pitch: UInt8, velocity: UInt8 = 100, channel: UInt8 = 0) {
         self.start = start
@@ -981,6 +1004,12 @@ public struct RecordedMidiNote: Hashable, Sendable, Codable {
         self.pitch = pitch
         self.velocity = velocity
         self.channel = channel
+    }
+
+    /// REC-034 (T-080).
+    public init(start: SamplePos, end: SamplePos, pitch: UInt8, velocity: UInt8 = 100, channel: UInt8 = 0, pass: UInt32) {
+        self.init(start: start, end: end, pitch: pitch, velocity: velocity, channel: channel)
+        self.pass = pass
     }
 }
 
@@ -1009,4 +1038,19 @@ extension EngineProtocol {
 /// T-054 additions to `EngineProtocol`, with defaults so test doubles compile unchanged.
 extension EngineProtocol {
     public func setMonitorInput(_ wanted: Bool) {}
+}
+
+// MARK: T-075 (AUTO-006)
+
+extension EngineProtocol {
+    /// Engines without automation (test doubles) ignore it.
+    public func setAutomationSuspended(laneID: ModelID, _ suspended: Bool) {}
+}
+
+/// T-080 additions to `EngineProtocol`, with defaults so test doubles compile unchanged.
+extension EngineProtocol {
+    /// REC-034: record options, not persisted and not in undo history. `midiLoopTakes`: a MIDI
+    /// loop recording becomes a take folder (one take per pass) instead of one merged clip.
+    /// Engines without recording ignore it.
+    public func setRecordOptions(midiLoopTakes: Bool) {}
 }

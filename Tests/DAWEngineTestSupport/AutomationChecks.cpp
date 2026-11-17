@@ -459,3 +459,118 @@ CheckResult automationAUParam() {
 }
 
 } // namespace daw::testing
+
+// MARK: T-075
+
+namespace daw::testing {
+
+CheckResult automationSuspend() {
+    CheckResult checks;
+    constexpr uint32_t kBlock = 500;
+    // The table itself: suspend twice holds once, resume frees, ID 0 ignored, capacity bounded.
+    {
+        AutomationSuspension table;
+        DAW_CHECK(!table.contains(7) && table.size() == 0);
+        DAW_CHECK(table.suspend(7) && table.suspend(7) && table.size() == 1 && table.contains(7));
+        DAW_CHECK(!table.suspend(0) && table.size() == 1);
+        table.resume(7);
+        DAW_CHECK(!table.contains(7) && table.size() == 0);
+        bool all = true;
+        for (uint64_t id = 1; id <= AutomationSuspension::kCapacity; ++id) all = all && table.suspend(id);
+        DAW_CHECK(all && !table.suspend(1000) && table.size() == AutomationSuspension::kCapacity);
+        table.resumeAll();
+        DAW_CHECK(table.size() == 0 && !table.contains(1));
+    }
+
+    LaneRig r;
+    DAW_CHECK(r.ok);
+    if (!r.ok) return checks;
+    r.lane({pd(0, 0.5f), pd(3840, 0.5f)});  // flat lane: −6 dB-ish in the fader mapping
+    DAW_CHECK(r.rig.publish(r.d));
+    const float laneValue = stripGainMapping().map(0.5f);
+    DAW_CHECK(r.rig.transport().locate(0) && r.rig.transport().play());
+    r.rig.renderFrames(2 * kBlock, [] { return kBlock; });
+    DAW_CHECK(r.slot() == laneValue);
+
+    // AUTO-006: while suspended (a gesture), the control's writes stand block after block.
+    AutomationSuspension& table = r.rig.engine().automationSuspension();
+    DAW_CHECK(table.suspend(7));
+    r.rig.engine().params().set(r.first, 2.0f);
+    r.rig.clearOutput();
+    r.rig.renderFrames(4 * kBlock, [] { return kBlock; });
+    DAW_CHECK(r.slot() == 2.0f && nearRel(r.rig.left().back(), 2.0 * kH));
+    // A graph swap mid-gesture (the commit) keeps it suspended: the table lives in the engine.
+    DAW_CHECK(r.rig.publish(r.d));
+    r.rig.renderFrames(2 * kBlock, [] { return kBlock; });
+    DAW_CHECK(r.slot() == 2.0f);
+    // Resumed (release in touch mode): the lane drives the slot again from the next block.
+    table.resume(7);
+    r.rig.renderFrames(kBlock, [] { return kBlock; });
+    DAW_CHECK(r.slot() == laneValue);
+
+    // Stopped: a suspended lane doesn't write at a new position either …
+    DAW_CHECK(r.rig.transport().stop());
+    DAW_CHECK(table.suspend(7));
+    r.rig.engine().params().set(r.first, 1.5f);
+    DAW_CHECK(r.rig.transport().locate(960));
+    r.rig.renderFrames(2 * kBlock, [] { return kBlock; });
+    DAW_CHECK(r.slot() == 1.5f);
+    // … and resuming at the same position keeps the gesture's value (DW-237: it holds until the
+    // playhead moves or playback starts).
+    table.resume(7);
+    r.rig.renderFrames(2 * kBlock, [] { return kBlock; });
+    DAW_CHECK(r.slot() == 1.5f);
+    DAW_CHECK(r.rig.transport().locate(1920));
+    r.rig.renderFrames(kBlock, [] { return kBlock; });
+    DAW_CHECK(r.slot() == laneValue);
+
+    // A lane with another ID isn't affected.
+    DAW_CHECK(table.suspend(99));
+    r.rig.engine().params().set(r.first, 1.25f);
+    DAW_CHECK(r.rig.transport().play());
+    r.rig.renderFrames(kBlock, [] { return kBlock; });
+    DAW_CHECK(r.slot() == laneValue);
+    table.resumeAll();
+
+    DAW_CHECK(r.rig.violations() == 0);
+    return checks;
+}
+
+CheckResult automationStoppedEdit() {
+    CheckResult checks;
+    constexpr uint32_t kBlock = 500;
+    LaneRig r;
+    DAW_CHECK(r.ok);
+    if (!r.ok) return checks;
+    r.lane({pd(0, 0.0f), pd(3840, 1.0f)});
+    DAW_CHECK(r.rig.publish(r.d));
+    AutomationPlayer oracle(7, 0, {pt(0, 0.0f), pt(3840, 1.0f)}, stripGainMapping());
+    DAW_CHECK(r.rig.transport().locate(1920));
+    r.rig.renderFrames(kBlock, [] { return kBlock; });
+    DAW_CHECK(r.slot() == oracle.valueAt(1920));
+
+    // DW-237 / AUTO-007: a SetParam while stopped holds, block after block …
+    r.rig.engine().params().set(r.first, 0.3f);
+    r.rig.renderFrames(4 * kBlock, [] { return kBlock; });
+    DAW_CHECK(r.slot() == 0.3f);
+    // … until play starts: the lane takes the slot back at the first playing block.
+    DAW_CHECK(r.rig.transport().play());
+    r.rig.renderFrames(kBlock, [] { return kBlock; });
+    DAW_CHECK(nearRel(r.slot(), oracle.valueAt(1920)));
+    DAW_CHECK(r.rig.transport().stop());
+    DAW_CHECK(r.rig.transport().locate(1920));
+    r.rig.renderFrames(kBlock, [] { return kBlock; });
+    DAW_CHECK(r.slot() == oracle.valueAt(1920));
+    // DW-237: a graph rebuild while stopped (a lane edit) writes the new lane's value at the
+    // playhead once, over a held SetParam (a fresh AutomationSet has no stopped position yet).
+    r.rig.engine().params().set(r.first, 0.3f);
+    r.d.automation.clear();
+    r.lane({pd(0, 0.25f), pd(3840, 0.25f)});
+    DAW_CHECK(r.rig.publish(r.d));
+    r.rig.renderFrames(kBlock, [] { return kBlock; });
+    DAW_CHECK(r.slot() == stripGainMapping().map(0.25f));
+    DAW_CHECK(r.rig.violations() == 0);
+    return checks;
+}
+
+} // namespace daw::testing

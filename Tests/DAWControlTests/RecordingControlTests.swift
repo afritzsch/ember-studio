@@ -130,3 +130,48 @@ struct MidiRecordingControlTests {
         #expect(events["events"]?.arrayValue?.contains { $0["event"]?["recording"]?["notes"]?[0]?["pitch"] == 60 } == true)
     }
 }
+
+// T-080: loop takes through the control protocol.
+@Suite("Loop take control (REC-030, REC-034, T-080)")
+@MainActor
+struct LoopTakeControlTests {
+    @Test("REC-034: transport.setRecordOptions sets midiLoopTakes on the engine (read back in transport), outside the project and its history")
+    func setRecordOptions() async throws {
+        let (dispatcher, box) = TestDispatchers.fake()
+        #expect(await dispatcher.failure(.transportSetRecordOptions, ["midiLoopTakes": true])?.dawError == "noProject")
+        _ = try await dispatcher.ok(.projectNew, ["name": "o"])
+        let on = try await dispatcher.ok(.transportSetRecordOptions, ["midiLoopTakes": true])
+        #expect(on["midiLoopTakes"] == true)
+        #expect(box.last.calls.contains(.setRecordOptions(midiLoopTakes: true)))
+        // Left out: kept.
+        #expect(try await dispatcher.ok(.transportSetRecordOptions, [:])["midiLoopTakes"] == true)
+        #expect(try await dispatcher.ok(.transportSetRecordOptions, ["midiLoopTakes": false])["midiLoopTakes"] == false)
+        #expect(await dispatcher.failure(.transportSetRecordOptions, ["midiLoopTakes": 3])?.code == -32602)
+        #expect(dispatcher.store?.isDirty == false && dispatcher.store?.undoLabel == nil)
+    }
+
+    @Test("REC-030: a loop take posted by the engine is a take folder (3 takes, default comp) by the time transport.stop answers, one Record undo")
+    func loopTakeFlow() async throws {
+        let (dispatcher, box) = TestDispatchers.fake()
+        _ = try await dispatcher.ok(.projectNew, ["name": "l"])
+        _ = try await dispatcher.ok(.commandApply, ["command": ["type": "AddTrack", "name": "Mic", "kind": "audio"]])
+        let store = try #require(dispatcher.store)
+        let mic = try #require(store.project.tracks.first?.id)
+        _ = try await dispatcher.ok(.transportRecord, ["enabled": true])
+        _ = try await dispatcher.ok(.transportPlay)
+        var take = RecordedTake(track: mic, file: "/tmp/t080/Track \(mic) Take 1.caf", startSample: 0, frames: 120_000,
+                                sampleRate: 48_000)
+        take.passes = 3
+        take.loopEndSample = 48_000
+        take.passStarts = [0, 48_000, 96_000]
+        box.last.post(EngineEvent(recording: take))
+        _ = try await dispatcher.ok(.transportStop)
+        let folders = try await dispatcher.ok(.projectGet, ["path": "/tracks/0/takeFolders"])
+        #expect(folders.arrayValue?.count == 1)
+        #expect(folders[0]?["takes"]?.arrayValue?.count == 3)
+        #expect(folders[0]?["start"] == 0 && folders[0]?["end"] == 1920)
+        #expect(folders[0]?["comp"]?.arrayValue?.count == 2, "the partial last pass, then the one before it")
+        #expect(try await dispatcher.ok(.undo)["label"] == "Record")
+        #expect(store.project.tracks[0].takeFolders.isEmpty && store.project.assets.isEmpty)
+    }
+}
