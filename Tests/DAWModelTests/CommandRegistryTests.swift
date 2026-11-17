@@ -96,6 +96,18 @@ struct CommandRegistryTests {
         RemoveDevice(slotID: 4),
         RestoreDevice(channel: 2, index: 1, slot: DeviceSlot(id: 4, kind: .builtin(.compressor), bypass: true)),
         MoveDevice(slotID: 4, index: 0),
+        // T-080 (MODEL-005 take folders, REC-030..033)
+        CreateTakeFolder(trackID: 2, takes: [
+            .init(start: 0, length: 960, assetID: 5, sourceOffsetSamples: 100, gain: 0.5),
+            .init(start: 0, length: 480, notes: [AddNotes.NoteSpec(start: 0, length: 10, pitch: 60, velocity: 90, channel: 1)]),
+        ]),
+        RemoveTakeFolder(folderID: 6),
+        RestoreTakeFolder(trackID: 2, index: 0, folder: TakeFolder(id: 6, takes: [
+            Take(id: 7, clip: .audio(AudioClip(id: 8, assetID: 5, start: 0, length: 960))),
+            Take(id: 9, clip: .midi(MidiClip(id: 10, start: 0, length: 480, notes: [Note(id: 11, start: 0, length: 10, pitch: 60)]))),
+        ])),
+        SetCompSelection(folderID: 6, start: 0, end: 480, takeID: 7),
+        RestoreComp(folderID: 6, comp: [CompSegment(start: 0, end: 480, take: 7), CompSegment(start: 480, end: 960, take: 9)]),
     ]
 
     @Test("MODEL-006: built-in type strings are stable and unique")
@@ -117,6 +129,7 @@ struct CommandRegistryTests {
             "AddAutomationPoint", "AddAutomationPoints", "RemoveAutomationPoints", "MoveAutomationPoints",
             "SetAutomationMode", "SetAutomationLane",
             "InsertDevice", "RemoveDevice", "RestoreDevice", "MoveDevice",
+            "CreateTakeFolder", "RemoveTakeFolder", "RestoreTakeFolder", "SetCompSelection", "RestoreComp",
         ])
         let all = CommandRegistry.registered.map { $0.type }
         #expect(Set(all).count == all.count)
