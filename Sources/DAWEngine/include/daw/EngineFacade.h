@@ -290,6 +290,22 @@ enum class EngineEventType : uint8_t {
     // PLUG-022 (T-064, additive): subject = the device slot whose plugin output NaN/inf. Its output
     // is silenced (telemetry nanBlocks counts the blocks); reported once per node instance.
     pluginMisbehaved,
+    // DW-204 (T-063, additive): subject = the device slot whose plugin changed one of its own
+    // parameters (its editor); `pluginEdit` says which, to what, and where in a gesture.
+    pluginParamEdited,
+};
+
+// DW-204 (T-063): a plugin's editor touched (begin), moved (value) or released (end) parameter
+// `index` (pluginInfoJSON's params[index], = param slot `index` of the plugin node). A value with
+// no begin of that parameter open is an ungestured edit (a menu, a preset). VST3 values are
+// normalized, AU values in the parameter's own range; begin/end carry the value when the plugin
+// reports one, else NaN.
+enum class PluginEditPhase : uint8_t { begin, value, end };
+
+struct PluginParamEditPOD {
+    uint32_t index = 0;
+    float value = 0;
+    PluginEditPhase phase = PluginEditPhase::value;
 };
 
 // IO-021 (7), T-051: why a deviceChanged event happened.
@@ -387,6 +403,7 @@ struct EngineEventPOD {
     DeviceChangePOD device;  // deviceChanged
     AssetsReloadPOD reload;  // assetsReloaded (T-056)
     RecordingPOD recording;  // recordingFinalized (T-052); subject = the track
+    PluginParamEditPOD pluginEdit;  // pluginParamEdited (T-063); subject = the device slot
 };
 
 // REC-010 (T-053): one MIDI input source, for the UI and dawctl.
@@ -604,6 +621,26 @@ public:
     // the engine has no plugin for. Non-RT, any thread.
     std::string pluginInfoJSON(NodeID slot) const;
     void destroyPluginView(NodeID slot);
+    // PLUG-017 (T-063, accepted (autobuild, see docs/autobuild/DECISIONS.md "T-063 editors")).
+    // createPluginView (main thread only; null elsewhere) opens the editor of the slot's plugin
+    // and returns its container NSView, which the facade owns until destroyPluginView (or the
+    // facade goes): AU `requestViewController`, else CoreAudioKit's generic view; VST3 the
+    // controller's IPlugView ("editor") attached to the container. Null when the slot has no loaded
+    // plugin or (VST3) no editor. Calling it again returns the same view; for a slot whose plugin
+    // was replaced since (a new instance after a rate change) the old editor closes and a new one
+    // opens. The container's frame follows the plugin: an AU view controller arriving later, a
+    // VST3 IPlugFrame::resizeView (the host puts the container in a window and follows its frame
+    // with NSViewFrameDidChangeNotification); resizing the container (a user resizing the window)
+    // tells a resizable VST3 view (checkSizeConstraint, onSize). While a VST3 editor is open, the
+    // model's values (slot pushes) are written to its controller at 30 Hz, except the parameters
+    // its editor is changing (DW-204).
+    //
+    // pluginViewJSON (any thread): {"slot", "open": true, "ready", "kind": "au"|"auGeneric"|"vst3",
+    // "title", "width", "height", "resizable", "stale"} for an open editor (`ready`: the AU's view
+    // controller has arrived; `stale`: the slot's plugin instance is no longer the one shown), else
+    // {"slot", "open": false}. openPluginViews lists the open slots, ascending.
+    std::string pluginViewJSON(NodeID slot) const;
+    std::vector<NodeID> openPluginViews() const;
 
     // MARK: Recording (09, T-052; accepted (autobuild, see docs/autobuild/DECISIONS.md))
     //

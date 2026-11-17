@@ -114,6 +114,7 @@ final class AppModel {
     func closeWindow(_ id: Int) async {
         guard let window = window(id) else { return }
         windows.removeAll { $0.id == id }
+        window.pluginEditors.closeAll()  // T-063: its plugin editors close with it
         presenter?.close(window)
         if dispatcher.store === window.store {
             if let next = windows.last {

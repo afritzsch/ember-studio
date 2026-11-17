@@ -450,6 +450,9 @@ public struct EngineEvent: Hashable, Sendable, Codable {
         /// PLUG-022 (T-064): `subject` is the device slot whose plugin output NaN/inf; its output
         /// was silenced (telemetry `nanBlocks`). Once per node instance.
         case pluginMisbehaved
+        /// DW-204 (T-063): `subject` is the device slot whose plugin changed one of its own
+        /// parameters (its editor); `pluginEdit` says which and how.
+        case pluginParamEdited
     }
 
     public var kind: Kind
@@ -465,6 +468,8 @@ public struct EngineEvent: Hashable, Sendable, Codable {
     public var reload: AssetsReload? = nil
     /// `recordingFinalized` (T-052, REC-004): the take; `subject` is its track.
     public var recording: RecordedTake? = nil
+    /// `pluginParamEdited` (T-063, DW-204): the plugin's own edit; `subject` is the device slot.
+    public var pluginEdit: PluginParamEdit? = nil
 
     public init(kind: Kind, subject: UInt64 = 0, job: JobID = 0, count: UInt64 = 0, error: DAWError? = nil,
                 device: DeviceChange? = nil) {
@@ -765,6 +770,10 @@ public protocol EngineProtocol: AnyObject, Sendable {
     func setPluginState(slot: NodeIDValue, _ state: Data)
     /// PLUG-010/015 (T-061): see the extension at the end of this file (default: "").
     func pluginInfoJSON(slot: NodeIDValue) -> String
+    /// PLUG-017 (T-063): plugin editors; see the extension at the end of this file (default: none).
+    func createPluginView(slot: NodeIDValue) -> UnsafeMutableRawPointer?
+    func destroyPluginView(slot: NodeIDValue)
+    func pluginViewJSON(slot: NodeIDValue) -> String
 
     // Offline (IO-010..013)
     func renderOffline(from: Tick, to: Tick, spec: ExportSpec) -> JobID
@@ -1038,6 +1047,48 @@ extension EngineProtocol {
 /// T-054 additions to `EngineProtocol`, with defaults so test doubles compile unchanged.
 extension EngineProtocol {
     public func setMonitorInput(_ wanted: Bool) {}
+}
+
+// MARK: T-063 (PLUG-017, DW-204): plugin editors and the plugin's own edits
+
+/// DW-204 (`daw::PluginParamEditPOD`): a plugin's editor touched (`begin`), moved (`value`) or
+/// released (`end`) param `index` of its device slot (the slot's param index, = the plugin's
+/// `pluginInfoJSON` params[index]). A `value` with no `begin` of that param open is ungestured (a
+/// menu, a preset). VST3 values are normalized, AU values in the parameter's own range; `begin` and
+/// `end` may carry NaN.
+public struct PluginParamEdit: Hashable, Sendable, Codable {
+    public enum Phase: String, Hashable, Sendable, Codable { case begin, value, end }
+
+    public var index: Int
+    public var value: Float
+    public var phase: Phase
+
+    public init(index: Int, value: Float, phase: Phase) {
+        self.index = index
+        self.value = value
+        self.phase = phase
+    }
+}
+
+extension EngineEvent {
+    /// DW-204 (T-063): a plugin's own edit of device slot `slot`.
+    public init(pluginEdit: PluginParamEdit, slot: NodeIDValue) {
+        self.init(kind: .pluginParamEdited, subject: slot)
+        self.pluginEdit = pluginEdit
+    }
+}
+
+/// T-063 additions to `EngineProtocol`, with defaults so test doubles compile unchanged.
+extension EngineProtocol {
+    /// PLUG-017: opens the editor of the slot's plugin (main thread) and returns its container
+    /// `NSView` (unretained; the engine owns it until `destroyPluginView`), or nil (no loaded
+    /// plugin, a VST3 without an editor, an engine without plugins). See
+    /// `EngineFacade::createPluginView`.
+    public func createPluginView(slot: NodeIDValue) -> UnsafeMutableRawPointer? { nil }
+    public func destroyPluginView(slot: NodeIDValue) {}
+    /// PLUG-017: `{"slot", "open": true, "ready", "kind", "title", "width", "height", "resizable",
+    /// "stale"}` for an open editor, else `{"slot", "open": false}` ("" from engines without plugins).
+    public func pluginViewJSON(slot: NodeIDValue) -> String { "" }
 }
 
 // MARK: T-075 (AUTO-006)

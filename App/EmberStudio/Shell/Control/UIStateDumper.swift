@@ -96,7 +96,26 @@ enum UIStateDumper {
             "automation": dump(window.automation),  // T-075 (UI-015)
             "engine": engine(window),  // T-090 (DW-156)
             "feedbackWarning": dump(window.feedbackGuard),  // T-090 (DW-230)
+            "pluginEditors": dump(window.pluginEditors),  // T-063 (PLUG-017)
         ]
+    }
+
+    /// PLUG-017 (T-063): the window's open plugin editors, by slot.
+    ///
+    ///     [{"slot", "title", "kind": "au"|"auGeneric"|"vst3", "width", "height", "ready", "resizable",
+    ///       "control": "<prefix>.insert.<slot>.editor" | "<prefix>.instrument.editor" | null}]
+    static func dump(_ editors: PluginEditorModel) -> JSONValue {
+        let controls = editors.window?.mixer.strips.flatMap(\.editorControls).map(\.id) ?? []
+        return .array(editors.openSlots.compactMap { slot in
+            guard let e = editors.editors[slot] else { return nil }
+            let control = controls.first { $0.hasSuffix(".insert.\(slot).editor") }
+                ?? editors.window?.project.tracks.first { $0.instrument?.id == slot }.map { "mixer.track.\($0.id).instrument.editor" }
+            return [
+                "slot": .int(Int64(bitPattern: slot)), "title": .string(e.title), "kind": .string(e.kind),
+                "width": .double(e.width), "height": .double(e.height), "ready": .bool(e.ready), "resizable": .bool(e.resizable),
+                "control": control.map(JSONValue.string) ?? .null,
+            ]
+        })
     }
 
     /// DW-156 (T-090): which engine the window's project has: the app's live one (front window

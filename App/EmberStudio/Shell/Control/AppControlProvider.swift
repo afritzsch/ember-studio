@@ -21,7 +21,16 @@ final class AppControlProvider: ControlUIProvider {
         guard let presenter = app?.presenter else {
             throw DAWError.notImplemented("ui.snapshot needs the app's windows")
         }
-        let (png, width, height) = try presenter.snapshot(window)
+        let png: Data, width: Int, height: Int
+        if let slot = params.pluginEditor {
+            // PLUG-017 (T-063): the slot's plugin editor panel.
+            guard let panel = window.pluginEditors.panels?.panel(for: slot) else {
+                throw DAWError.invalidArgument("no plugin editor is open for slot \(slot)")
+            }
+            (png, width, height) = try WindowSnapshotter.png(of: panel)
+        } else {
+            (png, width, height) = try presenter.snapshot(window)
+        }
         snapshots += 1
         let url: URL
         if let path = params.path {
@@ -38,8 +47,12 @@ final class AppControlProvider: ControlUIProvider {
         } catch {
             throw DAWError.fileIO(path: url.path, detail: error.localizedDescription)
         }
-        return ["pngPath": .string(url.standardizedFileURL.path), "width": .int(Int64(width)), "height": .int(Int64(height)),
-                "window": .int(Int64(window.id))]
+        var result: [String: JSONValue] = [
+            "pngPath": .string(url.standardizedFileURL.path), "width": .int(Int64(width)), "height": .int(Int64(height)),
+            "window": .int(Int64(window.id)),
+        ]
+        if let slot = params.pluginEditor { result["pluginEditor"] = .int(Int64(bitPattern: slot)) }  // T-063
+        return .object(result)
     }
 
     /// Clicks or toggles the control with `accessibilityId` in the main window. Actions: `click`

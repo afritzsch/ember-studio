@@ -80,6 +80,8 @@ Result<std::unique_ptr<Node>> VST3PluginHost::create(const NodeCreateInfo& info)
         instance = std::move(made).value();
     }
 
+    instance->setEditSink(editQueue(), desc.id);  // DW-204 (T-063)
+
     const std::vector<uint8_t>* apply = nullptr;
     if (pending) apply = &*pending;
     else if (!adopted && !config.state.empty()) apply = &config.state;
@@ -106,6 +108,7 @@ Result<void> VST3PluginHost::instantiate(NodeID slotID, std::string_view identif
     if (!plugin) return plugin.error();
     auto made = VST3Instance::instantiate(plugin.value());
     if (!made) return made.error();
+    made.value()->setEditSink(editQueue(), slotID);  // DW-204 (T-063)
     std::lock_guard lock(mutex_);
     Slot& slot = slots_[slotID];
     slot.parked = std::move(made).value();
@@ -159,6 +162,7 @@ Result<std::shared_ptr<VST3Instance>> VST3PluginHost::reinstantiate(NodeID slotI
     auto made = VST3Instance::instantiate(old->plugin());
     if (!made) return made.error();
     std::shared_ptr<VST3Instance> fresh = std::move(made).value();
+    fresh->setEditSink(editQueue(), slotID);  // DW-204 (T-063)
     auto state = old->state();
     if (state && !state.value().empty()) {
         if (auto set = fresh->setState(state.value()); !set) reportFailure(slotID, set.error());
@@ -237,6 +241,26 @@ std::vector<NodeID> VST3PluginHost::takeMisbehaved() {
 void VST3PluginHost::setTelemetry(Telemetry* telemetry) {
     std::lock_guard lock(mutex_);
     telemetry_ = telemetry;
+}
+
+// DW-204 (T-063).
+void VST3PluginHost::setEditQueue(std::shared_ptr<PluginEditQueue> queue) {
+    std::lock_guard lock(mutex_);
+    editQueue_ = std::move(queue);
+}
+
+std::shared_ptr<PluginEditQueue> VST3PluginHost::editQueue() const {
+    std::lock_guard lock(mutex_);
+    return editQueue_;
+}
+
+// PLUG-017 (T-063): the instance an editor shows: the slot's latest node's, else a parked one.
+std::shared_ptr<VST3Instance> VST3PluginHost::current(NodeID slotID) const {
+    std::lock_guard lock(mutex_);
+    auto it = slots_.find(slotID);
+    if (it == slots_.end()) return nullptr;
+    if (auto live = it->second.live.lock()) return live;
+    return it->second.parked;
 }
 
 } // namespace daw

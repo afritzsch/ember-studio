@@ -296,7 +296,7 @@ struct MixerModelTests {
         let slots = [DeviceSlot(id: next, kind: .builtin(.eq)), DeviceSlot(id: next + 1, kind: .au(AUDescriptor(identifier: "a:b:c", name: "Space")), bypass: true)]
         window.perform(RestoreTrack(track: Track(id: next + 2, name: "I", kind: .audio, inserts: slots), index: 2))
         let shown = try strip(window, next + 2)
-        #expect(shown.inserts == [MixerInsert(id: next, name: "EQ", bypass: false), MixerInsert(id: next + 1, name: "Space", bypass: true)])
+        #expect(shown.inserts == [MixerInsert(id: next, name: "EQ", bypass: false), MixerInsert(id: next + 1, name: "Space", bypass: true, isPlugin: true)])  // T-063: plugins have an editor
     }
 
     @Test("UI-052: strips reuse the header's track.<id>.… ids, list their own only while the tab is open, and are unique")

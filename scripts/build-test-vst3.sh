@@ -4,6 +4,7 @@
 #   again.vst3      the SDK's `again` sample, unmodified (VSTGUI replaced by the stubs in
 #                   Tests/VST3TestPlugin/vstgui-shim, since bootstrap doesn't fetch vstgui4)
 #   EmberTest.vst3  Tests/VST3TestPlugin/EmberTestPlugin.cpp (latency, sidechain, transport probes)
+#                   and EmberTestView.mm (T-063: its own NSView IPlugView editor, DW-208)
 # Called by scripts/test.sh and, when a bundle is missing or stale, by the tests. Safe to run
 # concurrently: one builder at a time holds the lock, the others wait and find nothing left to do.
 set -euo pipefail
@@ -48,7 +49,7 @@ sdk_common=(
     "$sdk/public.sdk/source/vst/vstparameters.cpp"
 )
 again_sources=("$again/again.cpp" "$again/againcontroller.cpp" "$again/againentry.cpp" "$again/againsidechain.cpp")
-ember_sources=("$ember/EmberTestPlugin.cpp")
+ember_sources=("$ember/EmberTestPlugin.cpp" "$ember/EmberTestView.mm")
 
 newest() { # prints the newest mtime (epoch seconds) of the given files
     local newest=0 f m
@@ -88,7 +89,7 @@ done
 trap 'rm -rf "$out"/.tmp-*; rmdir "$lock" 2>/dev/null || true' EXIT
 
 mkdir -p "$objdir"
-cxx=(xcrun clang++ -std=c++17 -arch arm64 -w -O1 -g -fPIC -fvisibility=hidden -DRELEASE=1
+cxx=(xcrun clang++ -std=c++17 -arch arm64 -w -O1 -g -fPIC -fvisibility=hidden -DRELEASE=1 -fobjc-arc
      -isystem "$sdk" -I "$ember/vstgui-shim")
 
 object_for() { echo "$objdir/$(echo "$1" | shasum | cut -c1-16)-$(basename "$1").o"; }
@@ -119,7 +120,7 @@ make_bundle() { # <name> <exports file> <sources…>
     mkdir -p "$tmp/Contents/MacOS"
     # shellcheck disable=SC2046
     xcrun clang++ -arch arm64 -bundle -exported_symbols_list "$exports" \
-        -framework CoreFoundation -framework Foundation \
+        -framework CoreFoundation -framework Foundation -framework AppKit \
         -o "$tmp/Contents/MacOS/$name" $(objects_for "$@")
     cat >"$tmp/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

@@ -21,6 +21,7 @@
 #include "core/Result.h"
 #include "graph/NodeRegistry.h"
 #include "plugins/VST3Instance.h"
+#include "plugins/PluginEditQueue.h"
 #include "plugins/PluginNanGuard.h"
 
 namespace daw {
@@ -60,6 +61,12 @@ public:
     // first build; the telemetry must outlive every node.
     void setTelemetry(Telemetry* telemetry);
 
+    // DW-204 (T-063): where every instance this host gives a slot sends the plugin's own parameter
+    // edits (as edits of that slot). Set before the first build.
+    void setEditQueue(std::shared_ptr<PluginEditQueue> queue);
+    // PLUG-017 (T-063): the slot's instance for an editor: the latest node's, else a parked one.
+    std::shared_ptr<VST3Instance> current(NodeID slot) const;
+
     // For VST3PluginNode (non-RT).
     void reportFailure(NodeID slot, Error error);
     Result<std::shared_ptr<VST3Instance>> reinstantiate(NodeID slot, const std::shared_ptr<VST3Instance>& old);
@@ -83,6 +90,8 @@ private:
     std::map<NodeID, Slot> slots_;
     std::vector<Failure> failures_;
     Telemetry* telemetry_ = nullptr;  // PLUG-022
+    std::shared_ptr<PluginEditQueue> editQueue_;  // DW-204
+    std::shared_ptr<PluginEditQueue> editQueue() const;
 };
 
 } // namespace daw

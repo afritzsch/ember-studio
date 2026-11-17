@@ -99,9 +99,9 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 | T-060 | P | PluginScanner + cache + blocklist | PLUG-001..004 | T-001 | done |
 | T-061 | P | AU hosting node (FX + instrument), params, state, latency | PLUG-010, 012..016 (AU) | T-021, T-014 | done |
 | T-062 | P | VST3 hosting node + build SDK `again` test plugin | PLUG-011..016 (VST3) | T-021, T-014 | done |
-| T-063 | P+U | Plugin editor windows (AU view controller, VST3 IPlugView) | PLUG-017 | T-061, T-062, T-032 | wip(t-063-plugin-editors) |
+| T-063 | P+U | Plugin editor windows (AU view controller, VST3 IPlugView) | PLUG-017 | T-061, T-062, T-032 | done |
 | T-064 | P | Host bypass, NaN guard, crash marker + safe-mode open | PLUG-018, 020..022 | T-061 | done |
-| T-065 | U | Device chain view (generic UI from ParamInfo), plugin manager | UI-032, UI-041 | T-063 | todo |
+| T-065 | U | Device chain view (generic UI from ParamInfo), plugin manager | UI-032, UI-041 | T-063 | ready |
 
 ### M7 — Effects & automation
 DSP effects (T-070..073) depend only on the Node API and can be **pulled forward** into any idle D-lane slot after T-005.
@@ -408,11 +408,11 @@ Recorded by the lead from worker reports.
 | DW-201 | T-072 | DAWModelTests' `@MainActor` tests still finish together (8–15 s): something else synchronous holds the main actor; candidates are the real-engine tests calling the blocking `EngineClient.waitForGraph` on it. Confirm with a per-test timing pass or `sample` | M/B | todo |
 | DW-202 | T-055 | Mixer channel strips (UI-030) need the same arm/monitor/input controls (logic in `TrackHeaderModel`, reusable) | U (T-076) | done (T-076) |
 | DW-203 | T-055 | `ProjectStore.connectRecording` only logs a take it couldn't import; the app infers it from the project's assets (`ProjectWindowModel.containsTake`). An import-result callback/event would be more direct | M | todo |
-| DW-204 | T-061 | Plugin → model params: a change from the AU's own UI (or user) isn't written back to `DeviceSlot.params` (PLUG-015 second half) | P+M (T-063) | todo |
+| DW-204 | T-061 | Plugin → model params: a change from the AU's own UI (or user) isn't written back to `DeviceSlot.params` (PLUG-015 second half) | P+M (T-063) | done (T-063) |
 | DW-205 | T-061 | A session-rate change re-instantiates the slot's AU synchronously on daw.compile (state carried over); may need to be async for slow out-of-process AUv3s | P (T-064 or later) | todo |
 | DW-206 | T-076 | UI-031's acceptance names Instruments (no SwiftUI invalidation per frame; today a `withObservationTracking` test) and UI-030's smooth scrolling with 100 strips is unmeasured; real mouse drag/double-click on faders only tested with synthesized NSEvents; occlusion pause has no test | U / user | todo |
 | DW-207 | T-076 | `MeterReading` holds one peak/RMS per channel strip, so mixer meters are a single bar, not L/R. Stereo meters need a two-channel reading (08 Interfaces change) | E+B / user | todo |
-| DW-208 | T-062 | The test VST3 bundles compile `again` against a VSTGUI stub (`Tests/VST3TestPlugin/vstgui-shim`; bootstrap doesn't fetch vstgui4), so `createView` returns an empty view. Editor tests (PLUG-017) need vstgui4 fetched or a test plugin with its own `IPlugView`. No plugin needed the main thread for its controller, but no third-party VST3 (VSTGUI/JUCE) has been hosted | P (T-063) | todo |
+| DW-208 | T-062 | The test VST3 bundles compile `again` against a VSTGUI stub (`Tests/VST3TestPlugin/vstgui-shim`; bootstrap doesn't fetch vstgui4), so `createView` returns an empty view. Editor tests (PLUG-017) need vstgui4 fetched or a test plugin with its own `IPlugView`. No plugin needed the main thread for its controller, but no third-party VST3 (VSTGUI/JUCE) has been hosted | P (T-063) | done (T-063) |
 | DW-209 | T-062 | VST3 restart flags other than kLatencyChanged (kParamValuesChanged, kParamTitlesChanged, kIoChanged, kReloadComponent) are ignored; plugin output parameter changes are received in a fixed-capacity list and dropped. Untested branches: the mono-sidechain bus-arrangement fallback and an empty state section | P (T-063) | todo |
 | DW-210 | T-062 | Only note on/off reach VST3 plugins: MIDI CC, pitch bend and aftertouch need `IMidiMapping` → parameter changes | P | todo |
 | DW-211 | T-062 | VST3 `setupProcessing` always uses `kRealtime`, offline renders included, because `PrepareInfo` has no offline flag | E + P | todo |
@@ -467,3 +467,6 @@ Recorded by the lead from worker reports.
 | DW-260 | T-080 | The recorder guesses whether a block advanced (`Transport` has no block counter): a stale block of whole loop lengths could be recorded twice, and a multi-pass block that can't be traced to the previous one (play + locate in one block, tempo edit) is rebuilt assuming it ran inside the loop. A per-block counter on `Transport` or an `advanced` flag through `InputCapture` makes both exact | E (small) | todo |
 | DW-261 | T-084 | After the first push, check the macos-15 image's Xcode (tests need Swift 6.2+ exit tests; local is Xcode 27.2 / Swift 6.4); switch the runner label in `ci-job.yml` if it's too old | lead | todo |
 | DW-262 | T-084 | test.sh's warning check covers `swift build`, not test targets, so test-target warnings don't fail CI | E (small) | todo |
+| DW-263 | T-063 | A plugin-side edit without a begin (menu, preset) has no "before" value, so undoing it leaves the plugin at the edited value (the first-edit baseline covers only gestured edits) | P+M | todo |
+| DW-264 | T-063 | A VST3 without its own editor gets none (generic ParamInfo UI is T-065); editor panel positions aren't remembered; third-party VSTGUI/JUCE VST3 and AUv3 out-of-process editors untried | U/P (T-065) | todo |
+| DW-265 | T-063 | Check that dawmcp's `daw_ui_snapshot` tool schema exposes the new `pluginEditor` param | B (small) | todo |

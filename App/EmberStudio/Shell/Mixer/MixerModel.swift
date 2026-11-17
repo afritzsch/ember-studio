@@ -60,8 +60,10 @@ final class MixerModel {
             output: track.output, outputTitle: outputTitle(track.output, buses: buses),
             outputChoices: outputChoices(track.output, buses: buses),
             sends: sendValues(track.sends, buses: buses), sendTargets: sendTargets(buses: buses),
-            inserts: track.inserts.map(Self.insert))
-        return makeStrip(values, header: header, muteControl: header.muteControl, soloControl: header.soloControl)
+            inserts: track.inserts.map(insert))
+        var withInstrument = values
+        withInstrument.instrument = track.instrument.map(insert)  // T-063
+        return makeStrip(withInstrument, header: header, muteControl: header.muteControl, soloControl: header.soloControl)
     }
 
     private func strip(bus: Bus, buses: [(NodeIDValue, String)]) -> MixerStripModel {
@@ -73,7 +75,7 @@ final class MixerModel {
             output: bus.output, outputTitle: outputTitle(bus.output, buses: buses),
             outputChoices: outputChoices(bus.output, buses: buses),
             sends: sendValues(bus.sends, buses: buses), sendTargets: sendTargets(buses: buses),
-            inserts: bus.inserts.map(Self.insert))
+            inserts: bus.inserts.map(insert))
         return makeStrip(values, header: nil, muteControl: switchControl(values, .mute, "Mute"),
                          soloControl: switchControl(values, .solo, "Solo"))
     }
@@ -83,7 +85,7 @@ final class MixerModel {
             id: master.id, kind: .master, name: "Master", controlPrefix: "mixer.master",
             gain: shown(master.id, .gain, master.strip.gain), pan: shown(master.id, .pan, master.strip.pan), mute: master.strip.mute, solo: false,
             isSelected: false, armed: false, inputPair: 0, monitoring: .off, inputChoices: [],
-            output: nil, outputTitle: nil, outputChoices: [], sends: [], sendTargets: [], inserts: master.inserts.map(Self.insert))
+            output: nil, outputTitle: nil, outputChoices: [], sends: [], sendTargets: [], inserts: master.inserts.map(insert))
         return makeStrip(values, header: nil, muteControl: switchControl(values, .mute, "Mute"), soloControl: nil)
     }
 
@@ -117,8 +119,25 @@ final class MixerModel {
         }
     }
 
-    private static func insert(_ slot: DeviceSlot) -> MixerInsert {
-        MixerInsert(id: slot.id, name: insertName(slot.kind), bypass: slot.bypass)
+    private func insert(_ slot: DeviceSlot) -> MixerInsert {
+        // T-063 (PLUG-017): plugins have an editor; whether it is open shows on the strip.
+        MixerInsert(id: slot.id, name: Self.insertName(slot.kind), bypass: slot.bypass, isPlugin: slot.isPlugin,
+                    editorOpen: window?.pluginEditors.isOpen(slot.id) ?? false)
+    }
+
+    /// PLUG-017 (T-063): "Open Editor" toggles for the strip's plugins.
+    private func editorControls(_ values: MixerStripModel.Values) -> [UIControl] {
+        let editors = window?.pluginEditors
+        func control(_ id: String, _ device: MixerInsert) -> UIControl {
+            .toggle(id, "\(device.name) Editor", isOn: device.editorOpen, enabled: editors?.canOpen(device.id) ?? false) {
+                editors?.toggle(device.id)
+            }
+        }
+        var controls = values.inserts.filter(\.isPlugin).map { control("\(values.controlPrefix).insert.\($0.id).editor", $0) }
+        if let instrument = values.instrument, instrument.isPlugin {
+            controls.append(control("\(values.controlPrefix).instrument.editor", instrument))
+        }
+        return controls
     }
 
     static func insertName(_ kind: DeviceSlot.Kind) -> String {
@@ -141,7 +160,7 @@ final class MixerModel {
                            soloControl: UIControl?) -> MixerStripModel {
         let id = values.id
         let prefix = values.controlPrefix
-        return MixerStripModel(
+        var strip = MixerStripModel(
             values: values, header: header, muteControl: muteControl, soloControl: soloControl,
             faderUp: .button("\(prefix).fader.up", "Raise \(values.name)", enabled: values.gain < ChannelStripState.maxGain) { [weak self] in
                 self?.setGain(id, FaderTaper.nudged(gain: values.gain, by: FaderTaper.nudgeDB))
@@ -171,6 +190,8 @@ final class MixerModel {
                     self?.performRouting(AddSend(channelID: id, busID: target.id))
                 }
             })
+        strip.editorControls = editorControls(values)  // T-063
+        return strip
     }
 
     /// `<prefix>.output.master|bus.<id>`: a toggle per destination, on for the current one, like the

@@ -61,6 +61,8 @@
 #include "nodes/MidiClipPlayer.h"
 #include "nodes/Reverb.h"
 #include "plugins/AUPluginHost.h"
+#include "plugins/PluginEditQueue.h"
+#include "plugins/PluginViewHost.h"
 #include "plugins/VST3PluginHost.h"
 #include "record/MidiInputRouter.h"
 #include "record/Recorder.h"
@@ -263,6 +265,11 @@ struct EngineFacade::Impl {
     std::shared_ptr<AUPluginHost> plugins = std::make_shared<AUPluginHost>();
     // PLUG-011 (T-062): the session's VST3 plugins, and the vst3Plugin factory.
     std::shared_ptr<VST3PluginHost> vst3Plugins = std::make_shared<VST3PluginHost>();
+    // DW-204 (T-063): both hosts' plugins report their own parameter edits here; pump() turns them
+    // into pluginParamEdited events.
+    std::shared_ptr<PluginEditQueue> pluginEdits = std::make_shared<PluginEditQueue>();
+    // PLUG-017 (T-063): open editors (main thread). Declared after the hosts, so it goes first.
+    std::unique_ptr<PluginViewHost> pluginViews = std::make_unique<PluginViewHost>();
 
     // Declaration order is destruction order in reverse: the loader and compiler threads stop
     // before the state their callbacks touch, and the engine outlives everything rendering
@@ -450,6 +457,8 @@ EngineFacade::Impl::Impl(EngineMode m, const DriverConfigPOD& cfg, FacadeOptions
     // PLUG-022 (T-064): plugin nodes count the blocks their NaN guard silenced into nanBlocks.
     plugins->setTelemetry(&engine.telemetry());
     vst3Plugins->setTelemetry(&engine.telemetry());
+    plugins->setEditQueue(pluginEdits);      // DW-204 (T-063)
+    vst3Plugins->setEditQueue(pluginEdits);
 
     // PLUG-010 (T-061): hosted Audio Units. Registered before the creator's hook (which may replace
     // the kind) and kept in registerNodes for rate changes.
@@ -925,6 +934,19 @@ void EngineFacade::Impl::pump() {
         event.subject = slot;
         event.error.code = FacadeErrorCode::internal;
         event.error.message = "plugin " + std::to_string(slot) + " output NaN or infinity; its output was silenced";
+        pushEvent(std::move(event));
+    }
+
+    // DW-204 (T-063): parameter edits made in a plugin's own editor, in the order it made them.
+    for (const PluginParamEdit& edit : pluginEdits->take()) {
+        EngineEventPOD event;
+        event.type = EngineEventType::pluginParamEdited;
+        event.subject = edit.slot;
+        event.pluginEdit.index = edit.index;
+        event.pluginEdit.value = edit.value;
+        event.pluginEdit.phase = edit.phase == PluginEditKind::begin ? PluginEditPhase::begin
+                                 : edit.phase == PluginEditKind::end ? PluginEditPhase::end
+                                                                     : PluginEditPhase::value;
         pushEvent(std::move(event));
     }
 
@@ -1557,8 +1579,28 @@ void EngineFacade::setPluginState(NodeID slot, const ByteVector& state) {
 std::string EngineFacade::pluginInfoJSON(NodeID slot) const {
     return impl_->vst3Plugins->knows(slot) ? impl_->vst3Plugins->infoJSON(slot) : impl_->plugins->infoJSON(slot);
 }
-void* EngineFacade::createPluginView(NodeID) { return nullptr; }
-void EngineFacade::destroyPluginView(NodeID) {}
+// PLUG-017 (T-063): main thread only (PluginViewHost). The slot's current instance (its latest
+// node's, else a parked one) of whichever host knows the slot.
+void* EngineFacade::createPluginView(NodeID slot) {
+    if (impl_->vst3Plugins->knows(slot)) {
+        auto instance = impl_->vst3Plugins->current(slot);
+        return instance ? impl_->pluginViews->open(slot, nullptr, instance) : nullptr;
+    }
+    auto instance = impl_->plugins->current(slot);
+    return instance ? impl_->pluginViews->open(slot, instance, nullptr) : nullptr;
+}
+
+void EngineFacade::destroyPluginView(NodeID slot) { impl_->pluginViews->close(slot); }
+
+std::string EngineFacade::pluginViewJSON(NodeID slot) const {
+    const void* shown = impl_->pluginViews->instanceOf(slot);
+    if (shown == nullptr) return impl_->pluginViews->json(slot, false);
+    const void* current = impl_->vst3Plugins->knows(slot) ? static_cast<const void*>(impl_->vst3Plugins->current(slot).get())
+                                                          : static_cast<const void*>(impl_->plugins->current(slot).get());
+    return impl_->pluginViews->json(slot, current != shown);
+}
+
+std::vector<NodeID> EngineFacade::openPluginViews() const { return impl_->pluginViews->openSlots(); }
 
 // MARK: Offline
 

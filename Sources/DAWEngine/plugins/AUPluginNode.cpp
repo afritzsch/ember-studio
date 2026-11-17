@@ -45,6 +45,7 @@ void AUPluginNode::prepare(const PrepareInfo& info) {
     tracked_ = std::min({numParams_, static_cast<uint32_t>(params.size()), kMaxParams});
     lastGeneration_.assign(tracked_, 0);
     lastPushed_.assign(tracked_, std::numeric_limits<float>::quiet_NaN());
+    retry_.assign(tracked_, 0);  // DW-204
     minValue_.resize(tracked_);
     maxValue_.resize(tracked_);
     canRamp_.resize(tracked_);
@@ -63,12 +64,24 @@ void AUPluginNode::pushParams(const ProcessContext& ctx) DAW_RT {
     for (uint32_t i = 0; i < tracked_; ++i) {
         const ParamID id = firstParam_ + i;
         const uint32_t generation = ctx.params.generation(id);
-        if (primed_ && generation == lastGeneration_[i]) continue;
+        if (primed_ && generation == lastGeneration_[i] && !retry_[i]) continue;
         lastGeneration_[i] = generation;
+        retry_[i] = 0;
         float value = ctx.params.get(id);
         if (!__builtin_isfinite(value)) continue;  // not set: the plugin keeps its value
         value = std::clamp(value, minValue_[i], maxValue_[i]);
         if (value == lastPushed_[i]) continue;
+        // DW-204 (T-063): the plugin's editor is ahead of the model; don't push it back.
+        switch (instance_->pushDecision(i, value)) {
+        case AUInstance::PushDecision::defer:
+            retry_[i] = 1;
+            continue;
+        case AUInstance::PushDecision::skip:
+            lastPushed_[i] = value;
+            continue;
+        case AUInstance::PushDecision::push:
+            break;
+        }
         // D-13: a block-long ramp where the parameter can ramp; the first push is a step.
         const bool ramp = canRamp_[i] && lastPushed_[i] == lastPushed_[i];
         instance_->scheduleParam(i, value, ramp ? ctx.numFrames : 0);
