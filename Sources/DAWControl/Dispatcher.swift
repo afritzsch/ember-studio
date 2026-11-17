@@ -238,6 +238,7 @@ public final class Dispatcher {
             return try encode(HistoryResult(label: label))
         case .transportPlay, .transportStop, .transportLocate, .transportSetLoop, .transportRecord, .transportSetPunch:
             return try encode(transport(method, params))
+        case .transportSetRecordOptions: return try encode(transport(method, params))  // T-080
         case .transportWait: return try encode(await transportWait(decode(params)))
         case .transportSetMetronome: return try encode(transportSetMetronome(decode(params)))
         case .assetImport: return try encode(await assetImport(decode(params)))
@@ -477,6 +478,9 @@ public final class Dispatcher {
                 throw ControlError.invalidParams("start and end go together")
             }
             engine.setPunch(enabled: p.enabled, start: start, end: end)
+        case .transportSetRecordOptions:  // REC-034 (T-080)
+            let p: TransportSetRecordOptionsParams = try decode(params)
+            if let midiLoopTakes = p.midiLoopTakes { engine.setRecordOptions(midiLoopTakes: midiLoopTakes) }
         default:
             preconditionFailure("\(method) is not a transport command")
         }

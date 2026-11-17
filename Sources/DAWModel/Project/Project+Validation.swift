@@ -14,6 +14,7 @@ extension Project {
         try validateLoop()
         try metronome.validate()
         try validateAutomation()  // T-074 (11)
+        try validateTakeFolders()  // T-080 (09, REC-030/031)
     }
 
     /// Assets are well-formed and every audio clip's asset exists (T-030). An asset whose file is
@@ -175,7 +176,7 @@ extension Track {
     func forEachID(_ body: (ModelID, String) -> Void) {
         body(id, "track")
         for clip in clips { clip.forEachID(body) }
-        for folder in takeFolders { body(folder.id, "take folder") }
+        for folder in takeFolders { folder.forEachID(body) }  // T-080: takes, their clips and notes
         instrument?.forEachID(body)
         for slot in inserts { slot.forEachID(body) }
         for send in sends { body(send.id, "send") }

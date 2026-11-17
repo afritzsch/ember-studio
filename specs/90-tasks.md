@@ -120,8 +120,8 @@ DSP effects (T-070..073) depend only on the Node API and can be **pulled forward
 ### M8 — Comping, export, hardening
 | Task | Lane | Title | Requirements | Depends on | Status |
 |---|---|---|---|---|---|
-| T-080 | E+M | Loop recording takes, TakeFolder, comp model, flattening | REC-030..034 | T-052, T-035 | wip(t-080-loop-takes) |
-| T-081 | U | Take folder / comp editing UI | UI-016 | T-080, T-033 | todo |
+| T-080 | E+M | Loop recording takes, TakeFolder, comp model, flattening | REC-030..034 | T-052, T-035 | done |
+| T-081 | U | Take folder / comp editing UI | UI-016 | T-080, T-033 | ready |
 | T-082 | U | Export dialog | UI-042 | T-009, T-032 | done |
 | T-083 | U | Crash recovery dialog | UI-043 | T-031, T-064 | ready |
 | T-084 | E | Sanitizer CI jobs, perf smoke, GitHub Actions | TEST-007, 008, BUILD-009 | T-077 | wip(t-084-ci) |
@@ -446,7 +446,7 @@ Recorded by the lead from worker reports.
 | DW-240 | T-077 | `Tests/GoldenTests/GoldenEngine.swift` mirrors `EngineClient`'s telemetry by hand and dropped `nanBlocks` (fixed in T-077); it may drop other later fields (`recordDrops`, `deviceInputLatency`, `armedTracks`, …). Share one conversion | B / tests | todo |
 | DW-241 | T-077 | Wall-clock tests flaky under parallel load besides UI-010 (DW-223): DW-032 `SyncCostTests` step-cost bounds, CTL-031 `ProgressTests` values.count ≥ 3 | E/B (T-084 perf job) | todo |
 | DW-242 | T-089 | `AUPluginNode::reset()` and `VST3PluginNode::reset()` do nothing, so the DW-063 reset before an offline render doesn't clear a hosted plugin's tail (AU: `AudioUnitReset`; VST3: processor reset/flush) | P | todo |
-| DW-243 | T-089 | With a loop shorter than the device buffer, the recorder reads `Transport::block()` once per device block (the last pass), so earlier passes of that block aren't captured. Matters for T-080 loop takes | E (T-080) | todo |
+| DW-243 | T-089 | With a loop shorter than the device buffer, the recorder reads `Transport::block()` once per device block (the last pass), so earlier passes of that block aren't captured. Matters for T-080 loop takes | E (T-080) | done (T-080) |
 | DW-244 | T-089 | 02 ENG-041's render order should mention passes (one graph run per pass, automation per pass); documented in 03 and `core/Engine.h` only | spec (lead) | todo |
 | DW-245 | T-089 | The toolbar / `ui.state` could show `playPending` (play waiting for an asset re-conversion); `GoldenEngine.transport()` doesn't mirror punch or `playPending` (with DW-240) | U / tests | todo |
 | DW-246 | T-090 | The facade has no `unloadAsset`: the live engine keeps the decoded audio of every project that was ever in front until quit (and background windows keep their own copy in their offline engine). A handover could unload the leaving project's assets | E/B | todo |
@@ -461,3 +461,6 @@ Recorded by the lead from worker reports.
 | DW-255 | T-075 | Recorded points appear on the lane only when the pass commits (release/stop), not live while recording | U | todo |
 | DW-256 | T-075 | After a touch pass commits, the lane resumes right after `perform`; the rebuilt graph lands after EngineSync's ~10 ms debounce, so the old lane can play for a block or two. Resume on `graphApplied` instead | M | todo |
 | DW-257 | T-075 | The dawctl touch-playback check (−12 dB inside the pass, back after release) could become a golden fixture | D | todo |
+| DW-258 | T-080 | `RemoveAsset` doesn't check take clips: Debug `validate()` rejects the removal, Release would leave a take on a missing asset | M | todo |
+| DW-259 | T-080 | `SetSessionSampleRate`/`RestoreSessionSampleRate` don't rescale take clips' `sourceOffsetSamples` | M | todo |
+| DW-260 | T-080 | The recorder guesses whether a block advanced (`Transport` has no block counter): a stale block of whole loop lengths could be recorded twice, and a multi-pass block that can't be traced to the previous one (play + locate in one block, tempo edit) is rebuilt assuming it ran inside the loop. A per-block counter on `Transport` or an `advanced` flag through `InputCapture` makes both exact | E (small) | todo |

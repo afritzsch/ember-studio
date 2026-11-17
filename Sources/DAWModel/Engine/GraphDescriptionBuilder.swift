@@ -54,6 +54,7 @@ public enum GraphDescriptionBuilder {
                         assetID: clip.assetID, sourceOffsetSamples: clip.sourceOffsetSamples, gain: clip.gain,
                         fadeIn: clip.fadeIn, fadeOut: clip.fadeOut))
                 }
+                b.appendComps(of: track, player: source, tempo: project.tempoMap)  // REC-032 (T-080)
                 head = source
                 // REC-020..022 (T-054): the track's input can replace its clips. Arm and input
                 // pair are structural; the mode is the monitor slot (`paramValues`).
@@ -65,6 +66,7 @@ public enum GraphDescriptionBuilder {
                 if let instrument = track.instrument {
                     b.node(source, .midiClipPlayer)
                     for case .midi(let clip) in track.clips { b.appendNotes(of: clip, player: source) }
+                    b.appendComps(of: track, player: source, tempo: project.tempoMap)  // REC-034 (T-080)
                     b.device(instrument)
                     b.edge(source, instrument.id, .midi)
                     head = instrument.id
@@ -413,5 +415,43 @@ extension Project {
         for bus in buses { out += bus.inserts }
         out += master.inserts
         return out
+    }
+}
+
+// MARK: Take folders (REC-032, T-080)
+
+extension GraphDescriptionBuilder {
+    /// REC-032: the ID of the n-th comp clip of a track. Model IDs stay below 2^56, so these sort
+    /// after every clip of the track: under DSP-002's "later clip wins" a comp clip counts as the
+    /// newest clip for equal starts (DECISIONS "T-080 takes model"), and a later folder's clips
+    /// win over an earlier folder's.
+    public static func compClipID(_ n: Int) -> ModelID { (1 << 63) | ModelID(n) }
+
+    /// REC-032: the comp's crossfade at segment boundaries, in samples (DSP-002's length).
+    public static let compCrossfadeSamples: Int64 = 64
+}
+
+extension Emitter {
+    /// REC-032/034 (T-080): each take folder's comp, flattened into ordinary clips of the track's
+    /// player (`TakeFolder.flattened`). Audio comp clips overlap at each boundary by 64 samples
+    /// where a take has the audio, so DSP-002 crossfades the boundary with its equal-power curve;
+    /// MIDI comps add the notes of each segment's take, trimmed to the segment.
+    mutating func appendComps(of track: Track, player: NodeIDValue, tempo: TempoMap) {
+        var n = 0
+        for folder in track.takeFolders {
+            let clips = folder.flattened(tempo: tempo, crossfadeSamples: GraphDescriptionBuilder.compCrossfadeSamples)
+            for clip in clips {
+                switch clip {
+                case .audio(let clip):
+                    graph.audioClips.append(.init(
+                        player: player, clipID: GraphDescriptionBuilder.compClipID(n), start: clip.start,
+                        length: clip.length, assetID: clip.assetID, sourceOffsetSamples: clip.sourceOffsetSamples,
+                        gain: clip.gain, fadeIn: clip.fadeIn, fadeOut: clip.fadeOut))
+                    n += 1
+                case .midi(let clip):
+                    appendNotes(of: clip, player: player)
+                }
+            }
+        }
     }
 }

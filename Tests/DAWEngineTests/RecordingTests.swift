@@ -25,4 +25,14 @@ struct RecordingTests {
 
     @Test("REC-004, IO-021 (2), DW-119: device loss, stop, arm changes and setRecording(false) finalize takes; offline records nothing")
     func finalizesTakes() { expectPasses(daw.testing.facadeFinalizesTakes()) }
+
+    // T-080 (REC-030, REC-034, DW-243): loop passes (Tests/DAWEngineTestSupport/LoopTakeChecks.cpp).
+    @Test("REC-030, DW-243: blocks laid out in passes like Engine::render: every pass of a short loop is captured and passStarts = each wrap + D")
+    func logsLoopPasses() { expectPasses(daw.testing.recorderLogsLoopPasses()) }
+
+    @Test("REC-030: fake-device loopback, 3 passes → 3 pass starts with each pass's click at its start; a loop shorter than the buffer reports every pass")
+    func facadeReportsLoopPasses() { expectPasses(daw.testing.facadeReportsLoopPasses()) }
+
+    @Test("REC-034: a MIDI loop take reports each note's pass, the passes and the loop; setRecordOptions(midiLoopTakes) is stamped and read back")
+    func midiTakeReportsPasses() { expectPasses(daw.testing.midiTakeReportsPasses()) }
 }

@@ -21,7 +21,20 @@
 // Takes. All armed tracks record into one session (a take per track). prepare() makes it ready
 // (allocating its FIFOs, non-RT); it starts when the first frame is captured. A finished session
 // is replaced by a new one at the next prepare(). A take is one continuous file: if the transport
-// wraps a loop while recording, the file runs on (REC-030's takes are T-080).
+// wraps a loop while recording, the file runs on, and the take reports where each loop pass
+// starts in it (REC-030, T-080; the model makes the passes takes, clip views into the file).
+//
+// Loop passes (REC-030, T-080). The audio thread logs the session frame of every wrap (a
+// preallocated log, kMaxWraps; later wraps are ignored and their audio stays in the last pass).
+// finalize() turns them into FinalizedTake::passStarts: the file frame holding the loop start in
+// each pass, i.e. the wrap shifted by the REC-003 latency D (a frame captured at transport q
+// belongs at q − D, so the loop start of the pass that began at wrap frame w is file frame w + D,
+// and the D frames before it still end the pass before). DW-243: with a loop shorter than the
+// device block, Engine::render lays the block out in several passes and Transport::block() keeps
+// only the last one (Transport.h). The capture writes the whole block anyway (with the loop on
+// there is no punch) and rebuilds the wraps before the last pass: they repeat every loop length
+// back from its start, beginning where the previous block left off (or, when that doesn't fit,
+// e.g. after a tempo edit, with the block's first frame inside the loop).
 //
 // Threads: the control functions are non-RT and called by one thread at a time (the facade,
 // under its lock); captureBlock is RT, from the engine's render thread; daw.diskwrite is the
@@ -58,11 +71,19 @@ struct FinalizedTake {
     std::string file;           // absolute path; empty if the file couldn't be written (`error`)
     int64_t startSample = 0;    // REC-003: timeline sample (session rate) of the file's first frame
     int64_t frames = 0;         // in the file (silence in place of dropped blocks included)
-    uint32_t takeIndex = 0;     // REC-030 (T-080): 0 until loop takes exist
+    uint32_t takeIndex = 0;     // 0: one file per track and take (REC-030 passes: passStarts)
     uint32_t channels = 2;
     double sampleRate = 0;
     uint64_t droppedFrames = 0; // REC-002: frames the FIFO had no room for
     std::optional<Error> error; // the file couldn't be created or written
+    // REC-030 (T-080): the loop passes in the file. Empty when the transport never wrapped inside
+    // the take; else passStarts[0] == 0 (the first pass starts at startSample) and passStarts[i],
+    // i ≥ 1, is the file frame that holds the loop start (timeline sample loopStart) in pass i,
+    // ascending and < frames. A pass runs to the next pass start (the last one to the end of the
+    // file, possibly partial). loopStart/loopEnd: the loop's timeline samples (session rate).
+    std::vector<int64_t> passStarts;
+    int64_t loopStart = 0;
+    int64_t loopEnd = 0;
 };
 
 struct PunchRange {
@@ -77,6 +98,8 @@ public:
     static constexpr std::size_t kMaxTracks = 64;
     // Input channel pairs (channels 2p, 2p+1); the device view is capped at kMaxDeviceChannels.
     static constexpr uint32_t kMaxInputPairs = 16;
+    // REC-030: loop wraps a session logs (a one-sample loop at 48 kHz fills it in 1.4 s).
+    static constexpr uint32_t kMaxWraps = 1u << 16;
 
     Recorder();   // starts daw.diskwrite
     ~Recorder();  // finalizes (the results are dropped) and joins it; nothing may capture any more
@@ -138,6 +161,12 @@ private:
     std::shared_ptr<Session> deactivate();
     // Has daw.diskwrite drain and close a deactivated session; its takes (empty if it never started).
     std::vector<FinalizedTake> finish(std::shared_ptr<Session> session);
+    // REC-030, RT: a wrap at session frame `at` of the loop [loopStart, loopEnd).
+    static void logWrap(Session& session, int64_t at, SamplePos loopStart, SamplePos loopEnd) DAW_RT;
+    // REC-001, RT: frames [from, from + n) of `input` into every take, the first of them at
+    // timeline sample `first` (latency-compensated).
+    static void capture(Session& session, const AudioBufferView& input, uint32_t from, uint32_t n,
+                        SamplePos first, int64_t latency, std::atomic<uint64_t>& dropped) DAW_RT;
 
     // Audio thread's view.
     std::atomic<Session*> active_{nullptr};
@@ -154,6 +183,14 @@ private:
     PunchRange rtPunch_{};
     SamplePos lastPos_ = 0;
     bool hasLastPos_ = false;
+    bool lastPlaying_ = false;
+    bool lastRecording_ = false;
+    // DW-243, audio thread only: the transport position just after the last frame of the last
+    // block that played (unwrapped: the loop end if it ended there), so a block laid out in
+    // several passes knows where it began.
+    SamplePos prevEnd_ = 0;
+    bool hasPrevEnd_ = false;
+    SamplePos prevLoopLength_ = 0;  // the loop's length in it, if it looped (see captureBlock)
 
     // Control side.
     std::map<NodeID, uint32_t> armed_;  // track → input pair
