@@ -320,6 +320,37 @@ struct DeviceInfoPOD {
 
 Affected: T-090 only. Tests: `FeedbackGuardTests` (`deviceInfoFields`: the defaults decode, and the real engine on the fake driver).
 
+### Contract delta (T-063), accepted (autobuild, see docs/autobuild/DECISIONS.md "T-063 editors")
+Plugin editors (PLUG-017) and the plugin's own parameter edits (PLUG-015 second half, DW-204). **Additive and defaulted.** Existing signatures and fields keep their meaning, and `createPluginView`/`destroyPluginView` (stubs until now) are filled in. The hosting side is in 10 "Contract delta (T-063)".
+- **`createPluginView(slot)` → `NSView*`** (main thread; null elsewhere).
+  - It opens the editor of the slot's AU or VST3 and returns its container, which the facade owns until `destroyPluginView(slot)` or the facade's end.
+  - It returns null when the slot has no loaded plugin, or for a VST3 without an editor.
+  - Calling it again returns the same view. If the slot's instance was replaced, the old editor closes and a new one opens.
+  - The container's frame follows the plugin. The host follows it with `NSViewFrameDidChangeNotification`, and a host resizing the container resizes a resizable VST3 view.
+  - Swift: `EngineClient.createPluginView(slot:) -> UnsafeMutableRawPointer?`. C++ interop imports the method as `__createPluginViewUnsafe`.
+- **New `std::string pluginViewJSON(NodeID slot) const`** (any thread):
+  - for an open editor: `{"slot", "open": true, "ready", "kind": "au"|"auGeneric"|"vst3", "title", "width", "height", "resizable", "stale"}`;
+  - otherwise: `{"slot", "open": false}`.
+- **New `std::vector<NodeID> openPluginViews() const`.**
+- **`EngineEventType::pluginParamEdited`** (appended last), with `subject` = the device slot. The new field `EngineEventPOD.pluginEdit` is a `PluginParamEditPOD {uint32_t index; float value; PluginEditPhase phase}`, where `enum class PluginEditPhase : uint8_t { begin, value, end }`.
+  - `index` is the slot's param index (`pluginInfoJSON` params[index]).
+  - VST3 values are normalized; AU values are in the parameter's range.
+  - `begin` carries the value before the gesture (VST3, AU Touch), or NaN.
+  - A `value` with no `begin` of that param open is ungestured.
+  - Events come in the plugin's order. Consecutive values of one param between polls coalesce into the newest; the queue is bounded at 4096 entries, dropping the oldest.
+- **Swift** (`EngineProtocol.swift`, its own block at the end):
+  - `EngineEvent.Kind.pluginParamEdited` and `EngineEvent.pluginEdit: PluginParamEdit? {index, value, phase}`, plus `EngineEvent(pluginEdit:slot:)` for tests.
+  - The requirements `createPluginView(slot:)`, `destroyPluginView(slot:)` and `pluginViewJSON(slot:)`, defaulted to none / "" in a protocol extension, so `FakeEngine` and other conformers compile unchanged.
+  - `ToastCenter`'s switch gets one `case .pluginParamEdited: return`.
+- **Model** (07, MODEL-003/005): `EngineSync.pluginEdits` (`PluginEditRecorder`) turns the events into `SetParam(.device(slot, index))`:
+  - each plugin gesture is one undo entry ("Set Parameter"); overlapping gestures of one plugin share it;
+  - the ungestured values of one poll are one entry;
+  - values the document already holds (the echo) are skipped;
+  - non-plugin and unknown slots are dropped;
+  - `endGestures(slot:)` ends an open gesture (the app calls it when the editor closes), and `ProjectStore.detachEngine` ends them all.
+
+Affected: T-063. T-065 (device chain view) uses `createPluginView` through the app's `PluginEditorModel` and gets the plugin → model direction for free.
+
 ## Status
 | ID | status | test |
 |---|---|---|
