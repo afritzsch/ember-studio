@@ -138,6 +138,10 @@ final class ProjectWindowModel: Identifiable {
     let pluginEditors = PluginEditorModel()
     /// UI-015, AUTO-006/007 (T-075): automation lanes in the arrange view and the window's recorder.
     let automation = AutomationLanesModel()
+    /// UI-032 (T-065): the Device Chain tab (generic device UI, bypass, reorder, sidechain).
+    let deviceChain = DeviceChainModel()
+    /// UI-041 (T-065): the plugin manager panel (the app's scanned plugins, blocked list, rescan).
+    let pluginPanel = PluginManagerPanelModel()
 
     init(id: Int, store: ProjectStore, toasts: ToastCenter = ToastCenter()) {
         self.id = id
@@ -151,6 +155,8 @@ final class ProjectWindowModel: Identifiable {
         feedbackGuard.window = self
         pluginEditors.window = self  // T-063
         automation.window = self  // T-075
+        deviceChain.window = self  // T-065
+        pluginPanel.window = self  // T-065
         audioPrefs.refreshDevices()
         // UI-004: device toasts name devices (also ones that are gone) and offer the audio settings.
         toasts.deviceName = { [weak self] id in self?.audioPrefs.name(of: id) }
@@ -173,6 +179,7 @@ final class ProjectWindowModel: Identifiable {
         pianoRoll.close()  // UI-021: its note-offs go to the old engine, before the swap
         mixer.documentReplaced()
         automation.documentReplaced()  // T-075: passes end uncommitted, before the swap
+        deviceChain.documentReplaced()  // T-065
         self.store = store
         arrange.peaks.invalidate(nil)
         selectedTracks = []
@@ -193,6 +200,7 @@ final class ProjectWindowModel: Identifiable {
         pluginEditors.engineWillChange()  // T-063: editors belong to the old engine; they reopen on the new
         pianoRoll.stopAudition()
         mixer.documentReplaced()  // a fader drag ends; meters start over on the next engine
+        deviceChain.engineChanged()  // T-065: a param drag ends; plugin info comes from the next engine
     }
 
     /// DW-156 (T-090): the project is the same but its engine changed (live ↔ offline). Transport,
@@ -358,6 +366,8 @@ final class ProjectWindowModel: Identifiable {
         controls += trackHeaders.flatMap(\.controls)
         controls += arrange.controls
         controls += automation.controls  // T-075 (UI-015)
+        controls += deviceChain.controls  // T-065 (UI-032)
+        controls += pluginPanel.controls  // T-065 (UI-041)
         controls += pianoRoll.controls
         controls += audioPrefs.controls
         controls += exportDialog.controls  // T-082
@@ -497,5 +507,6 @@ final class ProjectWindowModel: Identifiable {
         feedbackGuard.check()  // DW-230 (T-090)
         pluginEditors.refresh()  // T-063 (PLUG-017): removed slots, safe mode, sizes, replaced instances
         automation.transportPolled(transport)  // T-075 (AUTO-006/007)
+        deviceChain.refresh()  // T-065: plugins' own values, loads
     }
 }

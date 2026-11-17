@@ -23,6 +23,11 @@ struct ProjectWindowView: View {
                 ExportPanel(model: model.exportDialog, controls: controls)
                 Divider()
             }
+            // UI-041 (T-065): the plugin manager, a strip like the audio settings.
+            if model.pluginPanel.isOpen {
+                PluginManagerPanel(panel: model.pluginPanel, controls: controls)
+                Divider()
+            }
             HSplitView {
                 if model.showsBrowser {
                     PanePlaceholder(title: "Browser", detail: "Files and plugins")
@@ -45,6 +50,10 @@ struct ProjectWindowView: View {
                     // UI-030: strips need room for the fader between sends, pan and the buttons.
                     MixerPane(mixer: model.mixer)
                         .frame(height: 340)
+                } else if pane == .deviceChain {
+                    // UI-032 (T-065): device cards need room for a column of generic controls.
+                    DeviceChainPane(model: model.deviceChain)
+                        .frame(height: 300)
                 } else {
                     PanePlaceholder(title: pane.title, detail: "")
                         .frame(height: 140)
@@ -119,6 +128,7 @@ private struct ToolbarRow: View {
             if let browser = controls["pane.browser"] { ControlToggle(control: browser) }
             if let inspector = controls["pane.inspector"] { ControlToggle(control: inspector) }
             if let settings = controls["prefs.audio"] { ControlToggle(control: settings, face: "Audio") }
+            if let plugins = controls["plugins.manager"] { ControlToggle(control: plugins, face: "Plugins") }  // T-065
         }
         .labelStyle(.iconOnly)
         .padding(.horizontal, 10)

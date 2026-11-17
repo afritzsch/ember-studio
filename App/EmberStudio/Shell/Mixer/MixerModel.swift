@@ -122,7 +122,9 @@ final class MixerModel {
     private func insert(_ slot: DeviceSlot) -> MixerInsert {
         // T-063 (PLUG-017): plugins have an editor; whether it is open shows on the strip.
         MixerInsert(id: slot.id, name: Self.insertName(slot.kind), bypass: slot.bypass, isPlugin: slot.isPlugin,
-                    editorOpen: window?.pluginEditors.isOpen(slot.id) ?? false)
+                    editorOpen: window?.pluginEditors.isOpen(slot.id) ?? false,
+                    safeModeBypassed: slot.isPlugin && window?.store.isSafeMode == true,  // DW-226 (T-065)
+                    format: DeviceChainModel.format(slot.kind))
     }
 
     /// PLUG-017 (T-063): "Open Editor" toggles for the strip's plugins.
@@ -140,6 +142,44 @@ final class MixerModel {
         return controls
     }
 
+    /// DW-250 (T-065): the device picker's list, the same as the Device Chain tab's.
+    private var insertChoices: [DeviceChoice] {
+        DeviceChoice.all(plugins: window?.pluginPanel.manager.usable ?? [])
+    }
+
+    /// DW-250 (T-065): bypass (SetDeviceBypass; in safe mode a plugin's shows on and is disabled,
+    /// DW-226), remove (RemoveDevice), up/down (MoveDevice) and show (the Device Chain tab).
+    private func insertControls(_ values: MixerStripModel.Values) -> [UIControl] {
+        let count = values.inserts.count
+        return values.inserts.enumerated().flatMap { index, insert -> [UIControl] in
+            let prefix = "\(values.controlPrefix).insert.\(insert.id)"
+            let slot = insert.id
+            return [
+                .toggle("\(prefix).bypass", insert.safeModeBypassed ? "\(insert.name) Bypassed by Safe Mode" : "Bypass \(insert.name)",
+                        isOn: insert.isBypassed, enabled: !insert.safeModeBypassed) { [weak self] in
+                    self?.window?.perform(SetDeviceBypass(slotID: slot, bypass: !insert.bypass))
+                },
+                .button("\(prefix).remove", "Remove \(insert.name)") { [weak self] in
+                    self?.window?.perform(RemoveDevice(slotID: slot))
+                },
+                .button("\(prefix).up", "Move \(insert.name) Up", enabled: index > 0) { [weak self] in
+                    self?.window?.perform(MoveDevice(slotID: slot, index: index - 1))
+                },
+                .button("\(prefix).down", "Move \(insert.name) Down", enabled: index < count - 1) { [weak self] in
+                    self?.window?.perform(MoveDevice(slotID: slot, index: index + 1))
+                },
+                .button("\(prefix).show", "Show \(insert.name) in Device Chain") { [weak self] in
+                    self?.window?.deviceChain.show(channel: values.id)
+                },
+            ]
+        }
+    }
+
+    /// DW-250: drag-and-drop in the inserts list: `slot` moves to where `target` is.
+    func moveInsert(_ slot: NodeIDValue, onto target: NodeIDValue) {
+        window?.deviceChain.move(slot, onto: target)
+    }
+
     static func insertName(_ kind: DeviceSlot.Kind) -> String {
         switch kind {
         case .au(let plugin): plugin.name
@@ -151,6 +191,7 @@ final class MixerModel {
             case .delay: "Delay"
             case .reverb: "Reverb"
             case .sampler: "Sampler"
+            case .gain: "Gain"  // T-065: the device picker offers it
             default: node.rawValue
             }
         }
@@ -158,6 +199,8 @@ final class MixerModel {
 
     private func makeStrip(_ values: MixerStripModel.Values, header: TrackHeaderModel?, muteControl: UIControl,
                            soloControl: UIControl?) -> MixerStripModel {
+        var values = values
+        values.insertChoices = insertChoices  // T-065 (DW-250)
         let id = values.id
         let prefix = values.controlPrefix
         var strip = MixerStripModel(
@@ -191,6 +234,12 @@ final class MixerModel {
                 }
             })
         strip.editorControls = editorControls(values)  // T-063
+        strip.insertControls = insertControls(values)  // T-065 (DW-250)
+        strip.insertAddControls = values.insertChoices.map { choice in
+            .button("\(prefix).insert.add.\(choice.key)", "Add \(choice.name) to \(values.name)") { [weak self] in
+                self?.window?.perform(InsertDevice(channel: id, device: choice.kind))
+            }
+        }
         return strip
     }
 

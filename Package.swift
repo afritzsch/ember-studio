@@ -109,6 +109,9 @@ let package = Package(
         .executable(name: "dawctl", targets: ["dawctl"]),
         .executable(name: "dawmcp", targets: ["dawmcp"]),
         .executable(name: "PluginScanner", targets: ["PluginScanner"]),
+        // DW-015 (T-065, 01 "Contract delta (T-065)"): discovery, scan cache and scanner launcher for
+        // the app's plugin manager (UI-041). Plain Swift; loads no plugin code.
+        .library(name: "PluginCatalog", targets: ["PluginCatalog"]),
     ],
     dependencies: [
         // CTL-020: the official MCP Swift SDK, pinned to an exact version (dawmcp only).
@@ -290,3 +293,9 @@ let package = Package(
     ],
     cxxLanguageStandard: .cxx20
 )
+
+// DW-015 (T-065): the app shell's plugin manager (UI-041) uses the catalog. Appended rather than
+// edited into the targets above: Package.swift is add-only while several workers change it.
+for target in package.targets where target.name == "EmberStudioShell" || target.name == "EmberStudioShellTests" {
+    target.dependencies.append("PluginCatalog")
+}

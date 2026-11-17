@@ -97,6 +97,8 @@ enum UIStateDumper {
             "engine": engine(window),  // T-090 (DW-156)
             "feedbackWarning": dump(window.feedbackGuard),  // T-090 (DW-230)
             "pluginEditors": dump(window.pluginEditors),  // T-063 (PLUG-017)
+            "deviceChain": dump(window.deviceChain),  // T-065 (UI-032)
+            "pluginManager": dump(window.pluginPanel),  // T-065 (UI-041)
         ]
     }
 
@@ -301,6 +303,7 @@ enum UIStateDumper {
             "meter": meter(meters.readMeter(strip.id), meters.state(of: strip.id)),
             "controls": .array(strip.allControlIDs.map { .string($0) }),
         ]
+        json["inserts"] = mixerInserts(strip)  // T-065 (DW-250): with safe mode, format, editor
         if strip.header != nil {
             json["armed"] = .bool(strip.armed)
             json["inputPair"] = .int(Int64(strip.inputPair))

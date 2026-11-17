@@ -94,9 +94,14 @@ private struct MixerStripView: View, Equatable {
         }
     }
 
-    /// UI-030: read-only until the insert-chain commands exist (DW-149).
+    /// UI-030, DW-250 (T-065): the inserts, editable: per row a bypass toggle, the name (opens the
+    /// device in the Device Chain tab), the editor toggle for plugins, and a context menu to move or
+    /// remove it; rows can be dragged onto each other to reorder (MoveDevice). "+" is the device
+    /// picker (built-ins, scanned AU/VST3 effects). Up to three rows show, then "+N more".
     private var inserts: some View {
-        VStack(alignment: .leading, spacing: 1) {
+        let controls = Dictionary((strip.insertControls + strip.insertAddControls).map { ($0.id, $0) },
+                                  uniquingKeysWith: { a, _ in a })
+        return VStack(alignment: .leading, spacing: 1) {
             // PLUG-017 (T-063): a plugin instrument, with its editor toggle.
             if let instrument = strip.instrument, instrument.isPlugin {
                 HStack(spacing: 2) {
@@ -106,26 +111,56 @@ private struct MixerStripView: View, Equatable {
                 }
             }
             ForEach(strip.inserts.prefix(Self.insertRows)) { insert in
-                HStack(spacing: 2) {
-                    Text(insert.bypass ? "⊘ \(insert.name)" : insert.name)
-                        .foregroundStyle(insert.bypass ? .tertiary : .secondary)
-                        .lineLimit(1)
-                    if insert.isPlugin {  // PLUG-017 (T-063): "Open Editor"
-                        Spacer(minLength: 0)
-                        editorToggle("\(strip.controlPrefix).insert.\(insert.id).editor")
-                    }
+                insertRow(insert, controls: controls)
+            }
+            HStack(spacing: 2) {
+                if strip.inserts.count > Self.insertRows {
+                    Text("+\(strip.inserts.count - Self.insertRows) more").foregroundStyle(.tertiary)
+                } else if strip.inserts.isEmpty {
+                    Text("No inserts").foregroundStyle(.quaternary)
                 }
+                Spacer(minLength: 0)
+                DevicePickerMenu(title: "+", choices: strip.insertChoices, controls: controls,
+                                 idPrefix: "\(strip.controlPrefix).insert.add")
+                    .menuIndicator(.hidden)
+                    .accessibilityIdentifier("\(strip.controlPrefix).insert.add.menu")
             }
-            if strip.inserts.count > Self.insertRows {
-                Text("+\(strip.inserts.count - Self.insertRows) more").foregroundStyle(.tertiary)
-            }
-            if strip.inserts.isEmpty { Text("No inserts").foregroundStyle(.quaternary) }
             Spacer(minLength: 0)
         }
         .font(.system(size: 9))
         .frame(maxWidth: .infinity, alignment: .leading)
-        .frame(height: 38)
+        .frame(height: 52)
         .accessibilityIdentifier("\(strip.controlPrefix).inserts")
+    }
+
+    private func insertRow(_ insert: MixerInsert, controls: [String: UIControl]) -> some View {
+        let prefix = "\(strip.controlPrefix).insert.\(insert.id)"
+        return HStack(spacing: 2) {
+            if let bypass = controls["\(prefix).bypass"] {
+                ControlToggle(control: bypass, face: "⏻").controlSize(.mini).font(.system(size: 8))
+            }
+            if let show = controls["\(prefix).show"] {
+                ControlButton(control: show, face: insert.safeModeBypassed ? "⊘ \(insert.name)" : insert.name)
+                    .buttonStyle(.plain)
+                    .foregroundStyle(insert.isBypassed ? .tertiary : .secondary)
+                    .lineLimit(1)
+                    .draggable(String(insert.id))
+            }
+            if insert.isPlugin {  // PLUG-017 (T-063): "Open Editor"
+                Spacer(minLength: 0)
+                editorToggle("\(prefix).editor")
+            }
+        }
+        .contextMenu {
+            ForEach(["up", "down", "remove"], id: \.self) { action in
+                if let control = controls["\(prefix).\(action)"] { ControlButton(control: control) }
+            }
+        }
+        .dropDestination(for: String.self) { items, _ in
+            guard let dragged = items.first.flatMap(NodeIDValue.init) else { return false }
+            mixer.moveInsert(dragged, onto: insert.id)
+            return true
+        }
     }
 
     private static let insertRows = 3
