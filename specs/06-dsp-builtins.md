@@ -105,6 +105,14 @@ Behavior is unchanged (DSP-030, DSP-031, DSP-033 and DSP-040 as specified above)
 - **Reverb.** A block in which no delay time glides and the gains hold reads whole-frame taps and runs the 8 lines' damping, gains, Hadamard butterflies and write-back as two 4-lane vectors (the same float operations per line).
 - Also from the profile: `AudioClipPlayer` runs a clip's interior (past its fades and crossfades, inside the source) as a plain loop with the same products; the NaN guards (`dsp/Finite.h`) test exponent bits branch-free; `MeterWindow` (MIX-005) keeps its chunk totals in 15 groups recomputed from their chunks (still no running sums); a 0-latency insert's bypass delay line (`DelayLine` with `maxDelay() == 0`) copies instead of going through its ring.
 
+#### T-092 notes (AUTO-003 wrap jump, DW-232)
+At a loop wrap inside a block where automation registered an after-wrap value for any of a built-in's params (11 "Contract delta (T-074)"), the EQ, compressor, delay, reverb, sampler and metronome now jump there like the strip and gain node, instead of ramping across the wrap and picking up the loop start's value next block. `automation/WrapJump.h` `wrapFrame()` finds the wrap frame for a node's params (none for a slot beyond `numParams`), `afterWrapOr()` reads a param's value after it (its own slot value without a lane). Every param of the node takes its after-wrap value from the wrap frame on, latched ones included:
+- **EQ, compressor, reverb**: the block runs as two spans. The first ramps to this block's values over the frames before the wrap (ENG-022's shape, ending exactly on them at the frame before the wrap); the second starts at the after-wrap values with no ramp (the EQ's changed bands redesigned, the compressor's attack, release and detector switched, the reverb's decay gains and damping set). The reverb's size and pre-delay take the after-wrap values as their glide targets from the wrap frame (a glide, not a jump: a step would click).
+- **Delay**: feedback and mix through `ParamSmoother::next(target, n, WrapJump)`; lowpass and ping-pong switch at the wrap frame, and the after-wrap time (at the block's tempo, TIME-007) starts its crossfade there.
+- **Sampler**: the ADSR rates and velocity sensitivity switch at the wrap frame, before the events at that frame (the loop start's notes): envelopes advance with the new rates from there.
+- **Metronome**: the clicks of the segment after the wrap latch the after-wrap on/level/accent. It is a timeline node on the MIX-023 look-ahead block while automation follows the transport block (AUTO-010), so with graph latency it honors the jump only when its own wrap falls in a pass where automation registered one; without latency, always.
+- A block without a lane on the node (or without a wrap) runs exactly as before, bit for bit. Checks: `WrapJumpTests` (one per node, RT trap 0).
+
 ### General
 | ID | Requirement |
 |---|---|

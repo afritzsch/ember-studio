@@ -414,6 +414,7 @@ CheckResult bypassZeroLatencyToggles() {
             left = on ? run(rng) : 3 * run(rng);  // unbypassed runs are the longer ones
         }
         engine.params().set(bypass, on ? 1.0f : 0.0f);
+        if (block == 0) was = on;  // the first block takes the slot as it is (no fade in)
         const uint32_t n = size(rng);
         const size_t at = in.left.size();
         out.render(engine, n);
