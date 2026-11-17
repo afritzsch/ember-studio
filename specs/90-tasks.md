@@ -101,7 +101,7 @@ Tasks in different lanes can run in parallel once their dependencies are done.
 | T-062 | P | VST3 hosting node + build SDK `again` test plugin | PLUG-011..016 (VST3) | T-021, T-014 | done |
 | T-063 | P+U | Plugin editor windows (AU view controller, VST3 IPlugView) | PLUG-017 | T-061, T-062, T-032 | done |
 | T-064 | P | Host bypass, NaN guard, crash marker + safe-mode open | PLUG-018, 020..022 | T-061 | done |
-| T-065 | U | Device chain view (generic UI from ParamInfo), plugin manager | UI-032, UI-041 | T-063 | ready |
+| T-065 | U | Device chain view (generic UI from ParamInfo), plugin manager | UI-032, UI-041 | T-063 | wip(t-065-device-chain) |
 
 ### M7 — Effects & automation
 DSP effects (T-070..073) depend only on the Node API and can be **pulled forward** into any idle D-lane slot after T-005.
@@ -121,11 +121,11 @@ DSP effects (T-070..073) depend only on the Node API and can be **pulled forward
 | Task | Lane | Title | Requirements | Depends on | Status |
 |---|---|---|---|---|---|
 | T-080 | E+M | Loop recording takes, TakeFolder, comp model, flattening | REC-030..034 | T-052, T-035 | done |
-| T-081 | U | Take folder / comp editing UI | UI-016 | T-080, T-033 | ready |
+| T-081 | U | Take folder / comp editing UI | UI-016 | T-080, T-033 | wip(t-081-take-ui) |
 | T-082 | U | Export dialog | UI-042 | T-009, T-032 | done |
-| T-083 | U | Crash recovery dialog | UI-043 | T-031, T-064 | ready |
+| T-083 | U | Crash recovery dialog | UI-043 | T-031, T-064 | wip(t-083-crash-dialog) |
 | T-084 | E | Sanitizer CI jobs, perf smoke, GitHub Actions | TEST-007, 008, BUILD-009 | T-077 | done |
-| T-091 | D | DSP performance for TEST-008: compressor gain computer block-wise (vForce or fast dB, skip below threshold − knee), EQ per-sample coefficient path; perf job ≥ 10× (target 20×) | TEST-008, DSP-031, DSP-030 | T-084 | ready |
+| T-091 | D | DSP performance for TEST-008: compressor gain computer block-wise (vForce or fast dB, skip below threshold − knee), EQ per-sample coefficient path; perf job ≥ 10× (target 20×) | TEST-008, DSP-031, DSP-030 | T-084 | wip(t-091-dsp-perf) |
 
 ### Follow-ups from the user review (2026-11-10, see docs/autobuild/DECISIONS.md → User review)
 | Task | Lane | Title | Requirements | Depends on | Status |
