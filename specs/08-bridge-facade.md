@@ -320,6 +320,18 @@ struct DeviceInfoPOD {
 
 Affected: T-090 only. Tests: `FeedbackGuardTests` (`deviceInfoFields`: the defaults decode, and the real engine on the fake driver).
 
+### Contract delta (T-075), accepted (autobuild, see docs/autobuild/DECISIONS.md "T-075 gesture commit")
+Additive. AUTO-006 needs the engine to stop playing a lane while the user records a gesture on its target, without a graph rebuild per touch (11 "Contract delta (T-075)").
+```cpp
+// EngineFacade gains (Graph & params):
+bool setAutomationSuspended(uint64_t laneID, bool suspended);
+```
+- **Engine.** `automation/AutomationSuspension.h` is a fixed table of 64 lane IDs owned by the `Engine` (`Engine::automationSuspension()`), outside any RenderGraph, so a graph swap mid-gesture (the commit itself) keeps the lane suspended. Setters claim and free entries with CAS on any non-RT thread. The audio thread only loads them, and skips the scan while the table is empty. `AutomationSet::apply(block, params, suspended)` skips a suspended lane's players, playing and stopped. Every engine lane with that ID is skipped: a strip mute lane drives the strip's and the sends' mute slots.
+- **Semantics.** While a lane is suspended, `setParam` on its slot stands block after block. A resume hands the slot back to the lane from the next playing block. Resuming while stopped keeps the written value until the playhead moves or playback starts (the stopped position stays marked as written). The call returns false, and the lane keeps playing, when 64 lanes are suspended already. ID 0 is ignored.
+- **Swift.** `EngineProtocol.setAutomationSuspended(laneID:_:)` is a protocol requirement with a default no-op (test doubles). `EngineClient` calls the facade. `FakeEngine` records the calls (`suspendedLanes`, `suspensionLog`) and gains `setPlayhead(_:)` (a test seam that moves the fake playhead the way playback does).
+
+Affected: T-075 only. Tests: `AutomationTests.suspend` (C++ `automationSuspend`: table, playing/stopped, graph swap, resume, 0 RT violations) and the recorder tests in `AutomationRecordingTests`.
+
 ## Status
 | ID | status | test |
 |---|---|---|

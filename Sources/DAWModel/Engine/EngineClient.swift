@@ -64,6 +64,10 @@ public final class EngineClient: EngineProtocol {
     public func freeParams(_ first: ParamID, count: UInt32) { facade.freeParams(first, count) }
     public func setParam(_ id: ParamID, _ value: Float) { facade.setParam(id, value) }
     public func getParam(_ id: ParamID) -> Float { facade.getParam(id) }
+    /// AUTO-006 (T-075). A 65th lane at once is refused by the engine and keeps playing.
+    public func setAutomationSuspended(laneID: ModelID, _ suspended: Bool) {
+        _ = facade.setAutomationSuspended(laneID, suspended)
+    }
 
     // MARK: Transport
 

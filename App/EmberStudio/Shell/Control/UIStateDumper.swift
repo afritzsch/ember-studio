@@ -93,6 +93,7 @@ enum UIStateDumper {
             "audioPreferences": dump(window.audioPrefs),
             "mixer": dump(window.mixer),
             "export": dump(window.exportDialog),  // T-082
+            "automation": dump(window.automation),  // T-075 (UI-015)
             "engine": engine(window),  // T-090 (DW-156)
             "feedbackWarning": dump(window.feedbackGuard),  // T-090 (DW-230)
         ]
@@ -106,6 +107,64 @@ enum UIStateDumper {
         guard let engine = window.engine else { return .null }
         let mode: String = if case .realtime = engine.mode { "realtime" } else { "offline" }
         return ["live": .bool(window.hasLiveEngine), "mode": .string(mode)]
+    }
+
+    /// UI-015, AUTO-006 (T-075): automation lanes and recording passes:
+    /// `{expandedTracks: [ids], gesture, lanes: [{id, track, target, name, mode, row, rect, points:
+    /// [{tick, value, curve}], controls: [ids]}] (shown lanes), allLanes: [{id, channel, target,
+    /// mode, pointCount}], recording: [{lane, target, mode, from, lastTick, points, held}]}`.
+    static func dump(_ automation: AutomationLanesModel) -> JSONValue {
+        let g = automation.window?.arrange.geometry
+        var all: [JSONValue] = []
+        automation.window?.project.forEachAutomationLane { lane, channel in
+            all.append(["id": .int(Int64(bitPattern: lane.id)), "channel": .int(Int64(bitPattern: channel)),
+                        "target": target(lane.target), "mode": .string(lane.mode.rawValue),
+                        "pointCount": .int(Int64(lane.points.count))])
+        }
+        let passes = (automation.recorder?.passes.values.sorted { $0.laneID < $1.laneID }) ?? []
+        return [
+            "expandedTracks": ids(automation.expanded.sorted()),
+            "gesture": automation.activeGesture.map { .string($0) } ?? .null,
+            "lanes": .array(automation.layout.lanes.map { row in
+                let rect: JSONValue = g.map { g in
+                    ["x": 0, "y": .double(g.rowY(row.row)), "width": .double(g.size.width), "height": .double(g.trackHeight)]
+                } ?? .null
+                return [
+                    "id": .int(Int64(bitPattern: row.lane.id)), "track": .int(Int64(bitPattern: row.trackID)),
+                    "target": target(row.lane.target), "name": .string(row.name), "mode": .string(row.lane.mode.rawValue),
+                    "row": .int(Int64(row.row)), "rect": rect,
+                    "points": .array(row.lane.points.map { point in
+                        ["tick": .int(point.tick.raw), "value": .double(Double(point.value)), "curve": .string(curveName(point.curve))]
+                    }),
+                    "controls": .array(automation.laneControls(row).map { .string($0.id) }),
+                ]
+            }),
+            "allLanes": .array(all),
+            "recording": .array(passes.map { pass in
+                ["lane": .int(Int64(bitPattern: pass.laneID)), "target": target(pass.target), "mode": .string(pass.mode.rawValue),
+                 "from": .int(pass.from.raw), "lastTick": .int(pass.lastTick.raw), "points": .int(Int64(pass.points.count)),
+                 "held": .bool(pass.held)]
+            }),
+        ]
+    }
+
+    private static func target(_ target: ParamTarget) -> JSONValue {
+        switch target {
+        case .strip(let channel, let param):
+            ["kind": "strip", "channel": .int(Int64(bitPattern: channel)), "param": .string(param.rawValue)]
+        case .sendLevel(let send):
+            ["kind": "sendLevel", "send": .int(Int64(bitPattern: send))]
+        case .device(let slot, let index):
+            ["kind": "device", "slot": .int(Int64(bitPattern: slot)), "index": .int(Int64(index))]
+        }
+    }
+
+    private static func curveName(_ curve: AutomationPoint.Curve) -> String {
+        switch curve {
+        case .linear: "linear"
+        case .hold: "hold"
+        case .exp: "exp"
+        }
     }
 
     /// DW-230 (T-090): the monitoring feedback warning while it lasts.

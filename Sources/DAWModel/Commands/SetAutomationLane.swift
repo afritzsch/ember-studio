@@ -42,6 +42,7 @@ extension Project {
     ) throws(DAWError) -> (channel: NodeIDValue, lane: AutomationLane) {
         try Self.checkAutomatable(target)
         if let existing = automationLane(for: target) { return existing }
+        try checkLaneCreatable(target)
         guard let channel = automationOwner(of: target) else { throw .notFound(kind: "automation target", id: target.ownerID) }
         let lane = AutomationLane(id: ids.allocate(), target: target)
         try updateAutomation(of: channel) { lanes in lanes.append(lane) }  // the newest ID sorts last

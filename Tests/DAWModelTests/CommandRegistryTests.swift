@@ -96,6 +96,10 @@ struct CommandRegistryTests {
         RemoveDevice(slotID: 4),
         RestoreDevice(channel: 2, index: 1, slot: DeviceSlot(id: 4, kind: .builtin(.compressor), bypass: true)),
         MoveDevice(slotID: 4, index: 0),
+        // T-075 (AUTO-006)
+        RecordAutomation(target: .strip(channel: 2, param: .gain), from: 960, to: 1920,
+                         points: [AutomationPoint(tick: 960, value: 0.5), AutomationPoint(tick: 1920, value: 0.7, curve: .hold)],
+                         mode: .touch),
     ]
 
     @Test("MODEL-006: built-in type strings are stable and unique")
@@ -117,6 +121,7 @@ struct CommandRegistryTests {
             "AddAutomationPoint", "AddAutomationPoints", "RemoveAutomationPoints", "MoveAutomationPoints",
             "SetAutomationMode", "SetAutomationLane",
             "InsertDevice", "RemoveDevice", "RestoreDevice", "MoveDevice",
+            "RecordAutomation",
         ])
         let all = CommandRegistry.registered.map { $0.type }
         #expect(Set(all).count == all.count)

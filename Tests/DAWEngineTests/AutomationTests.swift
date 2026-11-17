@@ -24,4 +24,10 @@ struct AutomationTests {
 
     @Test("AUTO-008, AUTO-009: AUDelay param lanes map through the AU's ranges and reach the AU as parameter events")
     func auParam() { expectPasses(daw.testing.automationAUParam()) }
+
+    @Test("AUTO-006: a suspended lane lets the control's slot writes stand (playing and stopped), survives a graph swap, resumes next block")
+    func suspend() { expectPasses(daw.testing.automationSuspend()) }
+
+    @Test("AUTO-007, DW-237: a SetParam while stopped holds until play or locate; a rebuild while stopped writes the lane value once")
+    func stoppedEdit() { expectPasses(daw.testing.automationStoppedEdit()) }
 }

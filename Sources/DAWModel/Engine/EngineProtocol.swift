@@ -714,6 +714,10 @@ public protocol EngineProtocol: AnyObject, Sendable {
     /// ENG-023: writes the slot only; no graph is rebuilt.
     func setParam(_ id: ParamID, _ value: Float)
     func getParam(_ id: ParamID) -> Float
+    /// AUTO-006 (T-075, 08 "Contract delta (T-075)"): suspends or resumes automation lane `laneID`
+    /// while the user records a gesture on its target, so `setParam` on its slot stands (no graph
+    /// rebuild; the engine's lock-free table survives graph swaps). Default: ignored.
+    func setAutomationSuspended(laneID: ModelID, _ suspended: Bool)
 
     // Transport (TIME-004/009)
     func play()
@@ -1009,4 +1013,11 @@ extension EngineProtocol {
 /// T-054 additions to `EngineProtocol`, with defaults so test doubles compile unchanged.
 extension EngineProtocol {
     public func setMonitorInput(_ wanted: Bool) {}
+}
+
+// MARK: T-075 (AUTO-006)
+
+extension EngineProtocol {
+    /// Engines without automation (test doubles) ignore it.
+    public func setAutomationSuspended(laneID: ModelID, _ suspended: Bool) {}
 }

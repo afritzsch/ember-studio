@@ -70,6 +70,28 @@ This replaces the sentence of the T-074 delta that says a lane outlives its remo
 - Removing a send or device slot removes the lanes driving it in the same undo step: `RemoveSend`, `RemoveDevice`, `RemoveInstrument`, `SetInstrument` replacing an instrument, `RestoreInstrument` replacing a slot with another ID, and `RemoveBus` for the sends into the bus. Undo restores the target and then its lanes, with their IDs, points and mode (`SetAutomationLane` steps of one `CompositeCommand`), and redo removes both again. 07 "Contract delta (T-088)" has the full rule.
 - A lane whose target is missing anyway (a file saved before T-088, or `SetAutomationLane` on a missing target) still validates and is left out of the graph. Restoring its send or device adopts it. Undoing that restore puts the lane back as it was, so undo stays exact.
 
+### Contract delta (T-075), accepted (autobuild, see docs/autobuild/DECISIONS.md "T-075 gesture commit", "T-075 stopped edit", "T-075 automatable")
+The Interfaces above don't change. Additive: an engine suspend flag (08 "Contract delta (T-075)"), a command (07 "Contract delta (T-075)") and the model's recorder.
+- **Recording (AUTO-006).** `AutomationRecorder` (`Sources/DAWModel/Automation/`, one per `ProjectStore`, main actor) records only while the transport plays and the target's lane is in `touch`, `latch` or `write`. A *pass* captures `(tick, value)` points on the main thread, with the TIME-009 playhead tick, and is committed as **one** `RecordAutomation` command, thinned with Ramer–Douglas–Peucker: a point is dropped when the line between the kept points around it passes within ε = 0.005 (0.5 % of the normalized range) of its value at its tick. The distance is vertical (value units), not perpendicular.
+  - `touch`: the pass runs while the control is held. It is committed at release over [grab, release], and the lane plays its existing curve again.
+  - `latch`: from the first grab, the pass keeps writing until the transport stops, holding the last value after release. A second grab continues the same pass (the held value lasts until one tick before it). It is committed at stop over [grab, stop].
+  - `write`: from play to stop, the pass overwrites everything with the control's value: the value at play (the engine slot's) until a gesture changes it, gesture or not. It is committed at stop over [play, stop].
+  - While a pass runs, its lane is suspended in the engine, and the control's values go straight to the target's param slots (`setParam`; a strip mute drives the strip's and the sends' mute slots, MIX-007), not through `SetParam`. The document's static value doesn't change, and the pass is the gesture's only undo entry.
+  - A loop wrap (the playhead goes back while playing) ends the pass at the last tick before it and starts another at the new position: one command per pass of the loop.
+  - A document replaced mid-pass ends it without a commit.
+- **Commit merge** (`RecordAutomation`). The lane keeps its points before `from` and after `to`, and the recorded points replace those in [`from`, `to`]. So that the curve outside the pass plays as before, an existing lane gets an anchor one tick outside each end, holding its old value there: at `from − 1` (unless a kept point is there or `from` is 0) and at `to + 1` (unless a kept point is there or `to` ends the timeline). The `to + 1` anchor is how `touch` returns to the curve after release.
+  - An anchor copies the governing old point's curve if it is `hold`, and is linear otherwise. That is exact for linear and hold segments, and close inside an exponential one.
+  - A lane the command creates gets the pass's mode and no anchors.
+- **Stopped (AUTO-007, DW-237).** A control whose target has an enabled lane with points shows the lane's value at the playhead (`AutomationRecorder.displayedValue`; the model mirrors the engine's curves, `AutomationLane.value(at:)`). Moving it while stopped:
+  - With a point exactly at the playhead tick, it changes that point's value (`SetAutomationLane`, undoable; one drag is one entry).
+  - Otherwise it is a plain `SetParam`. The engine holds that value until playback starts or the playhead moves (T-074's stopped write, confirmed by `automationStoppedEdit`), and the control shows it until the playhead changes, then shows the lane again.
+  - A graph rebuild while stopped (any lane edit) writes the lane's value at the playhead once (DW-237).
+- **Automatable (DW-236).** `ParamCatalog` parses each built-in row's `automatable` flag (and its range and curve: `ParamDescriptor`, `ParamCatalog.infos`). A catalog read from an engine that publishes ParamInfo becomes `ParamCatalog.builtin`: the built-ins' tables are compiled into the engine, so they are the same for every engine of the process. Commands, which apply to a `Project` without an engine, consult it.
+  - A command that would *create* a lane on a non-automatable built-in param fails with `invalidArgument` ("eq HP On can't be automated"). That covers `AddAutomationPoint(s)`, `SetAutomationMode` and `RecordAutomation`.
+  - An existing lane on one (an older file) stays valid and editable, and `validate()` stays lenient (the engine leaves such lanes out).
+  - Hosted plugin params and kinds without ParamInfo count as automatable.
+- **Mapping in the model.** `AutomationMapping` mirrors `ParamMapping` (normalize ↔ native), and `Project.automationMapping(for:)` resolves it as GraphBuilder does: strip gain and send level are db faders reaching silence, pan is linear −1…1, mute 0…1, built-in device params use their ParamInfo row, VST3 params are already normalized, and AU params, whose range the model doesn't know, map 0…1. The recorder normalizes a control's value with it, and the controls show a lane through it.
+
 ## Status
 | ID | status | test |
 |---|---|---|
@@ -78,7 +100,7 @@ This replaces the sentence of the T-074 delta that says a lane outlives its remo
 | AUTO-003 | done (T-074) for strip and gain nodes | golden `automation_loop_wrap` (jumps at each wrap frame); `automationLoopWrapJump`. Other built-ins and plugins still ramp across a wrap (DW-232, DW-233) |
 | AUTO-004 | done (T-074) | `AutomationTests` `automationCurves` (linear, hold, exponential; cursor; mapping) |
 | AUTO-005 | done (T-074) | `automationDrivesSlots` (read overrides a slot write, off ignored, stopped behaviour); `AutomationModelTests` SetAutomationMode |
-| AUTO-006, AUTO-007 | todo (T-075) | |
+| AUTO-006, AUTO-007 | done (T-075) | `AutomationRecordingTests` (`thinning` RDP ε 0.5 %, `recordMerges`/`recordChecks` RecordAutomation merge + exact inverse, `touchMode`/`latchMode`/`writeMode`/`loopWrapSplits` with suspend/resume and one undo entry, `touchPlaysBack` real offline render, `stoppedEdits`), C++ `AutomationTests.suspend`/`.stoppedEdit` (DW-237 confirmed), `AutomationLaneTests.mixerTouchRecords`/`.mixerStopped`; 0 RT violations |
 | AUTO-008 | done (T-074) | `automationCompile` (ParamInfo mapping, non-automatable left out); `automationAUParam` (AU ranges); `AutomationModelTests` (mute lane drives strip and send mutes, bad edits throw) |
 | AUTO-009 | done (T-074) | `AutomationGoldenTests` VST3 lane reaches SDK `again` via IParameterChanges (computed, analytic); `automationAUParam` (AUDelay) |
 | AUTO-010 | done (T-074) | documented (11 Contract delta (T-074)): automation follows the transport block, not the MIX-023 look-ahead |

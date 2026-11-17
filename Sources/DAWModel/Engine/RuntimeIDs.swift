@@ -103,19 +103,29 @@ public enum ParamLayout {
 public struct ParamCatalog: Hashable, Sendable {
     /// Per kind, the default of each param in index order.
     public var defaults: [NodeKind: [Float]]
+    /// DW-236 (T-075): per kind, each published param's ParamInfo row (range, curve, automatable),
+    /// by index. Kinds without published ParamInfo have none.
+    public var infos: [NodeKind: [Int: ParamDescriptor]] = [:]
 
     public init(defaults: [NodeKind: [Float]] = [:]) {
         self.defaults = defaults
     }
 
-    /// Reads every kind's ParamInfo from the engine.
+    /// Reads every kind's ParamInfo from the engine. DW-236 (T-075): a catalog read from an engine
+    /// that publishes ParamInfo also becomes `ParamCatalog.builtin`, which commands consult.
     public init(engine: any EngineProtocol) {
         var defaults: [NodeKind: [Float]] = [:]
+        var infos: [NodeKind: [Int: ParamDescriptor]] = [:]
         for kind in NodeKind.allCases {
-            let values = Self.parseDefaults(engine.paramInfoJSON(kind))
+            let json = engine.paramInfoJSON(kind)
+            let values = Self.parseDefaults(json)
             if !values.isEmpty { defaults[kind] = values }
+            let rows = Self.parseInfos(json)
+            if !rows.isEmpty { infos[kind] = rows }
         }
         self.init(defaults: defaults)
+        self.infos = infos
+        if !infos.isEmpty { Self.registerBuiltin(self) }
     }
 
     public func paramCount(for slot: DeviceSlot) -> UInt32 {

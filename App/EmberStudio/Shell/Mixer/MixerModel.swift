@@ -53,7 +53,8 @@ final class MixerModel {
     private func strip(track: Track, header: TrackHeaderModel, buses: [(NodeIDValue, String)]) -> MixerStripModel {
         let values = MixerStripModel.Values(
             id: track.id, kind: track.kind == .midi ? .midi : .audio, name: track.name, controlPrefix: "mixer.track.\(track.id)",
-            gain: track.strip.gain, pan: track.strip.pan, mute: track.strip.mute, solo: track.strip.solo,
+            gain: shown(track.id, .gain, track.strip.gain), pan: shown(track.id, .pan, track.strip.pan),
+            mute: track.strip.mute, solo: track.strip.solo,
             isSelected: header.isSelected, armed: track.armed, inputPair: track.inputPair, monitoring: track.monitoring,
             inputChoices: header.inputControls.compactMap { UInt32($0.id.split(separator: ".").last ?? "") },
             output: track.output, outputTitle: outputTitle(track.output, buses: buses),
@@ -67,7 +68,7 @@ final class MixerModel {
         let prefix = "mixer.bus.\(bus.id)"
         let values = MixerStripModel.Values(
             id: bus.id, kind: .bus, name: bus.name, controlPrefix: prefix,
-            gain: bus.strip.gain, pan: bus.strip.pan, mute: bus.strip.mute, solo: bus.strip.solo,
+            gain: shown(bus.id, .gain, bus.strip.gain), pan: shown(bus.id, .pan, bus.strip.pan), mute: bus.strip.mute, solo: bus.strip.solo,
             isSelected: false, armed: false, inputPair: 0, monitoring: .off, inputChoices: [],
             output: bus.output, outputTitle: outputTitle(bus.output, buses: buses),
             outputChoices: outputChoices(bus.output, buses: buses),
@@ -80,10 +81,15 @@ final class MixerModel {
     private func strip(master: MasterChannel) -> MixerStripModel {
         let values = MixerStripModel.Values(
             id: master.id, kind: .master, name: "Master", controlPrefix: "mixer.master",
-            gain: master.strip.gain, pan: master.strip.pan, mute: master.strip.mute, solo: false,
+            gain: shown(master.id, .gain, master.strip.gain), pan: shown(master.id, .pan, master.strip.pan), mute: master.strip.mute, solo: false,
             isSelected: false, armed: false, inputPair: 0, monitoring: .off, inputChoices: [],
             output: nil, outputTitle: nil, outputChoices: [], sends: [], sendTargets: [], inserts: master.inserts.map(Self.insert))
         return makeStrip(values, header: nil, muteControl: switchControl(values, .mute, "Mute"), soloControl: nil)
+    }
+
+    /// AUTO-007 (T-075): an automated fader or pan shows its lane's value at the playhead.
+    private func shown(_ channel: NodeIDValue, _ param: ParamTarget.StripParam, _ value: Float) -> Float {
+        window?.automation.displayed(.strip(channel: channel, param: param), value) ?? value
     }
 
     private func outputTitle(_ output: OutputTarget, buses: [(NodeIDValue, String)]) -> String {
@@ -107,7 +113,7 @@ final class MixerModel {
     private func sendValues(_ sends: [Send], buses: [(NodeIDValue, String)]) -> [MixerSendValues] {
         sends.map { send in
             MixerSendValues(id: send.id, target: send.target, targetName: buses.first { $0.0 == send.target }?.1 ?? "Bus \(send.target)",
-                            level: send.level, tap: send.tap)
+                            level: window?.automation.displayed(.sendLevel(send: send.id), send.level) ?? send.level, tap: send.tap)
         }
     }
 
@@ -266,13 +272,21 @@ final class MixerModel {
     /// channel went away mid-drag) is skipped.
     func updateDrag(_ param: MixerParam, position: Double) {
         guard activeDrag == param, let store = dragStore else { return }
-        try? store.perform(command(param, position: position))
+        let command = command(param, position: position)
+        // AUTO-006/007 (T-075): recording automation takes the movement (no SetParam), and so does
+        // the stopped edit of the lane point under the playhead.
+        if let set = command as? SetParam, let value = set.value, window?.automation.controlMoved(set.target, value: value) == true { return }
+        if let set = command as? SetSendLevel,
+           window?.automation.controlMoved(.sendLevel(send: set.sendID), value: set.level) == true { return }
+        try? store.perform(command)
     }
 
     /// Ends the drag: one undo entry, none if it changed nothing.
     func endDrag() {
         dragStore?.endGesture()
         dragStore = nil
+        // AUTO-006 (T-075): a touch pass commits at release, after the drag's (empty) gesture.
+        if let param = activeDrag { window?.automation.controlReleased(param.target) }
         if activeDrag != nil { activeDrag = nil }
     }
 
