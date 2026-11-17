@@ -1,8 +1,10 @@
 #include "nodes/Compressor.h"
 
+#include <bit>
 #include <cmath>
 #include <cstddef>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <numbers>
 
@@ -57,6 +59,7 @@ void Compressor::reset() DAW_RT {
 void Compressor::prepare(const PrepareInfo& info) {
     sampleRate_ = info.sampleRate > 0.0 ? info.sampleRate : 48000.0;
     rmsCoeff_ = onePole(kRmsMs, sampleRate_);
+    attackMs_ = releaseMs_ = std::numeric_limits<float>::quiet_NaN();  // the rate may have changed
     env_ = 0.0;
     ms_ = 0.0;
     primed_ = false;
@@ -81,8 +84,17 @@ void Compressor::process(ProcessContext& ctx, NodeIO& io) DAW_RT {
     const float ratio = param(ctx, kRatio);
     const float knee = param(ctx, kKnee);
     const float makeup = param(ctx, kMakeup);
-    const double attack = onePole(param(ctx, kAttack), sampleRate_);
-    const double release = onePole(param(ctx, kRelease), sampleRate_);
+    const float attackMs = param(ctx, kAttack), releaseMs = param(ctx, kRelease);
+    if (attackMs != attackMs_) {
+        attackMs_ = attackMs;
+        attackCoeff_ = onePole(attackMs, sampleRate_);
+    }
+    if (releaseMs != releaseMs_) {
+        releaseMs_ = releaseMs;
+        releaseCoeff_ = onePole(releaseMs, sampleRate_);
+    }
+    const double attack = attackCoeff_;
+    const double release = releaseCoeff_;
     const bool rms = param(ctx, kDetector) >= 0.5f;
     if (!primed_) {
         threshold_.reset(threshold);
@@ -158,6 +170,21 @@ void Compressor::process(ProcessContext& ctx, NodeIO& io) DAW_RT {
                 if (ms_ < kSnapMs) ms_ = 0.0;
                 level[i] = ms_;
             }
+        } else if (keyChannels == 1 || keyChannels == 2) {
+            // One pass: max(|L|, |R|) in float (the same value as in double), and the chunk's
+            // loudest by the bit patterns, which order like the values for non-negative floats
+            // (and make an integer max, which vectorizes).
+            const float* k0 = key->channels[0] + base;
+            const float* k1 = key->channels[keyChannels - 1] + base;
+            uint32_t loudBits = 0;
+            for (uint32_t i = 0; i < m; ++i) {
+                const float a = std::fabs(k0[i]), b = std::fabs(k1[i]);
+                const float v = a > b ? a : b;
+                level[i] = v;
+                const uint32_t bits = std::bit_cast<uint32_t>(v);
+                loudBits = bits > loudBits ? bits : loudBits;
+            }
+            loudest = std::bit_cast<float>(loudBits);
         } else {
             for (uint32_t i = 0; i < m; ++i) level[i] = 0.0;
             for (uint32_t c = 0; c < keyChannels; ++c) {
@@ -168,7 +195,8 @@ void Compressor::process(ProcessContext& ctx, NodeIO& io) DAW_RT {
                 }
             }
         }
-        for (uint32_t i = 0; i < m; ++i) loudest = level[i] > loudest ? level[i] : loudest;
+        if (rms || keyChannels > 2)
+            for (uint32_t i = 0; i < m; ++i) loudest = level[i] > loudest ? level[i] : loudest;
 
         if (canRest && env_ == 0.0 && loudest < kneeEdge) {
             // Below the knee at rest: the gain is the makeup alone.
@@ -183,14 +211,20 @@ void Compressor::process(ProcessContext& ctx, NodeIO& io) DAW_RT {
 
         // Level in dB, floored (a level of 0 reads as the floor), and the gain computer's c,
         // which doesn't depend on the envelope.
-        for (uint32_t i = 0; i < m; ++i) {
-            const double v = level[i];
-            const double x = fastdb::ln(v > 0.0 ? v : 1.0) * levelToDb;
-            level[i] = v > 0.0 && x > kFloorDb ? x : kFloorDb;
-        }
         if (steadyCurve) {
-            for (uint32_t i = 0; i < m; ++i) level[i] = curve.gainDb(level[i]);
+#pragma clang loop interleave_count(4)
+            for (uint32_t i = 0; i < m; ++i) {
+                const double v = level[i];
+                const double x = fastdb::ln(v > 0.0 ? v : 1.0) * levelToDb;
+                level[i] = curve.gainDb(v > 0.0 && x > kFloorDb ? x : kFloorDb);
+            }
         } else {
+#pragma clang loop interleave_count(4)
+            for (uint32_t i = 0; i < m; ++i) {
+                const double v = level[i];
+                const double x = fastdb::ln(v > 0.0 ? v : 1.0) * levelToDb;
+                level[i] = v > 0.0 && x > kFloorDb ? x : kFloorDb;
+            }
             for (uint32_t i = 0; i < m; ++i) {
                 const uint32_t f = base + i;
                 level[i] = compressorGainDb(level[i], t.at(f), r.at(f), w.at(f));
@@ -205,13 +239,18 @@ void Compressor::process(ProcessContext& ctx, NodeIO& io) DAW_RT {
             const double released = release * env_ + (1.0 - release) * c;
             env_ = c < env_ ? attacked : released;
             // The snap is a branch, off the env → env chain: never taken while compressing,
-            // steadily taken at rest.
-            if (__builtin_expect(env_ > -kSnapDb, 0)) env_ = 0.0;
+            // steadily taken at rest. (The empty asm keeps the compiler from turning it back
+            // into a select, which would put a compare and a select on the chain.)
+            if (__builtin_expect(env_ > -kSnapDb, 0)) {
+                __asm__ volatile("");
+                env_ = 0.0;
+            }
             deepest = env_ < deepest ? env_ : deepest;
             gains[i] = env_ + g.at(base + i);
         }
 
         // Gains, then the multiply.
+#pragma clang loop interleave_count(4)
         for (uint32_t i = 0; i < m; ++i) {
             const double db = gains[i];
             gains[i] = db == 0.0 ? 1.0 : fastdb::dbToAmplitude(db);

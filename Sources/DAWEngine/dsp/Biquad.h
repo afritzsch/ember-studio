@@ -131,7 +131,9 @@ struct BiquadState2 {
         right = {z1.y, z2.y};
     }
 
-    Double2 tick(Double2 x, const BiquadCoeffs& c) DAW_RT {
+    // One step without the DSP-040 snap; a caller that steps several sections may snap them
+    // once per frame (see quietness() and snap()), which gives the same result as tick().
+    Double2 step(Double2 x, const BiquadCoeffs& c) DAW_RT {
         const Double2 y = __builtin_elementwise_fma(Double2(c.b0), x, z1);
         const Double2 u = c.b1 * x;
         const Double2 v = c.b2 * x;
@@ -140,16 +142,32 @@ struct BiquadState2 {
         const Double2 w = u + z2;
         z1 = w - p1;
         z2 = v - p2;
-        // DSP-040 snap, per lane: both terms below kSnap → both exactly 0. A branch, not a
-        // select, so it stays off the y → z1 dependency chain: it is rarely taken while a signal
-        // plays and steadily taken in silence, so it stays predicted. The test is the quieter
-        // lane's larger term, one compare for both lanes; inside, each lane is decided exactly.
-        const Double2 a1 = __builtin_elementwise_abs(z1), a2 = __builtin_elementwise_abs(z2);
-        if (__builtin_expect(__builtin_reduce_min(__builtin_elementwise_max(a1, a2)) < BiquadState::kSnap, 0)) {
-            const Mask2 quiet = (a1 < BiquadState::kSnap) & (a2 < BiquadState::kSnap);
-            z1 = __builtin_bit_cast(Double2, __builtin_bit_cast(Mask2, z1) & ~quiet);
-            z2 = __builtin_bit_cast(Double2, __builtin_bit_cast(Mask2, z2) & ~quiet);
-        }
+        return y;
+    }
+
+    // Per lane, the larger state term: a lane snaps when this is below BiquadState::kSnap.
+    Double2 quietness() const DAW_RT {
+        return __builtin_elementwise_max(__builtin_elementwise_abs(z1), __builtin_elementwise_abs(z2));
+    }
+
+    // DSP-040 snap, per lane: both terms below kSnap → both exactly 0. Only called on the rare
+    // frames where some section may snap; the empty asm makes it recompute |z1| and |z2| here
+    // instead of the compiler keeping quietness()'s values alive (spilled) on every frame.
+    void snap() DAW_RT {
+        __asm__ volatile("" : "+w"(z1), "+w"(z2));
+        const Mask2 quiet = (__builtin_elementwise_abs(z1) < BiquadState::kSnap) &
+                            (__builtin_elementwise_abs(z2) < BiquadState::kSnap);
+        z1 = __builtin_bit_cast(Double2, __builtin_bit_cast(Mask2, z1) & ~quiet);
+        z2 = __builtin_bit_cast(Double2, __builtin_bit_cast(Mask2, z2) & ~quiet);
+    }
+
+    // BiquadState::tick for both lanes. The snap is a branch, not a select, so it stays off the
+    // y → z1 dependency chain: it is rarely taken while a signal plays and steadily taken in
+    // silence, so it stays predicted. The test is the quieter lane's larger term; snap() then
+    // decides each lane exactly.
+    Double2 tick(Double2 x, const BiquadCoeffs& c) DAW_RT {
+        const Double2 y = step(x, c);
+        if (__builtin_expect(__builtin_reduce_min(quietness()) < BiquadState::kSnap, 0)) snap();
         return y;
     }
 };

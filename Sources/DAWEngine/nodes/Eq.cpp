@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstring>
+#include <limits>
 #include <memory>
 
 #include "core/ProcessContext.h"
@@ -54,7 +55,17 @@ void runSteady(const StereoIO& io, uint32_t n, const BiquadCoeffs* coeffs, Biqua
     }
     for (uint32_t i = 0; i < n; ++i) {
         Double2 x = io.in(i);
-        for (uint32_t k = 0; k < N; ++k) x = s[k].tick(x, c[k]);
+        // DSP-040: one test per frame for every section's snap (a section's snap only has to
+        // happen before its next frame, so this is tick()'s result).
+        Double2 quietest = std::numeric_limits<double>::infinity();
+        for (uint32_t k = 0; k < N; ++k) {
+            x = s[k].step(x, c[k]);
+            quietest = __builtin_elementwise_min(quietest, s[k].quietness());
+        }
+        if (__builtin_expect(__builtin_reduce_min(quietest) < BiquadState::kSnap, 0)) {
+            __asm__ volatile("");  // keep it a branch (see BiquadState2::tick)
+            for (uint32_t k = 0; k < N; ++k) s[k].snap();
+        }
         io.out(i, x);
     }
     for (uint32_t k = 0; k < N; ++k) state[k] = s[k];
