@@ -21,12 +21,15 @@ public enum ControlMethod: String, CaseIterable, Hashable, Sendable {
     case transportSetMetronome = "transport.setMetronome"
     case assetImport = "asset.import"
     case renderOffline = "render.offline"
+    case renderCancel = "render.cancel"  // T-096 (DW-220)
     case audioAnalyze = "audio.analyze"
     case audioCompare = "audio.compare"
     case engineTelemetry = "engine.telemetry"
     case engineEvents = "engine.events"
     case engineParamInfo = "engine.paramInfo"
     case enginePluginInfo = "engine.pluginInfo"
+    case engineMeters = "engine.meters"  // T-096 (DW-174)
+    case enginePreviewNote = "engine.previewNote"  // T-096 (DW-189)
     case deviceList = "device.list"
     case deviceSet = "device.set"
     case deviceSimulate = "device.simulate"
@@ -65,11 +68,14 @@ public enum ControlMethod: String, CaseIterable, Hashable, Sendable {
         case .transportSetMetronome: TransportSetMetronomeParams.self
         case .assetImport: AssetImportParams.self
         case .renderOffline: RenderOfflineParams.self
+        case .renderCancel: RenderCancelParams.self
         case .audioAnalyze: AudioAnalyzeParams.self
         case .audioCompare: AudioCompareParams.self
         case .engineEvents: EngineEventsParams.self
         case .engineParamInfo: EngineParamInfoParams.self
         case .enginePluginInfo: EnginePluginInfoParams.self
+        case .engineMeters: EngineMetersParams.self
+        case .enginePreviewNote: EnginePreviewNoteParams.self
         case .deviceSet: DeviceSetParams.self
         case .deviceSimulate: DeviceSimulateParams.self
         case .midiInject: MidiInjectParams.self
@@ -101,13 +107,16 @@ public enum ControlMethod: String, CaseIterable, Hashable, Sendable {
         case .transportWait: "Wait for playback to reach a tick or stop {untilTick?, timeoutMs} (live engine only)"
         case .transportSetMetronome: "Switch the project metronome or set its levels {enabled?, level?, accent?} → {enabled, level, accent} (not undoable)"
         case .assetImport: "Load an audio file into the project {path} → {assetID, …}"
-        case .renderOffline: "Render ticks [from, to) to a file {from, to, path, format?, includeMetronome?} → {path, durationSec, renderTimeSec}"
+        case .renderOffline: "Render ticks [from, to) to a file {from, to, path, format?, sampleFormat?, dither?, normalize?, includeMetronome?} → {path, durationSec, renderTimeSec}"
+        case .renderCancel: "Cancel the running render.offline {id?} → {cancelled, id?} (that render fails with cancelled and its file is deleted)"
         case .audioAnalyze: "Levels, loudness, spectrum and first sound of a file {path, range?, fftSize?, bands?}"
         case .audioCompare: "Null-test two files {a, b, toleranceDb?} → {nullResidualDb, maxDiffSample, offsetSamples}"
         case .engineTelemetry: "Engine telemetry, per-node latency and rtViolations"
         case .engineEvents: "Engine events after a cursor {since?} → {events, next}"
         case .engineParamInfo: "Param info of a node kind {kind}"
         case .enginePluginInfo: "A device slot's hosted plugin {slot} → {identifier, loaded, error?, latencySamples, params: [{index, address, name, min, max, value}], …}"
+        case .engineMeters: "Strip meters and compressor gain reduction {nodes?} → {meters: [{node, kind, peakDb, rmsDb, gainReductionDb?}]}"
+        case .enginePreviewNote: "Audition a note on a MIDI track's instrument {track, pitch, velocity?, durationMs?} (realtime engines; offline → notSupported)"
         case .deviceList: "Audio devices and the running one → {devices, outputDeviceID, driver}"
         case .deviceSet: "Switch the output/input device or rate {outputDevice?, inputDevice?, sampleRate?, bufferFrames?} (realtime engine)"
         case .deviceSimulate: "Make the fake device lose, restore, change rate or overload {kind, deviceID?, sampleRate?} → {outputDeviceID, sampleRate, events}"

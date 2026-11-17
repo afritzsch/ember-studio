@@ -83,7 +83,7 @@ private:
 } // namespace
 
 Result<void> OfflineDriver::render(Engine& engine, Tick from, Tick to, const ExportSpec& spec,
-                                   ProgressFn progress) {
+                                   ProgressFn progress, const std::atomic<bool>* cancel) {
     stats_ = {};
     if (to < from) return makeError(ErrorCode::invalidArgument, "offline render: range end before start");
     if (spec.blockSize == 0 || spec.blockSize > kMaxBlock)
@@ -188,7 +188,15 @@ Result<void> OfflineDriver::render(Engine& engine, Tick from, Tick to, const Exp
     const SamplePos loopStartSample = tempo.tickToSample(before.loopStart);
     const SamplePos loopEndSample = tempo.tickToSample(before.loopEnd);
     SamplePos loopedStart = startSample;
+    // DW-220 (T-096): a cancel lands between blocks, never inside Engine::render.
+    auto cancelled = [&] {
+        if (!cancel || !cancel->load(std::memory_order_acquire)) return false;
+        stats_.cancelled = true;
+        failure = makeError(ErrorCode::internal, "offline render: cancelled");
+        return true;
+    };
     while (failure && written < maxFrames) {
+        if (cancelled()) break;
         renderCounted(blockSize);
 
         // The playhead is where this block started on the graph's own map. If it isn't where
@@ -271,6 +279,7 @@ Result<void> OfflineDriver::render(Engine& engine, Tick from, Tick to, const Exp
         const float gain = static_cast<float>(stats_.normalizeGain);
         failure = spool->rewind();
         for (int64_t done = 0; failure && done < written;) {
+            if (cancelled()) break;
             const uint32_t n = static_cast<uint32_t>(std::min<int64_t>(blockSize, written - done));
             failure = spool->read(channels.data(), n, gain);
             if (!failure) break;
@@ -288,6 +297,7 @@ Result<void> OfflineDriver::render(Engine& engine, Tick from, Tick to, const Exp
     if (writer) {
         stats_.clippedSamples = writer->clippedSamples();
         if (failure) failure = writer->close();
+        else if (stats_.cancelled) (void)writer->close();  // DW-220: close, then unlink below
         if (!failure) {
             writer.reset();
             std::error_code ec;

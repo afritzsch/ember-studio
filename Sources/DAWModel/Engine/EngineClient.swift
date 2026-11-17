@@ -134,6 +134,7 @@ public final class EngineClient: EngineProtocol {
         case .running: status.state = .running
         case .succeeded: status.state = .succeeded
         case .failed: status.state = .failed
+        case .cancelled: status.state = .cancelled  // DW-220 (T-096)
         default: status.state = .unknown
         }
         if status.kind == .loadAsset && status.state == .succeeded {
@@ -215,6 +216,9 @@ public final class EngineClient: EngineProtocol {
     public func renderOffline(from: Tick, to: Tick, spec: ExportSpec) -> JobID {
         facade.renderOffline(from.raw, to.raw, Self.cxx(spec))
     }
+
+    /// DW-220 (T-096).
+    public func cancelJob(_ job: JobID) -> Bool { facade.cancelJob(job) }
 
     // MARK: Device
 

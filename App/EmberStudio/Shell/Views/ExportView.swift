@@ -68,6 +68,10 @@ struct ExportPanel: View {
                         .lineLimit(1)
                         .accessibilityIdentifier("export.error")
                 }
+                if let cancel = controls["export.cancel"] {  // DW-220 (T-096)
+                    ControlButton(control: cancel, face: model.isCancelling ? "Cancelling…" : "Cancel")
+                        .keyboardShortcut(.cancelAction)
+                }
                 if let start = controls["export.start"] {
                     ControlButton(control: start).keyboardShortcut(.defaultAction)
                 }

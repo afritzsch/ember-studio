@@ -24,6 +24,7 @@
 // The driver also counts each render call in its own RtScope and reports the sum: the render
 // thread's own count (DW-019), unaffected by what other threads do.
 
+#include <atomic>
 #include <cstdint>
 
 #include "core/Engine.h"
@@ -53,6 +54,8 @@ struct OfflineRenderStats {
     // applied (1 without it, or for silence).
     double peak = 0;
     double normalizeGain = 1;
+    // DW-220 (T-096): render() stopped because `cancel` was set; the partial file is gone.
+    bool cancelled = false;
 };
 
 class OfflineDriver {
@@ -62,8 +65,13 @@ public:
     // settings) and when the file can't be created. It stops, removes the partial file and
     // fails when a write fails or the transport doesn't follow spec.tempo (see ExportSpec).
     // `progress` may be empty.
+    //
+    // DW-220 (T-096): `cancel` (may be null) is read before every block, and between the chunks
+    // of the normalize pass. Once it is true the render stops: the transport is restored as after
+    // any render, the writer is closed and the partial file removed, stats().cancelled is set and
+    // render() fails (ErrorCode::internal, "offline render: cancelled").
     Result<void> render(Engine& engine, Tick from, Tick to, const ExportSpec& spec,
-                        ProgressFn progress);
+                        ProgressFn progress, const std::atomic<bool>* cancel = nullptr);
 
     const OfflineRenderStats& lastRender() const { return stats_; }
 
