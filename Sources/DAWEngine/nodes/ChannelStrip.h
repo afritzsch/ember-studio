@@ -60,8 +60,8 @@ public:
     static constexpr std::array<ParamInfo, kNumParams> kParamInfo{{
         {kGain, "gain", "Gain", 0.0f, kMaxGain, 1.0f, ParamInfo::Curve::db, "dB", true},
         {kPan, "pan", "Pan", -1.0f, 1.0f, 0.0f, ParamInfo::Curve::linear, "", true},
-        {kMute, "mute", "Mute", 0.0f, 1.0f, 0.0f, ParamInfo::Curve::linear, "", true},
-        {kPhase, "phase", "Phase Invert", 0.0f, 1.0f, 0.0f, ParamInfo::Curve::linear, "", false},
+        {kMute, "mute", "Mute", 0.0f, 1.0f, 0.0f, ParamInfo::Curve::linear, "", true, 1},
+        {kPhase, "phase", "Phase Invert", 0.0f, 1.0f, 0.0f, ParamInfo::Curve::linear, "", false, 1},
     }};
     static std::span<const ParamInfo> paramInfo() { return kParamInfo; }
 

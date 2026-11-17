@@ -17,6 +17,13 @@ struct ParamInfo {
     enum class Curve { linear, log, db } curve;
     const char* unit;
     bool automatable;
+    // Contract delta (T-065, DW-196), accepted (autobuild): discrete params. `steps` is the number
+    // of steps between `min` and `max` (VST3's stepCount): 0 = continuous, 1 = a switch (min/max),
+    // n = n + 1 values `min + k·(max − min)/n`. `valueLabels`, when set, holds `steps + 1` display
+    // names in value order (the delay's note values); null shows the numbers (or Off/On for a
+    // switch). Both default, so existing tables compile unchanged.
+    uint32_t steps = 0;
+    const char* const* valueLabels = nullptr;
 };
 
 } // namespace daw

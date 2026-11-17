@@ -61,6 +61,8 @@ struct MixerStripModel: Identifiable, Equatable {
         var inserts: [MixerInsert]
         /// PLUG-017 (T-063): a MIDI track's instrument (nil: none or not a track).
         var instrument: MixerInsert? = nil
+        /// DW-250 (T-065): what the strip's "+" device picker offers.
+        var insertChoices: [DeviceChoice] = []
     }
 
     let values: Values
@@ -86,6 +88,11 @@ struct MixerStripModel: Identifiable, Equatable {
     /// PLUG-017 (T-063): `<prefix>.insert.<slot>.editor` per AU/VST3 insert and
     /// `<prefix>.instrument.editor` for a plugin instrument (toggles, on while the editor is open).
     var editorControls: [UIControl] = []
+    /// DW-250 (T-065): per insert `<prefix>.insert.<slot>.bypass` (toggle), `.remove`, `.up`, `.down`,
+    /// `.show` (opens it in the Device Chain tab).
+    var insertControls: [UIControl] = []
+    /// DW-250: `<prefix>.insert.add.<key>`, the device picker (`DeviceChoice` keys).
+    var insertAddControls: [UIControl] = []
 
     nonisolated var id: NodeIDValue { values.id }
     var faderPosition: Double { FaderTaper.position(gain: values.gain) }
@@ -101,6 +108,7 @@ struct MixerStripModel: Identifiable, Equatable {
         var controls = [faderUp, faderDown, faderReset, panLeft, panRight, panCenter, clipReset] + outputControls + sendAddControls
         controls += sends.flatMap(\.controls)
         controls += editorControls  // T-063
+        controls += insertControls + insertAddControls  // T-065 (DW-250)
         if header == nil {
             controls.append(muteControl)
             if let soloControl { controls.append(soloControl) }
@@ -148,7 +156,7 @@ struct MixerRouteChoice: Equatable, Sendable, Identifiable {
     var isCurrent: Bool
 }
 
-/// UI-030: an insert in the list (read-only until the insert-chain commands of DW-149 exist).
+/// UI-030, DW-250 (T-065): an insert in the strip's list, editable through `insertControls`.
 struct MixerInsert: Equatable, Sendable, Identifiable {
     var id: NodeIDValue
     var name: String
@@ -156,4 +164,10 @@ struct MixerInsert: Equatable, Sendable, Identifiable {
     /// PLUG-017 (T-063): an AU or VST3 (it has an editor to open), and whether that editor is open.
     var isPlugin: Bool = false
     var editorOpen: Bool = false
+    /// DW-226 (T-065): an AU/VST3 slot in safe mode (PLUG-021): bypassed whatever `bypass` says.
+    var safeModeBypassed: Bool = false
+    /// `builtin`, `au`, `vst3`.
+    var format: String = "builtin"
+
+    var isBypassed: Bool { bypass || safeModeBypassed }
 }

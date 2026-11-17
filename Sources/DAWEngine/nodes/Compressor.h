@@ -80,6 +80,8 @@ public:
     static constexpr double kSnapDb = 1e-9;     // |e| below this is 0 dB
     static constexpr double kSnapMs = 1e-20;    // m below this (−200 dB) is 0
 
+    // DW-196 (T-065): the detector switch's value labels (0 peak, 1 RMS).
+    static constexpr const char* kDetectorLabels[] = {"Peak", "RMS"};
     static constexpr std::array<ParamInfo, kNumParams> kParamInfo{{
         {kThreshold, "threshold", "Threshold", -60.0f, 0.0f, -20.0f, ParamInfo::Curve::linear, "dB", true},
         {kRatio, "ratio", "Ratio", 1.0f, 20.0f, 4.0f, ParamInfo::Curve::log, ":1", true},
@@ -87,7 +89,7 @@ public:
         {kRelease, "release", "Release", 1.0f, 2000.0f, 100.0f, ParamInfo::Curve::log, "ms", true},
         {kKnee, "knee", "Knee", 0.0f, 24.0f, 6.0f, ParamInfo::Curve::linear, "dB", true},
         {kMakeup, "makeup", "Makeup", 0.0f, 24.0f, 0.0f, ParamInfo::Curve::linear, "dB", true},
-        {kDetector, "detector", "RMS Detector", 0.0f, 1.0f, 0.0f, ParamInfo::Curve::linear, "", false},
+        {kDetector, "detector", "RMS Detector", 0.0f, 1.0f, 0.0f, ParamInfo::Curve::linear, "", false, 1, kDetectorLabels},
     }};
     static std::span<const ParamInfo> paramInfo() { return kParamInfo; }
 

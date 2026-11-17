@@ -1806,6 +1806,15 @@ std::string EngineFacade::paramInfoJSON(NodeKind kind) const {
                 p.name + "\",\"min\":" + std::to_string(p.min) + ",\"max\":" + std::to_string(p.max) +
                 ",\"default\":" + std::to_string(p.def) + ",\"curve\":\"" + curve + "\",\"unit\":\"" + p.unit +
                 "\",\"automatable\":" + (p.automatable ? "true" : "false") + "}";
+        // DW-196 (T-065, 06 "Contract delta (T-065)"): steps and value labels, added inside the row.
+        json.pop_back();
+        json += ",\"steps\":" + std::to_string(p.steps);
+        if (p.valueLabels != nullptr) {
+            json += ",\"labels\":[";
+            for (uint32_t k = 0; k <= p.steps; ++k) json += std::string(k ? ",\"" : "\"") + p.valueLabels[k] + "\"";
+            json += "]";
+        }
+        json += "}";
     }
     return json + "]";
 }

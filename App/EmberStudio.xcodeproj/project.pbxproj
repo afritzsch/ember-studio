@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		DA0000000000000000000014 /* DAWModel in Frameworks */ = {isa = PBXBuildFile; productRef = DA0000000000000000000021 /* DAWModel */; };
 		DA0000000000000000000015 /* DAWControl in Frameworks */ = {isa = PBXBuildFile; productRef = DA0000000000000000000022 /* DAWControl */; };
+		DA0000000000000000000016 /* PluginCatalog in Frameworks */ = {isa = PBXBuildFile; productRef = DA0000000000000000000023 /* PluginCatalog */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -32,6 +33,7 @@
 			files = (
 				DA0000000000000000000014 /* DAWModel in Frameworks */,
 				DA0000000000000000000015 /* DAWControl in Frameworks */,
+				DA0000000000000000000016 /* PluginCatalog in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -66,6 +68,7 @@
 				DA0000000000000000000011 /* Sources */,
 				DA0000000000000000000012 /* Frameworks */,
 				DA0000000000000000000013 /* Resources */,
+				DA0000000000000000000017 /* Embed PluginScanner */,
 			);
 			buildRules = (
 			);
@@ -78,6 +81,7 @@
 			packageProductDependencies = (
 				DA0000000000000000000021 /* DAWModel */,
 				DA0000000000000000000022 /* DAWControl */,
+				DA0000000000000000000023 /* PluginCatalog */,
 			);
 			productName = EmberStudio;
 			productReference = DA0000000000000000000004 /* Ember Studio.app */;
@@ -129,6 +133,24 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		DA0000000000000000000017 /* Embed PluginScanner */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "Embed PluginScanner";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/bash;
+			shellScript = "# DW-015 (T-065): embed the PluginScanner helper in Contents/MacOS (an auxiliary executable),\n# so the plugin manager (UI-041) scans out of process (PLUG-001). SwiftPM builds it from the\n# same package, in a clean environment (Xcode's build settings would leak into SwiftPM).\nset -euo pipefail\nconfig=debug\nif [ \"$CONFIGURATION\" = Release ]; then config=release; fi\ncd \"$SRCROOT/..\"\nspm() { env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin HOME=\"$HOME\" TMPDIR=\"${TMPDIR:-/tmp}\" DEVELOPER_DIR=\"$DEVELOPER_DIR\" swift build -c \"$config\" \"$@\"; }\nspm --product PluginScanner\nbin=$(spm --show-bin-path)\ndest=\"$TARGET_BUILD_DIR/$EXECUTABLE_FOLDER_PATH\"\nmkdir -p \"$dest\"\ncp -f \"$bin/PluginScanner\" \"$dest/PluginScanner\"\n# The app's entitlements: disable-library-validation lets the hardened helper load third-party plugins (BUILD-004).\ncodesign --force --sign \"${EXPANDED_CODE_SIGN_IDENTITY:--}\" --options runtime --entitlements \"$SRCROOT/$CODE_SIGN_ENTITLEMENTS\" \"$dest/PluginScanner\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		DA0000000000000000000011 /* Sources */ = {
@@ -199,6 +221,7 @@
 				CODE_SIGN_STYLE = Manual;
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				INFOPLIST_FILE = Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -222,6 +245,7 @@
 				CODE_SIGN_STYLE = Manual;
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				INFOPLIST_FILE = Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -275,6 +299,10 @@
 		DA0000000000000000000022 /* DAWControl */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = DAWControl;
+		};
+		DA0000000000000000000023 /* PluginCatalog */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = PluginCatalog;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

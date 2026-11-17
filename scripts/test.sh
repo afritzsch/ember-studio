@@ -91,6 +91,7 @@ products = {p["name"]: list(p["type"].keys())[0] for p in pkg["products"]}
 for name, kind in [("DAWEngine", "library"), ("DAWModel", "library"), ("DAWControl", "library"),
                    ("dawctl", "executable"), ("dawmcp", "executable"), ("PluginScanner", "executable")]:
     check(products.get(name) == kind, f"missing {kind} product {name}")
+check(products.get("PluginCatalog") == "library", "missing library product PluginCatalog (01 Contract delta (T-065), DW-015)")
 
 # BUILD-002: every Swift target that reaches DAWEngine enables C++ interop. C-family targets
 # (no .swift sources, e.g. DAWEngineTestSupport) have nothing to enable it for (DW-023).
