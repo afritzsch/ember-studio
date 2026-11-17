@@ -446,8 +446,8 @@ CheckResult auPluginEditsBecomeEvents() {
         DAW_CHECK(collect(1));
         if (!edits.empty()) DAW_CHECK(edits.back().phase == PluginEditKind::value && std::fabs(edits.back().value - 25.0f) < 1e-4f);
         DAW_CHECK(instance->pushDecision(0, 80.0f) == AUInstance::PushDecision::defer);
-        std::this_thread::sleep_for(400ms);
-        DAW_CHECK(instance->pushDecision(0, 80.0f) == AUInstance::PushDecision::push);
+        // The hold lasts ~300 ms (a timer on a utility queue; later under load).
+        DAW_CHECK(eventually([&] { return instance->pushDecision(0, 80.0f) == AUInstance::PushDecision::push; }, 3000ms));
     }
     DAW_CHECK(rig->violations() == 0);
     return checks;

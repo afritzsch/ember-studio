@@ -247,6 +247,9 @@ struct AUInstance::EditState {
             break;
         default:  // Value
             if (self->open[i] == 0 && self->isEcho(i, value)) break;
+            // A V2 bridge reports the plugin's own value back once more; while that value is held it
+            // was reported already (re-holding it would keep the model from ever leading again).
+            if (self->open[i] == 0 && std::fabs(self->hold[i].load(std::memory_order_acquire) - value) <= self->tolerance[i]) break;
             self->lastValue[i] = value;
             if (self->open[i] == 0) holdValue(self, i, value);
             self->push(i, value, PluginEditKind::value);
