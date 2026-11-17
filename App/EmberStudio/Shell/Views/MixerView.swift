@@ -278,6 +278,11 @@ private struct MixerStripView: View, Equatable {
                         .menuIndicator(.hidden)
                         .accessibilityIdentifier("\(strip.controlPrefix).input.menu")
                     }
+                    if let midi = header.midiInputMenu {
+                        TrackMidiInputPicker(menu: midi)  // T-093 (DW-216): the header's controls
+                            .menuIndicator(.hidden)
+                            .accessibilityIdentifier("\(strip.controlPrefix).midiInput.menu")
+                    }
                     Menu("Mon \(TrackHeaderModel.monitoringTitle(header.monitoring))") {
                         ForEach(header.monitorControls) { control in
                             ControlToggle(control: control, face: control.label.replacingOccurrences(of: "Monitoring ", with: ""))
