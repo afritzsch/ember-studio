@@ -1,0 +1,63 @@
+# One CI job: `scripts/ci.sh <job>` on a macos-15 runner (T-084). Called by ci.yml, so every job
+# shares the same checkout, toolchain, cache and log upload steps.
+name: CI job
+
+on:
+  workflow_call:
+    inputs:
+      job:
+        description: "scripts/ci.sh job: test, asan, tsan or perf"
+        required: true
+        type: string
+      timeout-minutes:
+        required: false
+        type: number
+        default: 120
+
+permissions:
+  contents: read
+
+jobs:
+  run:
+    name: scripts/ci.sh ${{ inputs.job }}
+    runs-on: macos-15
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Vendor/vst3sdk; scripts/bootstrap.sh then fetches only its hosting submodules.
+          submodules: true
+
+      - name: Select the newest stable Xcode
+        run: |
+          xcode=$(ls -d /Applications/Xcode_*.app | grep -viE 'beta|_rc|release_candidate' | sort -V | tail -n 1)
+          echo "DEVELOPER_DIR=$xcode/Contents/Developer" >> "$GITHUB_ENV"
+          export DEVELOPER_DIR="$xcode/Contents/Developer"
+          xcodebuild -version
+          swift --version
+
+      # Fetched dependencies only (the MCP Swift SDK). Compiled outputs are never cached: the test
+      # job must build clean (DW-005), and the weekly jobs gain little from a week-old cache.
+      - name: Cache SwiftPM dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/org.swift.swiftpm
+            .build/repositories
+            .build/checkouts
+          key: swiftpm-${{ runner.os }}-${{ hashFiles('Package.resolved') }}
+          restore-keys: swiftpm-${{ runner.os }}-
+
+      - name: scripts/ci.sh ${{ inputs.job }}
+        run: scripts/ci.sh "${{ inputs.job }}"
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-${{ inputs.job }}
+          path: |
+            .build/ci-logs/
+            .build/test-logs/
+          if-no-files-found: ignore
+          retention-days: 14

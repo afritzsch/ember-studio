@@ -42,6 +42,11 @@ macDAW/
 | BUILD-008 | Arm64 only (`ARCHS=arm64`). | `lipo -info` shows arm64 |
 | BUILD-009 | CI (GitHub Actions `macos-15` runner) runs `scripts/test.sh` on every push. | Green on main |
 
+*BUILD-009 as built (T-084, DECISIONS phase 9 "T-084 CI scope").* `.github/workflows/ci.yml` runs on the `macos-15` runner (newest stable Xcode on the image), on every push to `main` and on `workflow_dispatch`; a newer push cancels the push run in progress. Each job calls `scripts/ci.sh <job>` through `ci-job.yml`, so it runs the same way locally:
+- `test` (push and manual): a clean build, then `scripts/test.sh`. `ci.sh` removes every compiled output first (`swift package clean`, the app's derived data), so the "no warnings" check sees every file, not only recompiled ones (DW-005). Only fetched SwiftPM dependencies are cached, never build outputs.
+- `asan`, `tsan`, `perf` (manual and weekly, Mondays): TEST-007 and TEST-008, see 14-testing → *CI jobs*.
+- Logs (`.build/ci-logs/`, `.build/test-logs/`) are uploaded as artifacts for every job.
+
 ## Interfaces
 - Product names (consumed by all): `DAWEngine`, `DAWModel`, `DAWControl` (libraries); `dawctl`, `dawmcp`, `PluginScanner` (executables).
 - Header visibility: Swift sees **only** `Sources/DAWEngine/include/daw/EngineFacade.h` and the POD types it includes (see 08-bridge-facade). The module map exposes nothing else.
@@ -51,4 +56,4 @@ macDAW/
 |---|---|---|
 | BUILD-001..008 | done (T-001) | `scripts/test.sh` stages: manifest, submodule, swift-build-debug/release, swift-test, engine-objects, xcodebuild, app-bundle, arch, bootstrap. BUILD-004 mic prompt not yet exercised (needs recording) |
 | BUILD-007 | done (T-001, T-019) | `scripts/test.sh` stages `swift-test` (all but GoldenTests) and `goldens` (fixture/reference pairing + GoldenTests real comparisons, DW-001) |
-| BUILD-009 | todo (T-084) | |
+| BUILD-009 | done (T-084) | `.github/workflows/ci.yml` + `ci-job.yml` (macos-15, push to main + workflow_dispatch; test job = clean build (DW-005) + `scripts/test.sh` via `scripts/ci.sh test`); verified locally with `scripts/ci.sh test`. First hosted run checked by the lead after the phase-9 push |

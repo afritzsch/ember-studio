@@ -28,7 +28,8 @@ struct FakeDeviceDriverTests {
 #if DEBUG  // the trap exists only in Debug (BUILD-005)
 // Deliberate violations belong to the serialized RtTrapTests suite (14-testing, "C++ unit tests").
 extension RtTrapTests {
-    @Suite("TEST-005: the fake device's IO cycle counts violations")
+    @Suite("TEST-005: the fake device's IO cycle counts violations",
+           .disabled(if: Sanitizer.hidesAllocations, Sanitizer.allocationNote))
     struct FakeDeviceViolationTests {
         @Test("DW-019: an allocating tap in the IO cycle is counted by the driver's own scope, not the engine's")
         func allocatingTapCounted() { expectPasses(daw.testing.fakeDeviceCountsCycleViolations()) }

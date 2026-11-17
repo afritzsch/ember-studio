@@ -32,7 +32,7 @@ struct OfflineDriverTests {
     func performance() {
         let perf = daw.testing.offlinePerformance60s()
         #expect(perf.ok, "\(String(perf.error))")
-        #expect(perf.renderSeconds < 10)
+        if !Sanitizer.active { #expect(perf.renderSeconds < 10) }  // DW-065: wall clock; ASan/TSan are slower
         #expect(perf.rtViolations == 0)
         let speed = perf.audioSeconds / perf.renderSeconds
         print("IO-010: rendered \(perf.audioSeconds) s of audio in \(perf.renderSeconds) s (\(speed)× realtime)")
@@ -69,7 +69,7 @@ struct OfflineRtTrapTests {
 #if DEBUG  // the trap exists only in Debug (BUILD-005)
 // Deliberate violations belong to the serialized RtTrapTests suite (14-testing, "C++ unit tests").
 extension RtTrapTests {
-    @Suite("IO-013: offline render counts violations")
+    @Suite("IO-013: offline render counts violations", .disabled(if: Sanitizer.hidesAllocations, Sanitizer.allocationNote))
     struct OfflineViolationTests {
         @Test("IO-013: an allocating node rendered offline is counted by the render thread's own count")
         func allocatingNodeCounted() {

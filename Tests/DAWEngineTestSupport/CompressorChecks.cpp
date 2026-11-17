@@ -598,9 +598,11 @@ CheckResult compressorThroughEngine() {
     Oracle oracle;
     std::vector<double> gains;
     for (size_t pos = 0; pos < 48000; pos += 256) {
+        // T-084 (ASan): the last block is the 128 frames left of 48000, not 256 past the end.
+        const size_t n = std::min<size_t>(256, 48000 - pos);
         std::vector<float> k(key.begin() + static_cast<std::ptrdiff_t>(pos),
-                             key.begin() + static_cast<std::ptrdiff_t>(pos + 256));
-        const auto g = oracle.block({k, k}, 256, s);
+                             key.begin() + static_cast<std::ptrdiff_t>(pos + n));
+        const auto g = oracle.block({k, k}, static_cast<uint32_t>(n), s);
         gains.insert(gains.end(), g.begin(), g.end());
     }
     DAW_CHECK(rig.left().size() == 48000);

@@ -38,8 +38,10 @@ struct FakeDSP {
     std::vector<float> delay[2];
     uint32_t writePos = 0;
     uint32_t latency = 0;   // samples, read by render
-    float gain = 1.0f;
-    float sidechainMix = 0.0f;
+    // T-084 (TSan): written by the render block's parameter events and the tree's observer, read by
+    // the tree's value provider on other threads. Relaxed: each value stands alone.
+    std::atomic<float> gain{1.0f};
+    std::atomic<float> sidechainMix{0.0f};
     std::atomic<uint64_t> noteOns{0};
     std::atomic<int64_t> lastNoteFrame{-1};
 };
@@ -92,11 +94,12 @@ static NSHashTable<DAWTestFakeAudioUnit*>* liveFakes() {
     _tree = [AUParameterTree createTreeWithChildren:@[ gain, mix ]];
     FakeDSP* dsp = _dsp;
     _tree.implementorValueObserver = ^(AUParameter* param, AUValue value) {
-        if (param.address == 0) dsp->gain = value;
-        if (param.address == 1) dsp->sidechainMix = value;
+        if (param.address == 0) dsp->gain.store(value, std::memory_order_relaxed);
+        if (param.address == 1) dsp->sidechainMix.store(value, std::memory_order_relaxed);
     };
     _tree.implementorValueProvider = ^AUValue(AUParameter* param) {
-        return param.address == 0 ? dsp->gain : dsp->sidechainMix;
+        return param.address == 0 ? dsp->gain.load(std::memory_order_relaxed)
+                                  : dsp->sidechainMix.load(std::memory_order_relaxed);
     };
     @synchronized(liveFakes()) {
         [liveFakes() addObject:self];
@@ -178,8 +181,10 @@ static NSHashTable<DAWTestFakeAudioUnit*>* liveFakes() {
                 const int64_t at = event->head.eventSampleTime - static_cast<int64_t>(timestamp->mSampleTime);
                 if (at > static_cast<int64_t>(i)) break;
                 if (event->head.eventType == AURenderEventParameter || event->head.eventType == AURenderEventParameterRamp) {
-                    if (event->parameter.parameterAddress == 0) dsp->gain = event->parameter.value;
-                    if (event->parameter.parameterAddress == 1) dsp->sidechainMix = event->parameter.value;
+                    if (event->parameter.parameterAddress == 0)
+                        dsp->gain.store(event->parameter.value, std::memory_order_relaxed);
+                    if (event->parameter.parameterAddress == 1)
+                        dsp->sidechainMix.store(event->parameter.value, std::memory_order_relaxed);
                 } else if (event->head.eventType == AURenderEventMIDI && event->MIDI.length == 3 &&
                            (event->MIDI.data[0] & 0xF0) == 0x90 && event->MIDI.data[2] > 0) {
                     impulse += event->MIDI.data[2] / 127.0f;
@@ -192,7 +197,8 @@ static NSHashTable<DAWTestFakeAudioUnit*>* liveFakes() {
                 const float x = dsp->in[c][i], s = dsp->aux[c][i];
                 dsp->delay[c][dsp->writePos] = x;
                 const float delayed = dsp->delay[c][(dsp->writePos + kMaxDelay - dsp->latency) % kMaxDelay];
-                out[c][i] = dsp->gain * delayed + dsp->sidechainMix * s + impulse;
+                out[c][i] = dsp->gain.load(std::memory_order_relaxed) * delayed +
+                            dsp->sidechainMix.load(std::memory_order_relaxed) * s + impulse;
             }
             dsp->writePos = (dsp->writePos + 1) % kMaxDelay;
         }

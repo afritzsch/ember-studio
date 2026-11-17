@@ -1,0 +1,51 @@
+# BUILD-009, TEST-007, TEST-008 (T-084; DECISIONS phase 9 "T-084 CI scope").
+# Every job is one `scripts/ci.sh <job>` (through ci-job.yml), so each runs the same way locally:
+#   test       every push to main, and on demand: clean build (DW-005) + scripts/test.sh
+#   asan       on demand and weekly: engine tests under ASan + UBSan (TEST-007)
+#   tsan       on demand and weekly: engine tests under TSan + snapshot publish/reclaim stress (TEST-007)
+#   perf       on demand and weekly: TEST-008 perf smoke + strict wall-clock tests (DAW_PERF_TESTS=1)
+name: CI
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    - cron: "23 4 * * 1"  # Mondays 04:23 UTC
+
+# A newer push cancels the run in progress; a push never cancels a scheduled or manual run.
+concurrency:
+  group: ci-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    if: github.event_name != 'schedule'
+    uses: ./.github/workflows/ci-job.yml
+    with:
+      job: test
+      timeout-minutes: 120
+
+  asan:
+    if: github.event_name != 'push'
+    uses: ./.github/workflows/ci-job.yml
+    with:
+      job: asan
+      timeout-minutes: 120
+
+  tsan:
+    if: github.event_name != 'push'
+    uses: ./.github/workflows/ci-job.yml
+    with:
+      job: tsan
+      timeout-minutes: 150
+
+  perf:
+    if: github.event_name != 'push'
+    uses: ./.github/workflows/ci-job.yml
+    with:
+      job: perf
+      timeout-minutes: 90

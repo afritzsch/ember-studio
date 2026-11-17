@@ -48,7 +48,7 @@ struct TelemetryCounterTests {
 // These read and reset the process-wide trap state and violate on purpose, so they run inside the
 // serialized RtTrapTests suite (14-testing, "Process-wide trap state").
 extension RtTrapTests {
-    @Suite("Telemetry rtViolations (DW-011, DW-024)")
+    @Suite("Telemetry rtViolations (DW-011, DW-024)", .disabled(if: Sanitizer.hidesAllocations, Sanitizer.allocationNote))
     struct TelemetryViolationTests {
         @Test("DW-011, DW-024: an allocating node's violations reach rtViolations and firstViolation")
         func fromRenderScope() { expectPasses(daw.testing.engineRtViolationsFromRenderScope()) }
