@@ -726,6 +726,8 @@ public protocol EngineProtocol: AnyObject, Sendable {
     func transport() -> TransportState
     /// REC-005 (T-052): see the extension at the end of this file (default: ignored).
     func setPunch(enabled: Bool, start: Tick, end: Tick)
+    /// REC-034 (T-080): see the extension at the end of this file (default: ignored).
+    func setRecordOptions(midiLoopTakes: Bool)
     /// UI-021 (T-043): auditions `pitch` on `track`'s instrument (a MIDI track's sampler or plugin),
     /// whether the transport plays or not. Every note-on needs its note-off; `stop` and `locate`
     /// end any still on. Non-RT; queued lock-free for the audio thread.
