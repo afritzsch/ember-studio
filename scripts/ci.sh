@@ -79,8 +79,11 @@ test)
         # Removing every compiled output (SwiftPM's and the app's derived data) makes it see all
         # of them. Fetched dependencies stay (.build/checkouts, .build/repositories).
         note "clean build: removing compiled outputs"
+        # `swift package clean` empties .build except fetched dependencies: this also drops the
+        # local asan/tsan/perf scratch builds and the logs folder, which is made again.
         swift package clean || fail "swift package clean"
         rm -rf .build/xcode .build/test-plugins
+        mkdir -p "$logs"
     fi
     scripts/test.sh || fail "scripts/test.sh"
     ;;
