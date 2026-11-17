@@ -75,6 +75,13 @@ dispatch_queue_t releaseQueue() {
     return queue;
 }
 
+// DW-204: a monotonic clock the audio thread may read: CLOCK_UPTIME_RAW comes from the commpage
+// (mach_absolute_time), no syscall, no lock. Not annotated nonblocking by the SDK, hence the pragma.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wfunction-effects"
+uint64_t uptimeNanos() DAW_RT { return clock_gettime_nsec_np(CLOCK_UPTIME_RAW); }
+#pragma clang diagnostic pop
+
 // True when `component` is a V2 Audio Unit, which AUAudioUnit wraps in the V2 bridge.
 bool isV2(AudioComponent component) {
     AudioComponentDescription full{};
@@ -151,10 +158,11 @@ namespace daw {
 // Holds. While a gesture is open the node doesn't push the parameter (`gesture`): the model is a
 // poll behind the knob, and pushing its older value would make the knob jump back. After a release
 // (or an ungestured edit) `hold` keeps the plugin's value until the model's value matches it (that
-// push is skipped: the plugin has it) or kHoldSeconds pass.
+// push is skipped: the plugin has it) or kHoldNanos pass. The deadline is checked when the node
+// asks (no timer, which a loaded machine could delay indefinitely on a low-priority queue).
 struct AUInstance::EditState {
     static constexpr uint32_t kRecent = 16;
-    static constexpr double kHoldSeconds = 0.3;
+    static constexpr uint64_t kHoldNanos = 300'000'000;  // 0.3 s
 
     std::mutex mutex;  // queue, slot, open, lastValue (observer side; never the audio thread)
     std::shared_ptr<PluginEditQueue> queue;
@@ -168,6 +176,7 @@ struct AUInstance::EditState {
     std::size_t count = 0;
     std::unique_ptr<std::atomic<bool>[]> gesture;
     std::unique_ptr<std::atomic<float>[]> hold;
+    std::unique_ptr<std::atomic<uint64_t>[]> holdUntil;  // CLOCK_UPTIME_RAW nanoseconds
     std::unique_ptr<std::atomic<float>[]> recent;     // kRecent per index
     std::unique_ptr<std::atomic<uint32_t>[]> recentPos;
 
@@ -178,6 +187,7 @@ struct AUInstance::EditState {
         tolerance.resize(count);
         gesture = std::make_unique<std::atomic<bool>[]>(count);
         hold = std::make_unique<std::atomic<float>[]>(count);
+        holdUntil = std::make_unique<std::atomic<uint64_t>[]>(count);
         recent = std::make_unique<std::atomic<float>[]>(count * kRecent);
         recentPos = std::make_unique<std::atomic<uint32_t>[]>(count);
         for (std::size_t i = 0; i < count; ++i) {
@@ -185,6 +195,7 @@ struct AUInstance::EditState {
             tolerance[i] = 1e-5f * std::fabs(params[i].max - params[i].min) + 1e-7f;
             gesture[i].store(false, std::memory_order_relaxed);
             hold[i].store(std::numeric_limits<float>::quiet_NaN(), std::memory_order_relaxed);
+            holdUntil[i].store(0, std::memory_order_relaxed);
             recentPos[i].store(0, std::memory_order_relaxed);
         }
         for (std::size_t i = 0; i < count * kRecent; ++i)
@@ -211,18 +222,10 @@ struct AUInstance::EditState {
         if (queue) queue->push(PluginParamEdit{slot, index, value, phase});
     }
 
-    // The plugin holds `value` until the model echoes it or kHoldSeconds pass.
+    // The plugin holds `value` until the model echoes it or kHoldNanos pass.
     static void holdValue(const std::shared_ptr<EditState>& self, uint32_t index, float value) {
+        self->holdUntil[index].store(uptimeNanos() + kHoldNanos, std::memory_order_relaxed);
         self->hold[index].store(value, std::memory_order_release);
-        std::weak_ptr<EditState> weak = self;
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, static_cast<int64_t>(kHoldSeconds * NSEC_PER_SEC)),
-                       dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-                           auto state = weak.lock();
-                           if (!state) return;
-                           float expected = value;
-                           state->hold[index].compare_exchange_strong(expected, std::numeric_limits<float>::quiet_NaN(),
-                                                                      std::memory_order_acq_rel);
-                       });
     }
 
     // From the parameter tree's automation observer (an internal queue; non-RT).
@@ -263,6 +266,11 @@ struct AUInstance::EditState {
         if (gesture[index].load(std::memory_order_acquire)) return PushDecision::defer;
         float held = hold[index].load(std::memory_order_acquire);
         if (held != held) return PushDecision::push;  // NaN: nothing held
+        if (uptimeNanos() > holdUntil[index].load(std::memory_order_relaxed)) {
+            // Held long enough without the model catching up: the model leads again.
+            hold[index].compare_exchange_strong(held, std::numeric_limits<float>::quiet_NaN(), std::memory_order_acq_rel);
+            return PushDecision::push;
+        }
         if (std::fabs(held - value) > tolerance[index]) return PushDecision::defer;
         hold[index].compare_exchange_strong(held, std::numeric_limits<float>::quiet_NaN(), std::memory_order_acq_rel);
         return PushDecision::skip;  // the model caught up with the plugin, which has the value
