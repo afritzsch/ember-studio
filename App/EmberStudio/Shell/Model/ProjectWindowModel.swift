@@ -138,6 +138,9 @@ final class ProjectWindowModel: Identifiable {
     let pluginEditors = PluginEditorModel()
     /// UI-015, AUTO-006/007 (T-075): automation lanes in the arrange view and the window's recorder.
     let automation = AutomationLanesModel()
+    /// UI-043 (T-083): the app's crash-recovery dialog while it is presented (`AppModel` sets it on
+    /// every window). The window shows it under the toolbar and lists its controls.
+    var crashRecovery: CrashRecoveryModel?
 
     init(id: Int, store: ProjectStore, toasts: ToastCenter = ToastCenter()) {
         self.id = id
@@ -158,6 +161,8 @@ final class ProjectWindowModel: Identifiable {
         // UI-004 (T-055): recording toasts name the track and say whether the take is in the project.
         toasts.trackName = { [weak self] id in self?.project.track(id)?.name }
         toasts.takeImported = { [weak self] take in self?.containsTake(take) ?? false }
+        // DW-226 (T-083): plugin toasts name the device slot.
+        toasts.slotName = { [weak self] id in self?.deviceSlotName(id) }
     }
 
     var project: Project { store.project }
@@ -361,6 +366,8 @@ final class ProjectWindowModel: Identifiable {
         controls += pianoRoll.controls
         controls += audioPrefs.controls
         controls += exportDialog.controls  // T-082
+        controls += crashRecovery?.controls ?? []  // T-083 (UI-043)
+        controls += safeModeControls  // T-083 (PLUG-021)
         controls += toasts.controls
         return controls
     }

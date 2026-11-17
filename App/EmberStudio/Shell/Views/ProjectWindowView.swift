@@ -12,6 +12,15 @@ struct ProjectWindowView: View {
         VStack(spacing: 0) {
             ToolbarRow(model: model, controls: controls)
             Divider()
+            // UI-043 (T-083): the crash-recovery dialog at launch, and the safe-mode banner (PLUG-021).
+            if let crash = model.crashRecovery, crash.isPresented {
+                CrashRecoveryPanel(model: crash, controls: controls)
+                Divider()
+            }
+            if model.store.isSafeMode {
+                SafeModeBanner(model: model, controls: controls)
+                Divider()
+            }
             // UI-040: the audio settings, a strip under the toolbar. In the layout rather than an
             // overlay: the AppKit canvases (layer-backed, Metal) would draw over a SwiftUI overlay.
             if model.audioPrefs.isOpen {

@@ -11,6 +11,8 @@ struct Toast: Identifiable, Equatable {
         case recoveryAvailable, offlineAssets, repairs, info, error
         /// DW-230 (T-090): a track monitors the built-in microphone through the built-in speakers.
         case feedbackRisk
+        /// DW-226 (T-083): a plugin output NaN or infinity and was silenced (PLUG-022); it keeps running.
+        case pluginMisbehaved
     }
 
     enum Severity: String, Codable, Sendable, Comparable {
@@ -54,6 +56,8 @@ final class ToastCenter {
     /// REC-004: whether a finished take is in the project now (the store imports it before the
     /// window sees the event). Without a project to ask, every take counts as added.
     @ObservationIgnored var takeImported: @MainActor (RecordedTake) -> Bool = { _ in true }
+    /// DW-226 (T-083): names a device slot for plugin toasts ("AUDelay on Guitar"); nil shows its ID.
+    @ObservationIgnored var slotName: @MainActor (NodeIDValue) -> String? = { _ in nil }
     /// UI-040 (T-055): opens the window's audio settings; device toasts then offer it as their action.
     @ObservationIgnored var openAudioSettings: (@MainActor () -> Void)?
     @ObservationIgnored private var nextID = 1
@@ -131,9 +135,16 @@ final class ToastCenter {
             } else {
                 post(.overload, .warning, title: "Audio dropout", message: Self.overloadMessage(event.count), count: event.count)
             }
-        case .pluginCrashed, .pluginMisbehaved:  // T-064: PLUG-022's event shares the toast
+        case .pluginCrashed:
             post(.pluginCrashed, .error, title: "A plugin misbehaved",
                  message: event.error.map { "\($0)" } ?? "It was disabled; the project autosaved.")
+        case .pluginMisbehaved:
+            // DW-226 (T-083), PLUG-022: not a crash. The plugin keeps running; only the blocks with
+            // NaN or infinity were silenced, so it plays again once it recovers.
+            let slot = slotName(event.subject) ?? "Device \(event.subject)"
+            post(.pluginMisbehaved, .warning, title: "A plugin output invalid audio",
+                 message: "\(slot) produced NaN or infinite samples; they were replaced with silence. "
+                     + "It plays again once its output is valid.")
         case .assetLoadFailed:
             post(.assetLoadFailed, .warning, title: "Audio file didn't load",
                  message: event.error.map { "Asset \(event.subject): \($0)" } ?? "Asset \(event.subject)")
