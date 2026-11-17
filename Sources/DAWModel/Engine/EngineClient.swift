@@ -189,6 +189,25 @@ public final class EngineClient: EngineProtocol {
         if let failure = Self.error(facade.injectMidi(atSample, relativeToNow, status, data1, data2, size)) { throw failure }
     }
 
+    /// T-093: the track's filter (all sources: `allSources`; otherwise only that unique ID).
+    public func setMidiInput(track: NodeIDValue, _ input: Track.MidiInput) {
+        switch input.source {
+        case .all: facade.setMidiInputFilter(track, true, 0, input.channel)
+        case .device(let id): facade.setMidiInputFilter(track, false, id, input.channel)
+        }
+    }
+
+    public func injectMidi(atSample: Int64, relativeToNow: Bool, status: UInt8, data1: UInt8, data2: UInt8,
+                           source: Int32?) throws(DAWError) {
+        guard let source else {
+            return try injectMidi(atSample: atSample, relativeToNow: relativeToNow, status: status, data1: data1, data2: data2)
+        }
+        let size: UInt8 = status & 0xF0 == 0xC0 || status & 0xF0 == 0xD0 ? 2 : 3
+        if let failure = Self.error(facade.injectMidiFromSource(source, atSample, relativeToNow, status, data1, data2, size)) {
+            throw failure
+        }
+    }
+
     public func instantiatePlugin(slot: NodeIDValue, _ plugin: PluginDescriptor) -> JobID {
         facade.instantiatePlugin(slot, Self.cxx(plugin))
     }

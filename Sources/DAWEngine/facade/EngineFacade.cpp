@@ -1537,6 +1537,26 @@ FacadeError EngineFacade::injectMidi(int64_t atSample, bool relativeToNow, uint8
     return {};
 }
 
+// T-093: the router keeps the filter per track; no take ends (the recorded events carry who heard
+// them).
+void EngineFacade::setMidiInputFilter(NodeID track, bool allSources, int32_t source, uint8_t channel) {
+    std::lock_guard lock(impl_->mutex);
+    impl_->midi.setInputFilter(track, MidiInputFilter{allSources, allSources ? 0 : source, channel <= 16 ? channel : uint8_t(0)});
+}
+
+FacadeError EngineFacade::injectMidiFromSource(int32_t source, int64_t atSample, bool relativeToNow, uint8_t status,
+                                               uint8_t data1, uint8_t data2, uint8_t size) {
+    std::lock_guard lock(impl_->mutex);
+    if (impl_->mode != EngineMode::realtime)
+        return facadeError(FacadeErrorCode::unsupported, "MIDI can only be injected into a realtime engine");
+    const uint8_t bytes[3] = {status, data1, data2};
+    if (status < 0x80 || status >= 0xF0 || size == 0 || size > 3)
+        return facadeError(FacadeErrorCode::invalidArgument, "not a MIDI channel message");
+    if (!impl_->midi.inject(source, atSample, relativeToNow, bytes, size))
+        return facadeError(FacadeErrorCode::io, "the MIDI input queue is full, or too many injected source IDs");
+    return {};
+}
+
 // PLUG-012 (T-061, T-062): an AU or VST3 plugin is instantiated right here, on the caller's
 // (non-RT) thread, and parked for `slot`; the graph build that brings the slot's node adopts it.
 // The job is finished when this returns.
