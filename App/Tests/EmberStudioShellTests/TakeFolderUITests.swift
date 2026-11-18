@@ -315,7 +315,10 @@ struct TakeFolderUITests {
         let window = t.app.newProject()
         defer { manager.close(window) }
         window.perform(AddTrack(name: "A", kind: .audio))
-        let (folder, _) = try makeFolder(window, engine: try #require(t.engines.last))
+        // DW-300 (T-101): unwrapped on its own, so #require checks a FakeEngine rather than the
+        // FakeEngine? parameter type (a redundant-#require warning).
+        let engine = try #require(t.engines.last)
+        let (folder, _) = try makeFolder(window, engine: engine)
         let content = try #require(manager.nsWindow(for: window)?.contentView)
         content.layoutSubtreeIfNeeded()
         let view = try #require(findCanvas(content))
