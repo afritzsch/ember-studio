@@ -3,7 +3,8 @@
 /// (MODEL-031): the channel exists, the index is in 0…insert count, the slot is valid and its ID
 /// unused, its sidechain source is a track or bus and the route acyclic (MODEL-030). It checks what
 /// `validate()` checks, not `InsertDevice`'s kind rule, so any insert a project holds can be put
-/// back.
+/// back. Since T-099 that includes `validate()`'s insert kinds (DW-251): no sampler or structural
+/// built-in, while the metronome (which `InsertDevice` refuses) may come back.
 public struct RestoreDevice: Command {
     public static let type = "RestoreDevice"
 
