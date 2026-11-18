@@ -22,6 +22,8 @@ final class DawTools {
     private(set) var attached: AttachedApp?
     /// Sends one MCP progress notification (set by the server; tests collect them).
     var sendProgress: (@Sendable (ProgressNotification.Parameters) async -> Void)?
+    /// DW-147/151 (T-098): a warning every result carries while it returns one (`StaleBinaryWatch`).
+    var staleCheck: (@Sendable () -> String?)?
 
     init(dispatcher: Dispatcher, attachSetup: AttachSetup = .currentCheckout()) {
         self.dispatcher = dispatcher
@@ -55,6 +57,7 @@ final class DawTools {
     nonisolated static let readOnly: Set<ControlMethod> = [
         .projectGet, .commandSchema, .audioAnalyze, .audioCompare, .engineTelemetry, .engineEvents, .engineParamInfo,
         .uiState, .engineMeters,
+        .pluginsList, .pluginsBlocked, .engineParamDisplay,  // T-098
     ]
 
     private nonisolated static func description(_ method: ControlMethod) -> String {
@@ -72,6 +75,14 @@ final class DawTools {
     }
 
     func call(_ name: String, arguments: [String: Value]?, meta: Metadata? = nil) async -> CallTool.Result {
+        let result = await perform(name, arguments: arguments, meta: meta)
+        // DW-147/151 (T-098): after the result's own content, so its first item stays the JSON.
+        guard let warning = staleCheck?() else { return result }
+        return CallTool.Result(content: result.content + [.text(text: warning, annotations: nil, _meta: nil)],
+                               isError: result.isError)
+    }
+
+    private func perform(_ name: String, arguments: [String: Value]?, meta: Metadata?) async -> CallTool.Result {
         if name == SessionMode.toolName {
             do {
                 return Self.success(try await setSessionMode(JSONValue(mcp: .object(arguments ?? [:]))))

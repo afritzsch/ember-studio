@@ -42,6 +42,10 @@ public final class Dispatcher {
         public var engineDebounce: Duration
         /// Implements `ui.*` in attach mode.
         public var ui: (any ControlUIProvider)?
+        /// T-098 (DW-016): what `plugins.*` run against. Default: `ui` when it implements them too
+        /// (the app's plugin manager), else `CatalogPluginControl` with `.headless()` settings,
+        /// made on first use.
+        public var plugins: (any ControlPluginProvider)? = nil
 
         @MainActor public init(
             mode: Mode = .headless,
@@ -311,7 +315,105 @@ public final class Dispatcher {
         case .uiSnapshot: return try await configuration.ui!.uiSnapshot(decode(params))
         case .uiPerform: return try await configuration.ui!.uiPerform(decode(params))
         case .testFixture: return try encode(await testFixture(decode(params)))
+        case .pluginsScan, .pluginsList, .pluginsBlocked, .pluginsRetry, .pluginsUnblock:
+            return try await plugins(method, params)  // T-098 (DW-016)
+        case .engineParamDisplay: return try encode(engineParamDisplay(decode(params)))  // T-098 (DW-289)
         }
+    }
+
+    // MARK: plugins.* (T-098, DW-016)
+
+    private var defaultPluginProvider: CatalogPluginControl?
+
+    /// `Configuration.plugins`, else the UI provider when it implements `plugins.*` (the app),
+    /// else the headless catalog.
+    private var pluginProvider: any ControlPluginProvider {
+        if let plugins = configuration.plugins { return plugins }
+        if let ui = configuration.ui as? any ControlPluginProvider { return ui }
+        if let defaultPluginProvider { return defaultPluginProvider }
+        let made = CatalogPluginControl(settings: .headless())
+        defaultPluginProvider = made
+        return made
+    }
+
+    private func plugins(_ method: ControlMethod, _ params: JSONValue?) async throws -> JSONValue {
+        let provider = pluginProvider
+        switch method {
+        case .pluginsList, .pluginsBlocked:
+            let _: NoParams = try decode(params)
+            let all = try await provider.pluginsList()
+            return try encode(method == .pluginsList
+                ? PluginsListResult(plugins: all.filter { !$0.isBlocked }, cachePath: provider.pluginCachePath)
+                : PluginsListResult(blocked: all.filter(\.isBlocked), cachePath: provider.pluginCachePath))
+        case .pluginsScan:
+            let p: PluginsScanParams = try decode(params)
+            return try encode(await provider.pluginsScan(timeout: try Self.scanTimeout(p.timeoutSeconds)))
+        case .pluginsRetry:
+            let p: PluginsRetryParams = try decode(params)
+            let timeout = try Self.scanTimeout(p.timeoutSeconds)
+            let retried = try await blockedPlugins(p.id, provider)
+            let ids = Set(retried.map(\.identifier))
+            // DW-275: a plugin that timed out gets the plugin manager's longer "Retry (120 s)" limit.
+            let limit = timeout ?? (retried.contains { $0.timedOut == true } ? CatalogPluginControl.retryTimeout : nil)
+            let scan = try await provider.pluginsRetry(identifiers: p.id == nil ? nil : ids, timeout: limit)
+            let after = try await provider.pluginsList()
+            return try encode(PluginsRetryResult(
+                retried: retried.map(\.identifier), scan: scan,
+                stillBlocked: after.filter { $0.isBlocked && ids.contains($0.identifier) }))
+        case .pluginsUnblock:
+            let p: PluginsUnblockParams = try decode(params)
+            let blocked = try await blockedPlugins(p.id, provider)
+            try await provider.pluginsUnblock(identifiers: p.id == nil ? nil : Set(blocked.map(\.identifier)))
+            return try encode(PluginsUnblockResult(unblocked: blocked.map(\.identifier)))
+        default:
+            throw ControlError.methodNotFound(method.rawValue)
+        }
+    }
+
+    /// The blocked plugins `id` names (all of them for nil); an `id` that isn't blocked is an error.
+    private func blockedPlugins(_ id: String?, _ provider: any ControlPluginProvider) async throws -> [ControlPlugin] {
+        let blocked = try await provider.pluginsList().filter(\.isBlocked)
+        guard let id else { return blocked }
+        let matches = blocked.filter { $0.identifier == id }
+        if matches.isEmpty {
+            throw DAWError.invalidArgument("no blocked plugin \"\(id)\" (plugins.blocked lists them)")
+        }
+        return matches
+    }
+
+    private static func scanTimeout(_ seconds: Double?) throws -> TimeInterval? {
+        guard let seconds else { return nil }
+        guard seconds.isFinite, seconds > 0, seconds <= 3600 else {
+            throw ControlError.invalidParams("timeoutSeconds must be in (0, 3600]")
+        }
+        return seconds
+    }
+
+    // MARK: engine.paramDisplay (T-098, DW-289)
+
+    /// The facade's `paramDisplay` (08 "Contract delta (T-094)") for a hosted plugin's param; the
+    /// value defaults to the param's current one from `pluginInfoJSON`.
+    private func engineParamDisplay(_ p: EngineParamDisplayParams) throws -> EngineParamDisplayResult {
+        let engine = try requireEngine()
+        guard p.param >= 0 else { throw ControlError.invalidParams("param must be ≥ 0") }
+        var value = p.value
+        if let given = value, !given.isFinite { throw ControlError.invalidParams("value must be a finite number") }
+        if value == nil {
+            let json = engine.pluginInfoJSON(slot: p.node)
+            let info = json.isEmpty ? nil : try? JSONValue(parsing: Data(json.utf8))
+            guard info?["loaded"]?.boolValue == true else {
+                throw DAWError.invalidArgument("slot \(p.node) has no loaded plugin (engine.pluginInfo)")
+            }
+            let row = info?["params"]?.arrayValue?.first { $0["index"]?.int64Value == Int64(p.param) }
+            guard let current = row?["value"]?.doubleValue else {
+                throw DAWError.invalidArgument("slot \(p.node)'s plugin has no param \(p.param)")
+            }
+            value = Float(current)
+        }
+        let resolved = value ?? 0
+        return EngineParamDisplayResult(
+            node: p.node, param: p.param, value: resolved,
+            display: engine.paramDisplay(slot: p.node, index: p.param, value: resolved))
     }
 
     // MARK: project.*
