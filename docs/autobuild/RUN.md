@@ -140,6 +140,10 @@ Unattended phases started by `/autobuild` (see `.claude/skills/autobuild/SKILL.m
 - T-063 merged (54fefc1): test.sh 12/12, swift test green. Worker closed. T-065 is ready.
 - End: 4/4 merged, main green, week 24%, five-hour window 80%. No worker session left open. main pushed (first push with CI).
 
+### Phase 12 (2026-11-18)
+- Wave: T-095 app follow-ups 2 (U+M), T-097 hosted-plugin follow-ups (P), T-098 control/tooling follow-ups (B), T-099 engine/model correctness follow-ups (E+M). Pre-decisions in DECISIONS.md (phase 12 rows).
+- Start: week 62%, five-hour window 42% (reset ~4 h away). WEEK_STOP 90 for this run.
+
 ## Summary for the user
 
 This run (the third) had one phase, 8 (2026-11-10 → 2026-11-11). The week went 43% → 61%. It stopped because the week passed the 50% limit during the phase. The wave was finished anyway.
