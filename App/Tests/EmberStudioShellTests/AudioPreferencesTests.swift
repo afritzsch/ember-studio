@@ -87,6 +87,42 @@ struct AudioPreferencesTests {
         await app.quit()
     }
 
+    @Test("DW-295, IO-005: the panel shows the device's real buffer (telemetry bufferFrames) beside the requested one and the input latency; ui.state carries both")
+    func deviceBufferAndInputLatency() async throws {
+        let app = fakeDeviceApp()
+        let window = app.newProject()
+        let prefs = window.audioPrefs
+        prefs.isOpen = true
+        app.pump()
+        #expect(prefs.telemetry.deviceRunning && prefs.telemetry.bufferFrames == 256)
+        #expect(prefs.deviceBufferFrames == 256 && prefs.deviceBufferText == "Device: 256")
+        try perform(window, "prefs.audio.buffer.512")
+        app.pump()
+        #expect(prefs.config?.bufferFrames == 512 && prefs.deviceBufferFrames == 512 && prefs.deviceBufferText == "Device: 512")
+
+        // Input latency: none until the device captures (an audio track monitoring its input).
+        #expect(prefs.latency.inputSamples == prefs.telemetry.deviceInputLatency)
+        window.addTrack(.audio)
+        try window.control("track.\(window.project.tracks[0].id).monitor.on").action()
+        app.pump()
+        let input = prefs.telemetry.deviceInputLatency
+        #expect(input > 0 && prefs.latency.inputSamples == input)
+        #expect(prefs.latencyText.hasSuffix(String(format: " · Input %.1f ms (%u samples)", prefs.latency.inputMs, input)))
+        #expect(abs(prefs.latency.inputMs - Double(input) * 1000 / prefs.telemetry.sampleRate) < 1e-9)
+
+        let state = UIStateDumper.dump(window, isMain: true)["audioPreferences"]
+        #expect(state?["bufferFrames"] == 512 && state?["deviceBufferFrames"] == 512)
+        #expect(state?["latency"]?["inputSamples"] == .int(Int64(input)))
+        #expect(state?["latency"]?["inputMs"]?.doubleValue == prefs.latency.inputMs)
+        #expect(prefs.telemetry.rtViolations == 0)
+        await app.quit()
+
+        // No device: no device buffer, nothing to show.
+        let (offline, _) = try makeWindow()
+        #expect(offline.audioPrefs.deviceBufferFrames == nil && offline.audioPrefs.deviceBufferText == nil)
+        #expect(UIStateDumper.dump(offline, isMain: true)["audioPreferences"]?["deviceBufferFrames"] == .null)
+    }
+
     @Test("UI-040, DW-079/DW-130: an output device that can't run the session rate changes it, and the project follows")
     func outputDeviceChangesRate() async throws {
         let app = fakeDeviceApp()

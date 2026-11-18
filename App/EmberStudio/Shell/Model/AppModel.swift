@@ -204,21 +204,41 @@ final class AppModel {
             window = addWindow(store)
         }
         if let engineError { window.toasts.post(.error, .error, title: "No audio engine", message: engineError) }
-        window.toasts.post(loadReport: report, project: store.project.name)
-        if report.recoveryAvailable && offerRecovery {
-            window.toasts.postRecoveryAvailable(project: store.project.name) { [weak self, weak window] in
-                guard let self, let window else { return }
-                Task { @MainActor in
-                    do {
-                        // T-083: recovering keeps the window's safe mode.
-                        try await self.open(url, recover: true, safeMode: window.store.isSafeMode, into: window)
-                    } catch {
-                        window.toasts.post(.error, .error, title: "Recovery failed", message: "\(error)")
-                    }
+        postLoadReport(report, of: url, in: window, offerRecovery: offerRecovery)
+        return window
+    }
+
+    /// The toasts of an open (File > Open, and `project.open` over the socket, DW-155): offline
+    /// audio, repairs, and "Unsaved changes found" with a Recover action when there is a newer
+    /// autosave (unless `offerRecovery` is false).
+    private func postLoadReport(_ report: ProjectLoadReport, of url: URL, in window: ProjectWindowModel, offerRecovery: Bool = true) {
+        window.toasts.post(loadReport: report, project: window.store.project.name)
+        guard report.recoveryAvailable && offerRecovery else { return }
+        window.toasts.postRecoveryAvailable(project: window.store.project.name) { [weak self, weak window] in
+            guard let self, let window else { return }
+            Task { @MainActor in
+                do {
+                    // T-083: recovering keeps the window's safe mode.
+                    try await self.open(url, recover: true, safeMode: window.store.isSafeMode, into: window)
+                } catch {
+                    window.toasts.post(.error, .error, title: "Recovery failed", message: "\(error)")
                 }
             }
         }
-        return window
+    }
+
+    /// CTL-030: one request line from the app's control socket. DW-155: a `project.open` that
+    /// opened a project posts the same load-report toasts as File > Open in the window that now
+    /// shows it (the Dispatcher's store has the whole report once the call returns).
+    func handleControl(line: String, notify: @escaping @MainActor (RPCRequest) -> Void) async -> String? {
+        let method = try? JSONDecoder().decode(RPCRequest.self, from: Data(line.utf8)).method
+        let before = dispatcher.store
+        let response = await dispatcher.handle(line: line, notify: notify)
+        if method == ControlMethod.projectOpen.rawValue, let store = dispatcher.store, store !== before,
+           let url = store.folderURL, let window = windows.first(where: { $0.store === store }) {
+            postLoadReport(store.loadReport, of: url, in: window)
+        }
+        return response
     }
 
     // MARK: Crash recovery (UI-043, T-083)
@@ -268,16 +288,6 @@ final class AppModel {
     func save(_ window: ProjectWindowModel, to url: URL?) async throws(DAWError) {
         try await window.store.save(to: url)
         presenter?.setTitle(window)
-    }
-
-    /// The whole project (to the end of its last clip, at least one bar) as a 32-bit float WAV with
-    /// its tail, without the click (DW-177). File > Export… opens the export dialog instead
-    /// (UI-042, `ExportModel`), which renders through the same `ExportModel.render`.
-    func export(_ window: ProjectWindowModel, to url: URL) async throws(DAWError) -> OfflineRenderResult {
-        guard let engine = window.engine else { throw .invalidArgument("the project has no engine") }
-        let span = window.exportDialog.span(.project) ?? (Tick(0), Tick(3840))
-        return try await ExportModel.render(window: window, engine: engine, from: span.from, to: span.to,
-                                            spec: ExportSpec(path: url.path), includeMetronome: false)
     }
 
     /// The app's engine for `store`; offline when that fails (no device), with the reason. DW-156:

@@ -171,6 +171,11 @@ struct RecordingUITests {
         #expect(tracks?[0]?["monitoringLatency"]?["samples"] == .int(Int64(t.monitoringLatency)))
         #expect(tracks?[0]?["monitoringLatency"]?["ms"]?.doubleValue == latency.milliseconds)
         #expect(tracks?[1]?["monitoringLatency"] == .null)
+        // DW-227: the mixer strip's monitor menu shows the header's line (its ui.state strips carry it).
+        window.bottomPane = .mixer
+        let strips = UIStateDumper.dump(window, isMain: true)["mixer"]?["strips"]?.arrayValue ?? []
+        #expect(strips.first { $0["id"] == .int(Int64(audio)) }?["monitoringLatency"]?["samples"] == .int(Int64(t.monitoringLatency)))
+        #expect(strips.first { $0["kind"] == "midi" }?["monitoringLatency"] == .null)
         #expect(t.rtViolations == 0)
         await app.quit()
     }

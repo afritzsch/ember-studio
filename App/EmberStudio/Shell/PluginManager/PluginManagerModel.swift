@@ -159,11 +159,44 @@ final class PluginManagerModel {
 
     // MARK: Scans
 
-    /// PLUG-004: scans new and changed plugins (and drops vanished ones).
-    func scan() {
-        run { catalog in
-            try catalog.refresh()
+    /// PLUG-004: scans new and changed plugins (and drops vanished ones). With `timeout` (DW-299,
+    /// `plugins.scan {timeoutSeconds}` in attach mode) each scan of this run gets that limit
+    /// instead of the scanner's own; later scans are back to the scanner's.
+    func scan(timeout: TimeInterval? = nil) {
+        guard let timeout else {
+            run { catalog in try catalog.refresh() }
+            return
         }
+        let url = cacheURL
+        let discovery = discovery
+        let scanner = scanner
+        run { catalog in
+            var limited = PluginCatalog(cacheURL: url, discovery: discovery,
+                                        scanner: LimitedScanner(base: scanner, timeout: timeout))
+            limited.maxConcurrentScans = catalog.maxConcurrentScans
+            let summary = try limited.refresh()
+            // What the limited run saved, with the scanner's own limit for the next scans.
+            catalog = PluginCatalog(cacheURL: url, discovery: discovery, scanner: scanner)
+            return summary
+        }
+    }
+
+    /// PLUG-004 (DW-299): forgets blocked plugins (those in `identifiers`, or all of them) without
+    /// scanning, so the next scan tries them again (`plugins.unblock`, as headless). Does nothing
+    /// while a scan runs (its result would overwrite the change); callers wait for `scanTask` first.
+    /// A cache that can't be saved sets `error`, as a failed scan does.
+    func unblock(_ identifiers: Set<String>? = nil) {
+        guard !isScanning else { return }
+        loadIfNeeded()
+        guard var catalog else { return }
+        error = nil
+        do throws(PluginCatalogError) {
+            try catalog.resetBlocked(identifiers: identifiers)
+        } catch {
+            self.error = Self.message(error)
+        }
+        self.catalog = catalog
+        publish(catalog)
     }
 
     /// Forgets every cached result and scans all plugins again.
@@ -241,6 +274,21 @@ final class PluginManagerModel {
         case .scannerUnavailable(let detail): "Plugin scanner unavailable: \(detail)"
         case .cacheWriteFailed(let detail): "Couldn't save the plugin list: \(detail)"
         }
+    }
+}
+
+/// DW-299: a caller's limit for every scan of one run (`scan(timeout:)`): `refresh()` scans with
+/// the scanner's own limit, so the scanner is wrapped.
+private struct LimitedScanner: PluginScanning {
+    let base: any PluginScanning
+    let timeout: TimeInterval
+
+    func scan(_ candidate: PluginCandidate) throws(PluginCatalogError) -> [PluginDescriptor] {
+        try base.scan(candidate, timeout: timeout)
+    }
+
+    func scan(_ candidate: PluginCandidate, timeout: TimeInterval) throws(PluginCatalogError) -> [PluginDescriptor] {
+        try base.scan(candidate, timeout: timeout)
     }
 }
 

@@ -287,6 +287,12 @@ private struct MixerStripView: View, Equatable {
                         ForEach(header.monitorControls) { control in
                             ControlToggle(control: control, face: control.label.replacingOccurrences(of: "Monitoring ", with: ""))
                         }
+                        // REC-021, DW-227: the header's read-only latency line, as in its own menu.
+                        if let latency = header.monitoringLatency {
+                            Divider()
+                            Text(latency.title)
+                                .accessibilityIdentifier("\(strip.controlPrefix).monitor.latency")
+                        }
                     }
                     .menuIndicator(.hidden)
                     .accessibilityIdentifier("\(strip.controlPrefix).monitor.menu")

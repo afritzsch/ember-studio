@@ -134,27 +134,47 @@ final class AudioPreferencesModel {
 
     /// What the output latency adds up to, in samples at the session rate (telemetry, IO-005): the
     /// device's (latency + safety offset + buffer + stream) and the graph's (PDC, MIX).
+    /// DW-295: and the running device's input latency (`deviceInputLatency`; 0 without input).
     struct Latency: Equatable {
         var deviceSamples: UInt32
         var graphSamples: UInt32
         var totalSamples: UInt32
+        var inputSamples: UInt32 = 0
         var sampleRate: Double
 
         func ms(_ samples: UInt32) -> Double { sampleRate > 0 ? Double(samples) * 1000 / sampleRate : 0 }
         var totalMs: Double { ms(totalSamples) }
+        var inputMs: Double { ms(inputSamples) }
     }
 
     var latency: Latency {
         let t = telemetry
         return Latency(deviceSamples: t.deviceOutputLatency, graphSamples: t.graphLatency, totalSamples: t.outputLatency,
-                       sampleRate: t.sampleRate > 0 ? t.sampleRate : sessionSampleRate)
+                       inputSamples: t.deviceInputLatency, sampleRate: t.sampleRate > 0 ? t.sampleRate : sessionSampleRate)
     }
 
-    /// "Output 5.3 ms (256 + 0 samples)"
+    /// "Output 5.3 ms (256 device + 0 plugin samples) · Input 1.4 ms (64 samples)"; the input part
+    /// says "no input" while the device captures nothing (DW-295).
     var latencyText: String {
         let l = latency
         guard config != nil, telemetry.deviceRunning else { return "No device running" }
-        return String(format: "Output %.1f ms (%u device + %u plugin samples)", l.totalMs, l.deviceSamples, l.graphSamples)
+        let output = String(format: "Output %.1f ms (%u device + %u plugin samples)", l.totalMs, l.deviceSamples, l.graphSamples)
+        let input = l.inputSamples > 0 ? String(format: "Input %.1f ms (%u samples)", l.inputMs, l.inputSamples) : "no input"
+        return "\(output) · \(input)"
+    }
+
+    /// DW-295 (DW-192): the buffer the running device really uses (telemetry `bufferFrames`), which
+    /// can differ from the one asked for (`config.bufferFrames`); nil while no device runs.
+    var deviceBufferFrames: UInt32? {
+        telemetry.deviceRunning && telemetry.bufferFrames > 0 ? telemetry.bufferFrames : nil
+    }
+
+    /// Beside the buffer menu: "Device: 256", or "Device: 512 (asked 256)" when the device chose
+    /// another size; nil while no device runs.
+    var deviceBufferText: String? {
+        guard let frames = deviceBufferFrames else { return nil }
+        if let asked = config?.bufferFrames, asked != frames { return "Device: \(frames) (asked \(asked))" }
+        return "Device: \(frames)"
     }
 
     /// "Converting audio to 44.1 kHz: 3 of 10"

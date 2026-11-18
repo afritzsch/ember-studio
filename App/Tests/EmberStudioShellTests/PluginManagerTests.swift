@@ -180,6 +180,44 @@ struct PluginManagerTests {
         #expect(!window.controls.contains { $0.id.hasSuffix(".retryLong") }, "a crash isn't offered the longer retry")
     }
 
+    @Test("DW-299: unblock forgets a blocked plugin without scanning; scan(timeout:) gives that run's scans the limit; attach-mode plugins.unblock and plugins.scan {timeoutSeconds} work as headless")
+    func unblockAndScanLimit() async throws {
+        let dir = try TempDir()
+        let discovery = FakeDiscovery([vst3("/a.vst3", "Alpha"), vst3("/c.vst3", "Crash")])
+        let scanner = FakeScanner(["/a.vst3": [ok("/a.vst3", "Alpha")]])
+        let manager = PluginManagerModel(cacheURL: dir.file("plugins.json"), scannerURL: nil, discovery: discovery, scanner: scanner)
+        manager.scan(timeout: 7)
+        await manager.scanTask?.value
+        #expect(scanner.timeouts == ["/a.vst3": 7, "/c.vst3": 7], "every scan of the run got the limit")
+        #expect(manager.blocked.map(\.name) == ["Crash"])
+
+        // Unblock: gone from the blocked list (and the cache) at once, nothing scanned.
+        manager.unblock()
+        #expect(manager.blocked.isEmpty && scanner.scanned.count == 2 && !manager.isScanning && manager.error == nil)
+        #expect(PluginManagerModel(cacheURL: dir.file("plugins.json"), scannerURL: nil, discovery: discovery, scanner: scanner)
+            .usable.map(\.name) == ["Alpha"])
+        // The next plain scan tries it again, with the scanner's own limit (no timeout call).
+        scanner.set("/c.vst3", [ok("/c.vst3", "Crash Fixed")])
+        manager.scan()
+        await manager.scanTask?.value
+        #expect(scanner.scanned.count == 3 && manager.usable.map(\.name) == ["Alpha", "Crash Fixed"])
+        #expect(scanner.timeouts == ["/a.vst3": 7, "/c.vst3": 7])
+
+        // Attach mode: the app's provider (the main window's manager).
+        let t = TestApp()
+        let window = t.app.newProject()
+        let attached = PluginManagerModel(cacheURL: dir.file("app.json"), scannerURL: nil,
+                                          discovery: FakeDiscovery([vst3("/a.vst3", "Alpha"), vst3("/z.vst3", "Zap")]),
+                                          scanner: FakeScanner(["/a.vst3": [ok("/a.vst3", "Alpha")]]))
+        window.pluginPanel.manager = attached
+        let d = t.app.dispatcher
+        let scan = try await d.call(.pluginsScan, ["timeoutSeconds": 9])
+        #expect(scan["timeoutSeconds"] == 9 && scan["note"] == nil && scan["blocked"] == 1)
+        let unblocked = try await d.call(.pluginsUnblock, ["id": "/z.vst3"])
+        #expect(unblocked["unblocked"] == ["/z.vst3"])
+        #expect(try await d.call(.pluginsBlocked)["blocked"] == [] && attached.blocked.isEmpty)
+    }
+
     @Test("UI-041, CONV §9: a tool-launched app works on its own copy of the scan cache under $TMPDIR; a person's app on the user's cache")
     func automatedCacheCopy() throws {
         let dir = try TempDir()

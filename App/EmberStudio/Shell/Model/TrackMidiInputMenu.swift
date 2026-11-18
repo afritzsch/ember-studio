@@ -21,9 +21,24 @@ struct TrackMidiInputMenu: Equatable {
 
     var controls: [UIControl] { sourceControls + channelControls }
 
-    /// The menu's face: "All · Omni", "Keystation · Ch 3", "⚠ Keystation · Omni" when not connected.
+    /// The menu's face, compact so it fits the default 220 pt header (DW-298): "All" (all sources,
+    /// Omni), "Ch 3" (all sources, channel 3), "Keystation" (Omni), "Keystation · Ch 3", with "⚠ "
+    /// before a source that isn't connected. `fullTitle` is the tooltip.
     var title: String {
-        "\(connected ? "" : "⚠ ")\(sourceName) · \(Self.channelTitle(input.channel))"
+        let warning = connected ? "" : "⚠ "
+        switch (input.source, input.channel) {
+        case (.all, 0): return "All"
+        case (.all, let channel): return Self.channelTitle(channel)
+        case (.device, 0): return "\(warning)\(sourceName)"
+        case (.device, let channel): return "\(warning)\(sourceName) · \(Self.channelTitle(channel))"
+        }
+    }
+
+    /// The full name (the picker's tooltip): "All Inputs · Omni", "Keystation · Ch 3",
+    /// "Pads · Omni (not connected)".
+    var fullTitle: String {
+        let source = input.source == .all ? "All Inputs" : sourceName
+        return "\(source) · \(Self.channelTitle(input.channel))\(connected ? "" : " (not connected)")"
     }
 
     static func channelTitle(_ channel: UInt8) -> String { channel == 0 ? "Omni" : "Ch \(channel)" }

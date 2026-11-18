@@ -19,6 +19,6 @@ struct TrackMidiInputPicker: View {
                 }
             }
         }
-        .help(menu.connected ? "MIDI input" : "MIDI input: \(menu.sourceName) is not connected")
+        .help("MIDI input: \(menu.fullTitle)")  // DW-298: the face is compact, the tooltip names it all
     }
 }

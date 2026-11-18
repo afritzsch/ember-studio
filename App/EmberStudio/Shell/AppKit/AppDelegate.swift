@@ -36,7 +36,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
         // CTL-030: the socket, when asked for (or in Debug).
         if let path = options.controlSocket {
-            let server = ControlSocketServer(path: path, dispatcher: app.dispatcher)
+            // DW-155: through the app, so a project.open toasts its load report like File > Open.
+            let server = ControlSocketServer(path: path) { [app] line, notify in await app.handleControl(line: line, notify: notify) }
             do {
                 try server.start()
                 self.server = server

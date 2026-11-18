@@ -114,12 +114,53 @@ struct AppModelTests {
         #expect(!FileManager.default.fileExists(atPath: dir.file("Crash.dawproject/autosave").path), "MODEL-045 clean quit")
     }
 
-    @Test("UI-001: Export… renders the project to the end of its last clip (at least a bar) on the window's engine")
+    @Test("DW-155, UI-004: project.open over the app's socket posts File > Open's load-report toasts (offline audio, recovery with Recover) in the window that shows it")
+    func socketOpenToasts() async throws {
+        let dir = try TempDir()
+        // A saved project with a missing audio file and an unsaved edit only in its autosave.
+        let saved = ProjectStore(project: Project(name: "Remote"))
+        saved.autosavePolicy = nil
+        try saved.perform(AddTrack(name: "Saved", kind: .audio))
+        try saved.perform(ImportAsset(asset: AssetRef(id: saved.project.ids.next, path: dir.file("gone.wav").path, channels: 1,
+                                                      originalSampleRate: 48_000, frames: 48_000)))
+        let folder = dir.file("Remote.dawproject")
+        try await saved.save(to: folder)
+        try saved.perform(AddTrack(name: "Unsaved", kind: .audio))
+        try await saved.autosave()
+
+        let t = TestApp()
+        let window = t.app.newProject()
+        let line = #"{"jsonrpc":"2.0","id":1,"method":"project.open","params":{"path":"\#(folder.path)"}}"#
+        let response = try #require(await t.app.handleControl(line: line) { _ in })
+        #expect(response.contains("loadReport") && !response.contains("\"error\""))
+        #expect(window.store === t.app.dispatcher.store && window.project.name == "Remote")
+        #expect(window.toasts.toasts.map(\.kind) == [.offlineAssets, .recoveryAvailable])
+        let recovery = try #require(window.toasts.toasts.first { $0.kind == .recoveryAvailable })
+        #expect(recovery.action?.label == "Recover")
+        window.toasts.performAction(recovery.id)
+        for _ in 0..<200 where window.project.tracks.count < 2 { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(window.project.tracks.map(\.name) == ["Saved", "Unsaved"] && window.store.loadReport.recovered)
+
+        // Other requests (and a failed open) post nothing.
+        let count = window.toasts.toasts.count
+        _ = await t.app.handleControl(line: #"{"jsonrpc":"2.0","id":2,"method":"project.get","params":{}}"#) { _ in }
+        _ = await t.app.handleControl(line: #"{"jsonrpc":"2.0","id":3,"method":"project.open","params":{"path":"/nope.dawproject"}}"#) { _ in }
+        #expect(window.toasts.toasts.count == count)
+        await t.app.quit()
+    }
+
+    @Test("UI-001, DW-221: File > Export… opens the export dialog, whose Export renders the project to the end of its last clip (at least a bar) on the window's engine")
     func export() async throws {
         let dir = try TempDir()
         let t = TestApp()
         let window = t.app.newProject()
-        _ = try await t.app.export(window, to: dir.file("out.wav"))
+        // File > Export… (AppDelegate.exportAudio) opens the main window's dialog: the only export path.
+        window.exportDialog.isOpen = true
+        window.exportDialog.setDestination(dir.file("out.wav"))
+        let start = try #require(window.controls.first { $0.id == "export.start" })
+        start.action()
+        for _ in 0..<1000 where window.exportDialog.isRunning { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(window.exportDialog.lastError == nil)
         let render = t.engines.last!.calls.compactMap { call -> (Tick, Tick, String)? in
             if case .renderOffline(let from, let to, let path) = call { (from, to, path) } else { nil }
         }

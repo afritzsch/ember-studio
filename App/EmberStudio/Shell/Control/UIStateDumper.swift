@@ -117,9 +117,7 @@ enum UIStateDumper {
                     "armed": .bool(track.armed), "inputPair": .int(Int64(track.inputPair)),
                     "monitoring": .string(track.monitoring.rawValue),
                     // T-054 (REC-021): software monitoring latency, audio tracks.
-                    "monitoringLatency": track.monitoringLatency.map { latency -> JSONValue in
-                        ["samples": .int(Int64(latency.samples)), "ms": .double(latency.milliseconds)]
-                    } ?? .null,
+                    "monitoringLatency": track.monitoringLatency.map(monitoringLatency) ?? .null,
                     // T-093 (DW-216): a MIDI track's input; channel 0 is omni.
                     "midiInput": track.midiInputMenu.map(midiInput) ?? .null,
                 ]
@@ -363,6 +361,7 @@ enum UIStateDumper {
     ///     {"open", "gesture", "strips": [{id, kind (audio|midi|bus|master), name, controlPrefix,
     ///      selected, gain, gainDB, faderPosition, pan, panLabel, mute, solo, armed?, inputPair?, monitoring?,
     ///      midiInput? (T-093: a track strip's, as in `tracks`; null for audio),
+    ///      monitoringLatency? (DW-227: as in `tracks`; null for MIDI),
     ///      output: {kind, id?, name} | null, outputChoices: [{id, name, current}],
     ///      sends: [{id, target, targetName, level, levelDB, tap, levelPosition, controls}],
     ///      sendTargets: [{id, name}], inserts: [{id, name, bypass}],
@@ -410,8 +409,15 @@ enum UIStateDumper {
             json["inputPair"] = .int(Int64(strip.inputPair))
             json["monitoring"] = .string(strip.monitoring.rawValue)
             json["midiInput"] = strip.header?.midiInputMenu.map(midiInput) ?? .null  // T-093
+            // DW-227: what the strip's monitor menu shows (the header's), as in `tracks`.
+            json["monitoringLatency"] = strip.header?.monitoringLatency.map(monitoringLatency) ?? .null
         }
         return .object(json)
+    }
+
+    /// T-054 (REC-021): `{"samples", "ms"}`.
+    private static func monitoringLatency(_ latency: TrackHeaderModel.MonitoringLatency) -> JSONValue {
+        ["samples": .int(Int64(latency.samples)), "ms": .double(latency.milliseconds)]
     }
 
     /// T-093: `{"source", "channel", "name", "connected"}`.
@@ -445,8 +451,9 @@ enum UIStateDumper {
     ///      outputChannels, nominalSampleRate, isDefaultOutput, isDefaultInput, isBuiltIn,
     ///      outputIsHeadphones}], "outputDevice", "inputDevice"
     ///      (0: system default), "runningDeviceID", "deviceRunning", "sampleRate" (the project's),
-    ///      "engineSampleRate", "bufferFrames", "inputChannels", "inputChannelChoices",
-    ///      "latency": {deviceSamples, graphSamples, totalSamples, totalMs},
+    ///      "engineSampleRate", "bufferFrames" (asked for), "deviceBufferFrames" (DW-295: running,
+    ///      telemetry; null without a device), "inputChannels", "inputChannelChoices",
+    ///      "latency": {deviceSamples, graphSamples, totalSamples, totalMs, inputSamples, inputMs},
     ///      "reload": {phase, previousSampleRate, sampleRate, done, total, failed} | null,
     ///      "assetsReloadPending", "error"}
     static func dump(_ prefs: AudioPreferencesModel) -> JSONValue {
@@ -473,11 +480,14 @@ enum UIStateDumper {
             "sampleRate": .double(prefs.sessionSampleRate),
             "engineSampleRate": .double(telemetry.sampleRate),
             "bufferFrames": config.map { .int(Int64($0.bufferFrames)) } ?? .null,
+            // DW-295: what the running device uses (telemetry), null while none runs.
+            "deviceBufferFrames": prefs.deviceBufferFrames.map { .int(Int64($0)) } ?? .null,
             "inputChannels": config.map { .int(Int64($0.inputChannels)) } ?? .null,
             "inputChannelChoices": .array(prefs.inputChannelChoices.map { .int(Int64($0)) }),
             "latency": [
                 "deviceSamples": .int(Int64(latency.deviceSamples)), "graphSamples": .int(Int64(latency.graphSamples)),
                 "totalSamples": .int(Int64(latency.totalSamples)), "totalMs": .double(latency.totalMs),
+                "inputSamples": .int(Int64(latency.inputSamples)), "inputMs": .double(latency.inputMs),  // DW-295
             ],
             "reload": prefs.reload.map { r in
                 [
