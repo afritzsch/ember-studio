@@ -8,8 +8,10 @@ import Foundation
 /// project's value again. The fields show the value in force at the playhead, as the readouts did;
 /// with one tempo and one signature (most projects) that is bar 1's.
 ///
-/// For `ui.perform` (UI-052), which can't type: `transport.tempo.up|down` (±1 BPM at bar 1) and the
-/// signature menu's `transport.signature.<numerator>.<denominator>` toggles (bar 1's is on).
+/// For `ui.perform` (UI-052): the fields are text-field controls (`transport.tempo`,
+/// `transport.signature`), which `setText` commits through `commitTempo`/`commitSignature` as typing
+/// does (DW-297, T-100); and `transport.tempo.up|down` (±1 BPM at bar 1) and the signature menu's
+/// `transport.signature.<numerator>.<denominator>` toggles (bar 1's is on).
 extension ProjectWindowModel {
     /// The signatures the toolbar's menu offers.
     static let signaturePresets: [(numerator: Int, denominator: Int)] = [
@@ -91,6 +93,13 @@ extension ProjectWindowModel {
     var tempoSignatureControls: [UIControl] {
         let bpm = tempoAtBar1
         var controls: [UIControl] = [
+            // DW-297: the toolbar's fields; the view commits through these, so typing and setText match.
+            .textField("transport.tempo", "Tempo at Bar 1 (BPM)", text: tempoFieldText) { [weak self] in
+                self?.commitTempo($0) ?? false
+            },
+            .textField("transport.signature", "Time Signature at Bar 1", text: signature) { [weak self] in
+                self?.commitSignature($0) ?? false
+            },
             .button("transport.tempo.up", "Tempo +1 BPM", enabled: bpm < TempoMap.maxBPM) { [weak self] in
                 self?.setTempoAtBar1(bpm + 1)
             },

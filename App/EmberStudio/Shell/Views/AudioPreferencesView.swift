@@ -44,6 +44,13 @@ struct AudioPreferencesPanel: View {
                     menu(model.config.map { "\($0.bufferFrames) samples" } ?? "—", id: "prefs.audio.buffer.menu",
                          ids: AudioPreferencesModel.bufferSizes.map { "prefs.audio.buffer.\($0)" },
                          face: { $0.label.replacingOccurrences(of: "Buffer ", with: "") })
+                    // DW-295: what the device runs, next to what was asked for.
+                    if let device = model.deviceBufferText {
+                        Text(device)
+                            .font(.callout.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .accessibilityIdentifier("prefs.audio.buffer.device")
+                    }
                 }
                 field("Input channels") {
                     menu(model.config.map { "\($0.inputChannels)" } ?? "—", id: "prefs.audio.inputChannels.menu",

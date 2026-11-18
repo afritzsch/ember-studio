@@ -309,6 +309,49 @@ struct ToolbarTests {
         #expect(try !model.control("transport.tempo.up").isEnabled)
     }
 
+    @Test("DW-297, DW-180: ui.perform setText types into the toolbar's tempo and signature fields (bar 1, one undo entry, as typing); refused text is invalidArgument, a non-text control or another action invalidParams")
+    func setTextOnToolbarFields() async throws {
+        let t = TestApp()
+        let window = t.app.newProject()
+        let d = t.app.dispatcher
+        let tempo = try window.control("transport.tempo")
+        #expect(tempo.kind == .textField && tempo.text == "120")
+
+        let set = try await d.call(.uiPerform, ["accessibilityId": "transport.tempo", "action": "setText", "text": "128,5"])
+        #expect(set == ["accessibilityId": "transport.tempo", "kind": "textField", "action": "setText", "text": "128.5"])
+        #expect(window.tempoAtBar1 == 128.5 && window.store.undoLabel == "Set Tempo")
+        let sig = try await d.call(.uiPerform, ["accessibilityId": "transport.signature", "action": "setText", "text": "7/8"])
+        #expect(sig["text"] == "7/8" && window.signatureAtBar1 == (7, 8) && window.store.undoLabel == "Set Time Signature")
+        // The same value again: no edit (as typing it unchanged).
+        window.store.undo()
+        #expect(window.signatureAtBar1 == (4, 4))
+        _ = try await d.call(.uiPerform, ["accessibilityId": "transport.tempo", "action": "setText", "text": "128.5 BPM"])
+        #expect(window.store.undoLabel == "Set Tempo" && window.store.canRedo, "no new entry: the redo stays")
+
+        let state = try await d.call(.uiState)
+        let controls = state["windows"]?[0]?["controls"]?.arrayValue ?? []
+        #expect(controls.first { $0["id"] == "transport.tempo" }?["text"] == "128.5")
+        #expect(controls.first { $0["id"] == "transport.tempo" }?["kind"] == "textField")
+
+        let refused = await failure(d, ["accessibilityId": "transport.tempo", "action": "setText", "text": "abc"])
+        #expect(refused?.code == -32000 && refused?.data?["dawError"] == "invalidArgument")
+        #expect(window.tempoAtBar1 == 128.5)
+        #expect(await failure(d, ["accessibilityId": "transport.signature", "action": "setText", "text": "4/3"])?.data?["dawError"] == "invalidArgument")
+        #expect(await failure(d, ["accessibilityId": "transport.play", "action": "setText", "text": "1"])?.code == -32602)
+        #expect(await failure(d, ["accessibilityId": "transport.tempo", "action": "click"])?.code == -32602)
+        #expect(await failure(d, ["accessibilityId": "transport.tempo", "action": "setText"])?.code == -32602)
+        await t.app.quit()
+    }
+
+    private func failure(_ d: Dispatcher, _ params: JSONValue) async -> RPCError? {
+        do {
+            _ = try await d.call(.uiPerform, params)
+            return nil
+        } catch {
+            return error.rpcError
+        }
+    }
+
     @Test("ui.state carries the toolbar readouts, the loop and the key bindings")
     func uiState() throws {
         let (model, _) = try makeWindow()

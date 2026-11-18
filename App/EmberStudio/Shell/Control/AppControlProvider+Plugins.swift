@@ -5,10 +5,8 @@ import Foundation
 /// the plugin manager panel shows what a scan through the socket found, and the other way round.
 /// The `Dispatcher` uses this because the app's UI provider conforms (13 "Contract delta (T-098)").
 ///
-/// Differences from headless: `plugins.scan` uses the app's scanner limit (30 s; a
-/// `timeoutSeconds` is reported back in `note`, not applied), the summary has counts only, and
-/// `plugins.unblock` is `notSupported` (the manager always rescans what it forgets: use
-/// `plugins.retry`).
+/// Differences from headless: the summary has counts only. `plugins.scan {timeoutSeconds}` and
+/// `plugins.unblock` behave as headless (DW-299: `PluginManagerModel.scan(timeout:)`, `.unblock`).
 extension AppControlProvider: ControlPluginProvider {
     /// The main window's manager (the app's one, unless a test gave the window another).
     private var pluginManager: PluginManagerModel {
@@ -28,11 +26,8 @@ extension AppControlProvider: ControlPluginProvider {
     }
 
     func pluginsScan(timeout: TimeInterval?) async throws -> ControlPluginScanSummary {
-        var summary = try await runScan { $0.scan() }
-        summary.timeoutSeconds = CatalogPluginControl.defaultTimeout
-        if let timeout {
-            summary.note = "timeoutSeconds \(timeout) not applied: the app scans with its own \(Int(CatalogPluginControl.defaultTimeout)) s limit"
-        }
+        var summary = try await runScan { $0.scan(timeout: timeout) }
+        summary.timeoutSeconds = timeout ?? CatalogPluginControl.defaultTimeout
         return summary
     }
 
@@ -43,7 +38,10 @@ extension AppControlProvider: ControlPluginProvider {
     }
 
     func pluginsUnblock(identifiers: Set<String>?) async throws {
-        throw ControlError.notSupported("the app's plugin manager rescans what it unblocks: use plugins.retry")
+        let manager = pluginManager
+        await manager.scanTask?.value
+        manager.unblock(identifiers)
+        if let error = manager.error { throw ControlError.internalError(error) }
     }
 
     /// Starts a scan on the manager (after one already running, which the panel may have

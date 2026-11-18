@@ -36,7 +36,21 @@ struct TrackMidiInputUITests {
         #expect(menu.channelControls[0].label == "MIDI Channel Omni" && menu.channelControls[16].label == "MIDI Channel 16")
         #expect(try window.control("track.\(keys).midiInput.source.all").isOn == true)
         #expect(try window.control("track.\(keys).midiInput.channel.0").isOn == true)
-        #expect(menu.title == "All · Omni" && menu.connected)
+        #expect(menu.title == "All" && menu.fullTitle == "All Inputs · Omni" && menu.connected)
+    }
+
+    @Test("DW-298: compact picker titles (All, Ch 3, Keystation, Keystation · Ch 3, ⚠ for not connected); the full name is the tooltip")
+    func compactTitles() throws {
+        let (window, _, _, keys) = try midiWindow()
+        func menu() throws -> TrackMidiInputMenu { try #require(window.trackHeaders[1].midiInputMenu) }
+        window.perform(SetTrackMidiInput(trackID: keys, source: .all, channel: 3))
+        #expect(try menu().title == "Ch 3" && menu().fullTitle == "All Inputs · Ch 3")
+        window.perform(SetTrackMidiInput(trackID: keys, source: .device(7), channel: 0))
+        #expect(try menu().title == "Keystation" && menu().fullTitle == "Keystation · Omni")
+        window.perform(SetTrackMidiInput(trackID: keys, source: .device(7), channel: 16))
+        #expect(try menu().title == "Keystation · Ch 16")
+        window.perform(SetTrackMidiInput(trackID: keys, source: .device(8), channel: 0))
+        #expect(try menu().title == "⚠ Pads" && menu().fullTitle == "Pads · Omni (not connected)")
     }
 
     @Test("DW-216, MODEL-005: picking a source and a channel performs SetTrackMidiInput (undoable) and reaches the engine")
@@ -64,6 +78,11 @@ struct TrackMidiInputUITests {
         // The mixer strip shows the header's controls (DW-202).
         let strip = try #require(window.mixer.strips.first { $0.id == keys })
         #expect(strip.allControlIDs.contains("track.\(keys).midiInput.channel.3"))
+        // T-100: a new channel is a different strip (`==` decides whether the equatable strip view
+        // redraws; it used to compare equal, so the strip kept the old title).
+        try window.control("track.\(keys).midiInput.channel.5").action()
+        let after = try #require(window.mixer.strips.first { $0.id == keys })
+        #expect(after != strip && after.header?.midiInputMenu?.title == "Keystation · Ch 5")
     }
 
     @Test("DW-216: a source that isn't connected keeps the selection and shows as not connected")

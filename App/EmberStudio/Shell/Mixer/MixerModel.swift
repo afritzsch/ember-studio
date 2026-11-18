@@ -63,6 +63,10 @@ final class MixerModel {
             inserts: track.inserts.map(insert))
         var withInstrument = values
         withInstrument.instrument = track.instrument.map(insert)  // T-063
+        if let midi = header.midiInputMenu {
+            withInstrument.midiInputFace = [midi.title, midi.fullTitle] + midi.controls.map { "\($0.id)=\($0.label)=\($0.isOn == true)" }
+        }
+        withInstrument.monitoringLatency = header.monitoringLatency?.title  // DW-227
         return makeStrip(withInstrument, header: header, muteControl: header.muteControl, soloControl: header.soloControl)
     }
 

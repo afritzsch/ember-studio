@@ -9,6 +9,9 @@ struct UIControl: Identifiable {
     enum Kind: String, Codable, Sendable {
         case button
         case toggle
+        /// DW-297 (T-100): a field that commits typed text (`CommitTextField`); `ui.perform`
+        /// `setText` commits as typing and Return would.
+        case textField
     }
 
     /// `track.<id>.mute`, `transport.play`, `pane.inspector`, …
@@ -18,8 +21,12 @@ struct UIControl: Identifiable {
     /// Toggles only.
     let isOn: Bool?
     let isEnabled: Bool
-    /// A button's click, or a toggle's flip.
+    /// A button's click, or a toggle's flip (nothing for a text field).
     let action: @MainActor () -> Void
+    /// Text fields only: the value as the field shows it.
+    var text: String? = nil
+    /// Text fields only: commits typed text; false when it refuses it (the field shows `text` again).
+    var commitText: (@MainActor (String) -> Bool)? = nil
 
     static func button(_ id: String, _ label: String, enabled: Bool = true, action: @escaping @MainActor () -> Void) -> UIControl {
         UIControl(id: id, kind: .button, label: label, isOn: nil, isEnabled: enabled, action: action)
@@ -28,6 +35,12 @@ struct UIControl: Identifiable {
     static func toggle(_ id: String, _ label: String, isOn: Bool, enabled: Bool = true,
                        action: @escaping @MainActor () -> Void) -> UIControl {
         UIControl(id: id, kind: .toggle, label: label, isOn: isOn, isEnabled: enabled, action: action)
+    }
+
+    /// DW-297: a text field showing `text`; `commit` is what Return (or leaving the field) runs.
+    static func textField(_ id: String, _ label: String, text: String, enabled: Bool = true,
+                          commit: @escaping @MainActor (String) -> Bool) -> UIControl {
+        UIControl(id: id, kind: .textField, label: label, isOn: nil, isEnabled: enabled, action: {}, text: text, commitText: commit)
     }
 }
 
@@ -43,4 +56,6 @@ enum UIAction: String, CaseIterable, Sendable {
     case on
     /// Toggles: off.
     case off
+    /// Text fields (DW-297): commit `UIPerformParams.text` as if typed and Return pressed.
+    case setText
 }

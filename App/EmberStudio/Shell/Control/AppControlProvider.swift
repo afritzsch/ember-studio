@@ -70,6 +70,7 @@ final class AppControlProvider: ControlUIProvider {
         guard control.isEnabled else {
             throw DAWError.invalidArgument("\(control.id) (\(control.label)) is disabled")
         }
+        if control.kind == .textField || action == .setText { return try setText(params, control, action) }  // DW-297
         switch (control.kind, action) {
         case (.button, .click), (.button, .press), (.toggle, .click), (.toggle, .press), (.toggle, .toggle):
             control.action()
@@ -79,6 +80,8 @@ final class AppControlProvider: ControlUIProvider {
             if control.isOn != false { control.action() }
         case (.button, _):
             throw ControlError.invalidParams("\(control.id) is a button; use click")
+        case (.textField, _), (_, .setText):
+            break  // handled above
         }
         var result: [String: JSONValue] = [
             "accessibilityId": .string(control.id), "kind": .string(control.kind.rawValue), "action": .string(action.rawValue),
@@ -88,6 +91,29 @@ final class AppControlProvider: ControlUIProvider {
             result["isOn"] = .bool(isOn)
         }
         return .object(result)
+    }
+
+    /// DW-297 (T-100): `ui.perform {accessibilityId, action: "setText", text}` on a text-field
+    /// control commits `text` through the field's own commit (as typing and Return do: the
+    /// toolbar's tempo and signature set bar 1's value, one undo entry). Returns `{accessibilityId,
+    /// kind, action, text}` with the field's text afterwards. Another action on a text field, setText
+    /// on another control, or no `text` is `invalidParams`; text the field refuses is `invalidArgument`.
+    private func setText(_ params: UIPerformParams, _ control: UIControl, _ action: UIAction) throws -> JSONValue {
+        guard control.kind == .textField, let commit = control.commitText else {
+            throw ControlError.invalidParams("\(control.id) is a \(control.kind.rawValue), not a text field; setText works on text fields")
+        }
+        guard action == .setText else {
+            throw ControlError.invalidParams("\(control.id) is a text field; use setText with text")
+        }
+        guard let text = params.text else { throw ControlError.invalidParams("setText needs text") }
+        guard commit(text) else {
+            throw DAWError.invalidArgument("\(control.id) (\(control.label)) refuses \"\(text)\"")
+        }
+        let after = app?.mainWindow?.controls.first { $0.id == control.id }
+        return [
+            "accessibilityId": .string(control.id), "kind": .string(control.kind.rawValue), "action": "setText",
+            "text": .string(after?.text ?? text),
+        ]
     }
 
     /// UI-016 (T-081): `ui.perform {accessibilityId: "takeFolder.<folder>.take.<take>.swipe",

@@ -212,6 +212,7 @@ struct ShellSourceTests {
             }
         }
         let controls = try String(contentsOf: Self.views.appending(path: "ControlViews.swift"), encoding: .utf8)
-        #expect(controls.components(separatedBy: ".accessibilityIdentifier(control.id)").count == 3)
+        // ControlButton, ControlToggle and CommitTextField (DW-297: text-field controls).
+        #expect(controls.components(separatedBy: ".accessibilityIdentifier(control.id)").count == 4)
     }
 }

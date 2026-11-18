@@ -107,8 +107,7 @@ private struct ToolbarRow: View {
             // DW-180 (T-095): editable; a commit sets bar 1's tempo / signature (one undo entry).
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 3) {
-                    CommitTextField(id: "transport.tempo", label: "Tempo at Bar 1 (BPM)", value: model.tempoFieldText,
-                                    commit: { model.commitTempo($0) }, width: 52)
+                    if let tempo = controls["transport.tempo"] { CommitTextField(control: tempo, width: 52) }
                     Text("BPM").font(.caption).foregroundStyle(.secondary).fixedSize()
                     Group {
                         if let down = controls["transport.tempo.down"] { ControlButton(control: down, systemImage: "minus") }
@@ -119,8 +118,7 @@ private struct ToolbarRow: View {
                     .imageScale(.small)
                 }
                 HStack(spacing: 2) {
-                    CommitTextField(id: "transport.signature", label: "Time Signature at Bar 1", value: model.signature,
-                                    commit: { model.commitSignature($0) }, width: 40)
+                    if let signature = controls["transport.signature"] { CommitTextField(control: signature, width: 40) }
                     Menu {
                         ForEach(ProjectWindowModel.signaturePresets.indices, id: \.self) { i in
                             let preset = ProjectWindowModel.signaturePresets[i]
