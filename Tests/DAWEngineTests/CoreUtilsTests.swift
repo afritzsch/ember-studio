@@ -47,7 +47,7 @@ struct AudioBufferPoolTests {
 
 @Suite("CONV-RT-06: DAW_RT")
 struct RtAnnotationTests {
-    @Test("CONV-RT-06: DAW_RT is [[clang::nonblocking]]; RT utilities pass the effect check")
+    @Test("CONV-RT-06, DW-009: DAW_RT is [[clang::nonblocking]]; RT utilities pass the effect check and count 0 RT violations")
     func nonblocking() { expectPasses(daw.testing.rtAnnotationNonblocking()) }
 
     /// The engine's warning flags (Package.swift engineCxxSettings) that matter for DAW_RT.

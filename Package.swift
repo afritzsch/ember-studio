@@ -215,10 +215,7 @@ let package = Package(
             name: "DAWEngineTestSupport",
             dependencies: ["DAWEngine"],
             path: "Tests/DAWEngineTestSupport",
-            cxxSettings: engineCxxSettings + [.unsafeFlags(["-I", engineSourceRoot])],
-            // No Swift sources. Listed for scripts/test.sh's BUILD-002 check, which expects every
-            // target that reaches DAWEngine to declare C++ interop.
-            swiftSettings: cxxInterop
+            cxxSettings: engineCxxSettings + [.unsafeFlags(["-I", engineSourceRoot])]
         ),
         .testTarget(
             name: "DAWEngineTests",
