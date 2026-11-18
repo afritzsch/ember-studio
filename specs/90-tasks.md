@@ -150,6 +150,15 @@ DSP effects (T-070..073) depend only on the Node API and can be **pulled forward
 | T-098 | B | Control/tooling follow-ups: dawctl/dawmcp plugin scan, list and blocked/retry (`plugins.*`); `engine.paramDisplay`; Ctrl-C cancels `dawctl render.offline`; `midi.inject` summary; shared fixture-folder lookup; pipelined dawmcp calls run in order; one telemetry conversion shared by `GoldenEngine` and `EngineClient`; dawmcp notices a stale binary | DW-016, DW-289, DW-283, DW-285, DW-132, DW-163, DW-240, DW-147, DW-151 | T-094, T-096 | done |
 | T-099 | E+M | Engine/model correctness follow-ups: telemetry `clippedSamples`, `midiEventsDropped`, `inputLatency`, `bufferFrames`; `RemoveAsset` checks take clips; session-rate change rescales take offsets; `Bus`/`MasterChannel` decode a missing `automation` key; `validate()` checks `inputPair` and insert kinds; `RestoreSessionSampleRate` optional arrays | DW-083, DW-170, DW-192, DW-258, DW-259, DW-235, DW-199, DW-251, DW-185 (MODEL-005, ENG-050) | T-093 | done |
 
+### Follow-ups from autobuild phase 12 (open DW items; see docs/autobuild/DECISIONS.md "Phase 13 follow-up tasks")
+| Task | Lane | Title | Requirements | Depends on | Status |
+|---|---|---|---|---|---|
+| T-100 | U (+B) | App follow-ups 3: audio panel shows the device's real buffer and input latency (telemetry); compact MIDI input picker title; `PluginManagerModel.unblock`/`scan(timeout:)` so attach-mode `plugins.unblock` and scan limits work; the mixer strip's monitor menu shows the monitoring latency line; `project.open` over the socket toasts the load report; remove the unused `AppModel.export(_:to:)`; `ui.perform` `setText` for text fields | DW-295, DW-298, DW-299, DW-227, DW-155, DW-221, DW-297 | T-095, T-098 | wip(t-100-app-followups) |
+| T-101 | B | Control/tooling follow-ups 3: dawctl keeps hosted-plugin stdout out of its JSONL output; test-target warnings fail test.sh's warning check (fix the existing ones); the CTL-031 ProgressTests and REC-005 punch load flakes | DW-300, DW-262, DW-238, DW-231 | T-098 | wip(t-101-control-followups) |
+| T-102 | M | Model follow-ups 3: `InsertDevice` decodes AU/VST3 descriptors without `vendor`/`version` (matches its schema); `RenameBus`/`MoveBus` commands; `SetParam` refuses a param index beyond the kind's published params | DW-296, DW-113, DW-112 (MODEL-005) | T-088 | wip(t-102-model-followups) |
+| T-103 | E+P | Hosted plugins render offline in app exports: a facade "export begins/ends" hook re-prepares hosted plugins with `PrepareInfo.offline`; EmberTest's process-wide test knobs move to per-instance probes | DW-301, DW-302 (PLUG-018) | T-097 | ready |
+| T-104 | E | Engine test cleanups: RT round-trip inside an `RtScope` (DW-009), keep or replace the BUILD-005 symbol check (DW-002), shared `TestNodes.h` in TelemetryChecks/PdcChecks, drop DAWEngineTestSupport's no-op cxxInterop setting, metronome in `resetsOnLocate` | DW-009, DW-002, DW-138, DW-136, DW-161 | — | ready |
+
 ## Critical path
 `T-001 → T-002 → T-004 → T-012 → T-014 → T-016 → T-017 → T-018` unlocks agent self-testing. Prioritize it; everything else fans out from there.
 
