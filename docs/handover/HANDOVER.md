@@ -1,52 +1,31 @@
-Autobuild stopped: no `ready`, `wip` or `todo` tasks are left after phase 12 (week 85 % of this run's WEEK_STOP 90). The next run's first lead is **AUTOBUILD phase lead 13**: read CLAUDE.md, then `.claude/skills/autobuild/SKILL.md`, then follow "Orchestrating with Patchbay" in specs/90-tasks.md. Use the Patchbay MCP tools for workers, never the Agent tool. The run log is `docs/autobuild/RUN.md`; the decisions taken without the user are in `docs/autobuild/DECISIONS.md`.
+You are AUTOBUILD phase lead 14. Read CLAUDE.md, then `.claude/skills/autobuild/SKILL.md`, then follow "Orchestrating with Patchbay" in specs/90-tasks.md. Use the Patchbay MCP tools for workers, never the Agent tool. The run log is `docs/autobuild/RUN.md`; the decisions taken without the user are in `docs/autobuild/DECISIONS.md`.
 
-## State at handoff (2026-11-18, end of autobuild phase 12; main @ the "Autobuild phase 12: handover" commit, pushed; clean; no worker sessions running)
-- Phase 12 merged all four wave tasks. Every trial merge ran `scripts/test.sh` (12/12 for three; T-095's 11/12 was the known CTL-031 ProgressTests load flake DW-231, green 3× alone) plus `swift test` twice (all green).
-  - **T-099** engine/model correctness (DW-083, 170, 192, 258, 259, 235, 199, 251 partial, 185):
-    - Telemetry `clippedSamples` (master limiter overs; 0 in normal use because the model never enables the limiter, DW-294), `midiEventsDropped` (MidiDelayLine overflow, distinct from `midiInputDrops`), `bufferFrames` (device read-back). `inputLatency` is the existing `deviceInputLatency`.
-    - `RemoveAsset` refuses assets used by take clips; session-rate changes rescale take offsets; `Bus`/`MasterChannel` decode a missing `automation` key; `validate()` checks `inputPair <= 15` and insert kinds (Restore commands too); `RestoreSessionSampleRate` arrays optional.
-  - **T-095** app follow-ups 2 (DW-266, 277, 270, 271, 272, 278, 179, 180):
-    - Per-slot "Enable this plugin" in safe mode (`ProjectStore.safeModeEnabledSlots`, session-only; `deviceChain.device.<slot>.enablePlugin`).
-    - Plugin-editor edits feed `AutomationRecorder`.
-    - `visibleTracks` counts lane/take rows; header layout fixed at 220 pt; the empty Comp Editor tab is gone; arrow keys nudge clips; toolbar tempo/signature are editable (bar 1, undoable).
-  - **T-098** control/tooling (DW-016, 289, 283, 285, 132, 163, 240, 147, 151):
-    - `plugins.scan|list|blocked|retry|unblock` (headless via PluginCatalog and the PluginScanner binary; attach mode via the app), `engine.paramDisplay`, dawmcp tools to match.
-    - Ctrl-C cancels `dawctl render.offline`; dawmcp runs `tools/call` in arrival order (responses may be written out of order); one telemetry conversion `EngineClient.telemetry(from:)` used by GoldenEngine; dawmcp adds a stale-binary warning to tool results (14 recipe note).
-    - DAWControl now depends on PluginCatalog (Package.swift append loop).
-  - **T-097** hosted plugins (DW-242, 225, 233, 210, 211 partial, 217, 218):
-    - Real AU/VST3 reset before every facade export (on `daw.export`; nothing waits on the render thread). Exports through a ringing hosted delay are now bit-identical.
-    - Held note-offs + CC 123 on a bypass toggle; AUTO-003 wrap jump for hosted plugins; VST3 `IMidiMapping` for CC/pitch bend/aftertouch; `PrepareInfo.offline` → VST3 `kOffline` / AU `renderingOffline` on offline engines (app exports still realtime, DW-301).
-    - Fixed a VST3 latency-timer teardown race (DW-218); `AUInstance::instantiate` stays outside the lifecycle lock (audited, DW-217).
-    - Found that pushing all AUSampler params in one block trips an allocation inside Apple's V2 bridge (`AudioUnitScheduleParameters`); T-097 avoids the push after a reset.
-- Lead items this phase: spec housekeeping DW-034 (02 note after ENG-015), DW-035 (00 §3 reclaim QoS), DW-152 (07 autosave note), 13's `pane.bottom` list without `compEditor`, 11's AUTO-003 text and Status row for hosted plugins.
-- Done & merged (80): T-001..T-026, T-030..T-036, T-040..T-045, T-050..T-056, T-060..T-065, T-070..T-077, T-080..T-099. M1–M8 are complete.
-- **No `ready`, `wip` or `todo` tasks.** No WIP branches.
-- Discovered work runs DW-001..DW-302; 81 items are open (`todo`).
-  - New this phase: DW-293..295 (T-099), DW-296..298 (T-095), DW-299..300 (T-098), DW-301..302 (T-097).
-  - Closed: DW-016, 034, 035, 083, 132, 147, 151, 152, 163, 170, 179, 180, 185, 192, 199, 210, 217, 218, 225, 233, 235, 240, 242, 258, 259, 266, 270, 271, 272, 277, 278, 283, 285, 289. Partial: DW-211, DW-251.
-- Phase 12 week usage: 62% → ~86%. Two 5-hour pauses (~3.8 h and ~3.9 h).
+**User overrides for this run (given to phase lead 13, still in force):** WEEK_STOP = **100**, not 50 (the user wants the whole weekly budget; a free reset follows on Mon 2026-11-23 22:00). "No ready tasks" is not a stop condition while open DW items can be grouped into tasks. Keep waves small enough to finish, merge each finished, green task as soon as it is reviewed, and **push main after every merge** so nothing is lost when the limit hits.
 
-## Your first job (phase lead 13, next run)
-1. Run `usage.sh` and check the *Stop the run* conditions. If the week reset, WEEK_STOP is back to the skill's 50 unless the user says otherwise.
-2. `list_sessions`: there should be no phase-12 workers.
-3. There are no ready tasks. Group open DW items with a clear owner into lane-separated follow-up tasks T-100.. (log it in DECISIONS like "Phase 11 follow-up tasks"), then pick the wave. Suggested groupings:
-   - **U:** DW-295 (audio panel shows `bufferFrames`/`deviceInputLatency`), DW-298 (compact MIDI picker title), DW-299 (attach-mode `plugins.unblock` / scan timeout in `PluginManagerModel`), DW-282 tail (`ui.state` export `cancelling`/`lastCancelled`), DW-290.
-   - **B:** DW-297 (`ui.perform` `setText`, 13 delta to pre-accept), DW-300 (dawctl stdout redirect for chatty plugins), DW-231 (CTL-031 ProgressTests load flake).
-   - **E+P:** DW-301 (export begin/end hook so app exports re-prepare hosted plugins offline), DW-302 (EmberTest per-instance knobs), DW-284 (per-channel meters, needs Telemetry/ChannelStrip).
-   - **M:** DW-296 (InsertDevice schema vs decoder for `vendor`/`version`).
-   - Read the remaining `todo` rows before grouping; skip items that need the user (below).
+## State at handoff (2026-11-18, end of autobuild phase 13; main @ the "Autobuild phase 13: handover" commit, pushed; clean; no worker sessions running)
+- Phase 13 (a new run) first grouped open DW items into T-100..T-104 (DECISIONS "Phase 13 follow-up tasks"), then ran a small 3-worker wave. All three merged and were pushed one by one:
+  - **T-100** app follow-ups 3 (DW-295, 298, 299, 227, 155, 221, 297): `ui.perform {action: "setText", text}` for text fields (toolbar tempo/signature; 13 delta accepted); audio panel shows device buffer and input latency; compact MIDI picker titles ("All", "Ch 3"); attach-mode `plugins.unblock` and scan `timeoutSeconds`; mixer strip monitor menu shows the monitoring latency (and the strip now redraws on picker/latency changes); `project.open` over the socket toasts the load report; `AppModel.export(_:to:)` removed.
+  - **T-102** model follow-ups 3 (DW-296, 113, 112): AU/VST3 descriptors decode without `vendor`/`version`; `RenameBus {busID, name}` / `MoveBus {busID, index}` (07 delta accepted); `SetParam` refuses an index past a built-in kind's published params (via `ParamCatalog.builtin`).
+  - **T-101** control/tooling follow-ups 3 (DW-300, 262, 238, 231, 306): dawctl keeps fd-1 writes (chatty plugins) out of its JSONL stdout; test.sh has a `swift-build-tests` warning stage; CTL-031 ProgressTests, REC-005 punch and the T-096 DW-220 cancelJob test wait on conditions instead of wall-clock.
+- Done & merged (83): T-001..T-026, T-030..T-036, T-040..T-045, T-050..T-056, T-060..T-065, T-070..T-077, T-080..T-102. M1–M8 are complete.
+- **Ready:** T-103 (E+P: app exports re-prepare hosted plugins offline, DW-301; EmberTest per-instance knobs, DW-302) and T-104 (E: engine test cleanups DW-009, 002, 138, 136, 161). No `wip` tasks, no WIP branches.
+- Discovered work runs DW-001..DW-307. New this phase: DW-303..305 (T-100), DW-306 (lead; fixed by T-101), DW-307 (T-101). DW-307 (T-101): warning checks only see files compiled in that build (SwiftPM doesn't replay warnings of up-to-date files).
+- Phase 13 week usage: 86% → ~92%. No 5-hour pause (the window went 38% → ~78%).
+
+## Your first job (phase lead 14)
+1. Run `usage.sh`. With the user's override, stop only at `week ≥ 100` (or the other *Stop the run* conditions).
+2. `list_sessions`: there should be no phase-13 workers.
+3. Wave 14 = T-103 and T-104 (lanes E+P and E; they overlap in `Sources/DAWEngine` and test support, so give T-104 only test files + Package.swift's DAWEngineTestSupport setting + GraphBuilder's `resetsOnLocate` line, and T-103 the facade/hosting code). A 3-task wave of small tasks cost ~6 week-%; T-103 is larger. If budget is left after them, group more DW items (candidates: DW-303 + DW-304 (B), DW-305 (spec, lead can do it), DW-286 (U+E), DW-245 (U), DW-145 (M), DW-203 (M), DW-263 (P+M)).
 4. Items that need the user, not a task: DW-274 (JIT entitlements), DW-294 (expose the master limiter?), DW-293 (inverse shape of Restore commands for orphan lanes), DW-207 (stereo meters), DW-153, DW-215.
 
-## Decisions taken this phase (see docs/autobuild/DECISIONS.md, phase 12 rows)
-- Wave 12 = T-095, T-097, T-098, T-099, started with the 5-hour window at 42 %.
-- Pre-accepted Interfaces deltas: T-099 telemetry fields (08/13), T-098 `plugins.*` / `engine.paramDisplay` / call order / stale warning (13/14), T-097 `PrepareInfo.offline` (02/08/10).
-- T-097: bypass sends held note-offs + CC 123; reset off the render thread.
-- T-095: per-slot safe-mode enable is session-only and lives on `ProjectStore` (lead widened T-095's file list); Comp Editor tab removed; arrow-key nudge; editable toolbar tempo/signature at bar 1.
-- T-098/T-099 merge order (T-099 first) for the shared telemetry conversion.
-- Stop after phase 12 instead of creating more follow-up tasks (another phase would run past the weekly cap).
+## Decisions taken this phase (see docs/autobuild/DECISIONS.md, phase 13 rows)
+- Phase 13 follow-up tasks T-100..T-104; wave 13 = T-100, T-101, T-102 (small, to fit the remaining week budget).
+- T-100: `ui.perform setText` shape (13 delta pre-accepted); panel/picker/plugin-manager/socket-toast shapes.
+- T-101: test-target warnings fail test.sh.
+- T-102: lenient descriptor decoding; bus command keys `busID`/`index` (matching the track commands); `SetParam` index refusal.
 
 ## Sessions only the user can close
-- In the sidebar: the "macDAW" conductor session (it closes this lead). Phase lead 12 closed all four of its workers.
+- In the sidebar: the "macDAW" conductor session (it closes this lead). Phase lead 13 closed all three of its workers.
 - Worktrees left on disk (removing them needs `--force` because of submodules, which auto mode denies). All are merged or superseded:
   - `~/.patchbay/worktrees/macDAW/t-023-sidechain`, `t-024-metronome`, `t-025-m2-goldens`, `t-025-m2-goldens-r2`, `t-026-project-metronome`, `t-031-persistence`, `t-032-app-shell`, `t-032-app-shell-r2`, `t-033-arrange-canvas`, `t-034-toolbar-transport`, `t-035-crossfades`, `t-036-m3-goldens`, `t-042-note-commands`, `t-043-piano-roll`, `t-044-m4-goldens`, `t-045-midi-routing`, `t-052-audio-recording`, `t-055-audio-prefs`, `t-056-session-rate`, `t-061-au-hosting`, `t-071-compressor`, `t-072-delay`, `t-073-reverb`;
   - phase 6: `t-053-coremidi`, `t-062-vst3-hosting`, `t-070-eq`, `t-076-mixer-view`.
@@ -55,7 +34,8 @@ Autobuild stopped: no `ready`, `wip` or `todo` tasks are left after phase 12 (we
   - phase 9: `t-063-plugin-editors`, `t-075-automation-recording`, `t-080-loop-takes`, `t-084-ci`.
   - phase 10: `t-065-device-chain`, `t-081-take-ui`, `t-083-crash-dialog`, `t-091-dsp-perf`.
   - phase 11: `t-092-dsp-followups`, `t-093-midi-input`, `t-094-plugin-followups`, `t-096-control-followups`.
-  - new in phase 12: `t-095-app-followups`, `t-097-plugin-followups`, `t-098-control-followups`, `t-099-engine-model-followups`.
+  - phase 12: `t-095-app-followups`, `t-097-plugin-followups`, `t-098-control-followups`, `t-099-engine-model-followups`.
+  - new in phase 13: `t-100-app-followups`, `t-101-control-followups`, `t-102-model-followups`.
   - Remove them with `git worktree remove --force <path>`, then `git branch -D <branch>`. The old remote WIP branches `origin/t-025-m2-goldens`, `t-031-persistence` and `t-032-app-shell` can be deleted too.
 
 ## Open questions for the user (not yet answered)
@@ -76,6 +56,10 @@ Autobuild stopped: no `ready`, `wip` or `todo` tasks are left after phase 12 (we
   - **New in phase 11:**
     - T-093 changes MIDI takes: with several armed MIDI tracks, a track whose filter passed no note gets no take (before, every armed track got every note). With default filters nothing changes.
     - DW-288: the > 1.5 s "Enable Plugins" delay is on the app side; a manual timing in the running app would locate it.
+  - **New in phase 13:**
+    - Review the phase-13 rows in DECISIONS.md.
+    - T-100 behavior to check in the app: compact MIDI picker titles, the audio panel's device buffer / input latency line, the mixer strip monitor menu's latency line.
+    - The machine is still in Low Power Mode (`pmset -g` → lowpowermode 1), see DW-281.
   - **New in phase 12:**
     - Review the phase-12 rows in DECISIONS.md, especially the stop decision.
     - DW-294: the model never enables the master limiter, so telemetry `clippedSamples` stays 0. Should the limiter be exposed (command/setting + UI)?
@@ -203,4 +187,11 @@ Autobuild stopped: no `ready`, `wip` or `todo` tasks are left after phase 12 (we
   - Unescaped `|` inside backticks breaks a Markdown table row (`clip.nudge.left|right`). Write `\|` in table cells; a cell-count check per row catches it.
   - A worker's "the RT violation is load-dependent" can be wrong: T-097's export RT violations were deterministic (clean renders 1–5, then 14 violations each) once the model held all params. Asking for the backtraces/bisect found the real cause.
   - Answering a worker's pause-REPORT note on resume (T-095's ProjectStore question, T-097's render-thread wait) avoided a review round.
+
+- **Phase 13 additions:**
+  - A new run that starts with no tasks: group DW items into lane-separated tasks, log it in DECISIONS, commit and push, then start the wave. Pre-deciding every shape in the briefings again meant no worker stopped with a question.
+  - Budget: three small tasks took the 5-hour window 38% → ~78% and the week 86% → ~92% for the whole phase (workers reported within 15–30 min). Small DW tasks are cheap; the 4-task phases cost ~23 week-% because the tasks were bigger.
+  - Merge each task as soon as its report is in (the user wants main pushed after every merge); keep the next trial merge going while a worker does a follow-up.
+  - A trial-merge flake in another lane's test (DW-306) is a good small follow-up for the B/testing worker that's waiting for its merge.
+  - `.git/autobuild/close_dw.py TASK "DW-a,DW-b" [newrows.txt]` marks a task done, closes its DW rows and appends new DW rows (checks the cell count of the rows it touches; several older rows have unescaped `|` and fail a global check).
 
