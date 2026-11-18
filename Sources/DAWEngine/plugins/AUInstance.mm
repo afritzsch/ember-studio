@@ -100,12 +100,16 @@ struct AUInstance::LatencyState {
     std::mutex mutex;          // guards reporter
     LatencyReporter reporter;  // the node that uses the instance last
 
-    // Non-RT, any thread.
-    void update(double seconds) {
+    // Any thread, the render thread included: lock-free. True when the latency changed.
+    bool store(double seconds) {
         const double r = rate.load(std::memory_order_acquire);
-        if (r <= 0 || !(seconds >= 0)) return;
+        if (r <= 0 || !(seconds >= 0)) return false;
         const auto next = static_cast<uint32_t>(std::min(std::llround(seconds * r), static_cast<long long>(UINT32_MAX)));
-        if (samples.exchange(next, std::memory_order_acq_rel) == next) return;
+        return samples.exchange(next, std::memory_order_acq_rel) != next;
+    }
+
+    // Non-RT, any thread: tells the node (MIX-024).
+    void report() {
         LatencyReporter copy;
         {
             std::lock_guard lock(mutex);
@@ -118,7 +122,9 @@ struct AUInstance::LatencyState {
 } // namespace daw
 
 // KVO on AUAudioUnit.latency (PLUG-013). The callback may come on any thread, the render thread of
-// a misbehaving AU included, so it only hops to a global queue, where LatencyState::update runs.
+// a misbehaving AU included: it stores the new latency (lock-free) at once, so the instance reports
+// it right away, and hops to a global queue only to tell the node. DW-261: that hop was utility QoS
+// and could wait seconds on a loaded 3-core CI runner; the default QoS keeps the rebuild prompt.
 @interface DAWAULatencyObserver : NSObject {
 @public
     std::shared_ptr<daw::AUInstance::LatencyState>* state;
@@ -140,8 +146,9 @@ struct AUInstance::LatencyState {
     if (![value isKindOfClass:[NSNumber class]]) return;
     const double seconds = [(NSNumber*)value doubleValue];
     std::shared_ptr<daw::AUInstance::LatencyState> shared = *state;
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-        shared->update(seconds);
+    if (!shared->store(seconds)) return;
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_DEFAULT, 0), ^{
+        shared->report();
     });
 }
 @end
