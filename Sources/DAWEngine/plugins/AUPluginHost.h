@@ -93,6 +93,11 @@ public:
     // The AU the slot's latest node uses (null if none).
     std::shared_ptr<AUInstance> instance(NodeID slot) const;
 
+    // DW-242 (T-097), non-RT: resets every slot's live instance now (PluginReset.h), so an offline
+    // render starts without the tails of what played before. Call it only while nothing renders
+    // (the facade does, before an export's first block, with the device stopped).
+    void resetAll();
+
 private:
     Result<std::unique_ptr<Node>> create(const NodeCreateInfo& info);
 

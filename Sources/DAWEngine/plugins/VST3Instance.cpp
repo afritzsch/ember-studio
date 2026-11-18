@@ -674,16 +674,16 @@ Result<std::shared_ptr<VST3Instance>> VST3Instance::instantiate(const VST3Plugin
 
     // DW-242 (T-097): resets run on the reset worker; the instance outlives its registration.
     VST3Instance* self = instance.get();
-    instance->reset_ = std::make_unique<PluginReset>([self] { self->resetNow(); });
+    instance->reset_ = std::make_unique<PluginReset>([self] { self->clearState(); });
     return instance;
 }
 
-// DW-242 (T-097), on the reset worker while the render thread waits (PluginReset.h): the plugin
+// DW-242 (T-097), on the thread that resets before an export, or on the reset worker (PluginReset.h): the plugin
 // clears its processing state the way the VST3 docs prescribe, a deactivate/activate cycle
 // (setProcessing(false), setActive(false), setActive(true), setProcessing(true)). Its parameters
 // and state are kept. The host's own per-render state goes too: held notes (the voices are gone)
 // and the transport history.
-void VST3Instance::resetNow() {
+void VST3Instance::clearState() {
     Impl& impl = *impl_;
     std::lock_guard lock(impl.mutex);
     if (!impl.processing) return;
@@ -698,7 +698,9 @@ void VST3Instance::resetNow() {
     impl.lastEndTick = 0;
 }
 
-bool VST3Instance::reset() DAW_RT { return reset_->run(); }
+void VST3Instance::resetNow() { reset_->resetNow(); }
+bool VST3Instance::consumeFreshReset() DAW_RT { return reset_->consumeFresh(); }
+void VST3Instance::requestReset() DAW_RT { reset_->request(); }
 bool VST3Instance::resetBusy() const DAW_RT { return reset_->busy(); }
 uint64_t VST3Instance::resetsDone() const { return reset_->completed(); }
 

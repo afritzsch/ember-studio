@@ -24,10 +24,11 @@
 // NaN guard (PLUG-022, T-064): as AUPluginNode's (plugins/PluginNanGuard.h).
 //
 // reset() (DW-242, T-097): only the DW-063 reset before an offline render reaches a plugin node
-// (live locates reset timeline nodes only, TIME-008). It clears the plugin's processing state on
-// the reset worker (VST3Instance::reset, PluginReset.h), so an export starts without the tail of
-// what played before, and re-pushes every set param slot in the next block. While a reset that
-// outlasted its wait is still running, the node renders as if absent.
+// (live locates reset timeline nodes only, TIME-008). An export resets its plugins on its own,
+// non-RT thread before the first block (VST3PluginHost::resetAll), so reset() finds the reset done
+// and only re-pushes every set param slot in the next block. Without that (a bare Engine reset) it
+// asks the reset worker and returns at once; the node renders as if absent until the worker is done
+// (PluginReset.h). It never waits on the render thread.
 //
 // Offline (DW-211, T-097): PrepareInfo::offline prepares the plugin in kOffline process mode.
 //

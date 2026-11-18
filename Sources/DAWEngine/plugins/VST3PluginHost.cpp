@@ -173,6 +173,17 @@ Result<void> VST3PluginHost::setState(NodeID slotID, const std::vector<uint8_t>&
     return instance->setState(state);
 }
 
+// DW-242 (T-097).
+void VST3PluginHost::resetAll() {
+    std::vector<std::shared_ptr<VST3Instance>> live;
+    {
+        std::lock_guard lock(mutex_);
+        for (auto& [id, slot] : slots_)
+            if (auto instance = slot.live.lock(); instance && instance->isPrepared()) live.push_back(std::move(instance));
+    }
+    for (const auto& instance : live) instance->resetNow();
+}
+
 std::shared_ptr<VST3Instance> VST3PluginHost::instance(NodeID slotID) const {
     std::lock_guard lock(mutex_);
     auto it = slots_.find(slotID);

@@ -623,7 +623,7 @@ Result<std::shared_ptr<AUInstance>> AUInstance::instantiate(const AUComponentID&
         [unit addObserver:impl.observer forKeyPath:@"latency" options:NSKeyValueObservingOptionNew context:nullptr];
         // DW-242 (T-097): resets run on the reset worker; unregistered before the unit goes.
         AUInstance* self = instance.get();
-        instance->reset_ = std::make_unique<PluginReset>([self] { self->resetNow(); });
+        instance->reset_ = std::make_unique<PluginReset>([self] { self->clearState(); });
         return instance;
     }
 }
@@ -914,10 +914,10 @@ void AUInstance::releaseHeldNotes(uint32_t frame) DAW_RT {
 
 bool AUInstance::holdsNotes() const DAW_RT { return impl_->held.any(); }
 
-// DW-242 (T-097), on the reset worker while the render thread waits (PluginReset.h). AUAudioUnit's
+// DW-242 (T-097), on the thread that resets before an export, or on the reset worker (PluginReset.h). AUAudioUnit's
 // -reset is AudioUnitReset(unit, kAudioUnitScope_Global, 0) for a V2 unit behind the bridge: it
 // clears DSP state (delay lines, voices), keeping parameters and state.
-void AUInstance::resetNow() {
+void AUInstance::clearState() {
     @autoreleasepool {
         std::lock_guard lock(impl_->mutex);
         if (!prepared_.load(std::memory_order_acquire)) return;
@@ -928,7 +928,9 @@ void AUInstance::resetNow() {
     }
 }
 
-bool AUInstance::reset() DAW_RT { return reset_->run(); }
+void AUInstance::resetNow() { reset_->resetNow(); }
+bool AUInstance::consumeFreshReset() DAW_RT { return reset_->consumeFresh(); }
+void AUInstance::requestReset() DAW_RT { reset_->request(); }
 bool AUInstance::resetBusy() const DAW_RT { return reset_->busy(); }
 uint64_t AUInstance::resetsDone() const { return reset_->completed(); }
 

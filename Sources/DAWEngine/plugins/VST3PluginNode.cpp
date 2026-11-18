@@ -88,7 +88,9 @@ void VST3PluginNode::pushParams(const ProcessContext& ctx) DAW_RT {
 // so the plugin's parameters are the model's from the reset on.
 void VST3PluginNode::reset() DAW_RT {
     if (!active_) return;
-    instance_->reset();
+    // The export's own thread normally reset the plugin just before (VST3PluginHost::resetAll);
+    // otherwise the worker does it and the node renders as if absent until it is done.
+    if (!instance_->consumeFreshReset()) instance_->requestReset();
     std::fill(lastPushed_.begin(), lastPushed_.end(), std::numeric_limits<float>::quiet_NaN());
     primed_ = false;
 }
@@ -102,6 +104,7 @@ void VST3PluginNode::process(ProcessContext& ctx, NodeIO& io) DAW_RT {
         passThrough(io);
         return;
     }
+    (void)instance_->consumeFreshReset();  // DW-242: a fresh mark lasts until the plugin renders
     pushParams(ctx);
     for (const MidiEvent& event : io.midiIn) instance_->addMidi(event, n);
     // DW-225 (T-097): bypass turned on: this is the last block the plugin gets until it is enabled

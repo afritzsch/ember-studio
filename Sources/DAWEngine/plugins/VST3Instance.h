@@ -144,10 +144,14 @@ public:
     bool holdsNotes() const DAW_RT;
 
     // DW-242 (T-097): clears the plugin's processing state (tails, voices) with a
-    // setProcessing(false) / setActive(false) / setActive(true) / setProcessing(true) cycle on the
-    // reset worker; parameters and state stay. RT entry (an offline render's reset, PluginReset.h):
-    // waits for the worker; false if it timed out, and resetBusy() until it is done (don't render).
-    bool reset() DAW_RT;
+    // setProcessing(false) / setActive(false) / setActive(true) / setProcessing(true) cycle;
+    // parameters and state stay (PluginReset.h).
+    //   resetNow: non-RT, synchronous, while nothing renders the instance (before an export).
+    //   consumeFreshReset: RT, true once after resetNow (the node's reset() has nothing to do).
+    //   requestReset: RT, never waits: the reset worker does it, resetBusy() until then.
+    void resetNow();
+    bool consumeFreshReset() DAW_RT;
+    void requestReset() DAW_RT;
     bool resetBusy() const DAW_RT;
     uint64_t resetsDone() const;  // tests
     // RT. Fills the ProcessContext the plugin sees during the next render.
@@ -174,7 +178,7 @@ public:
 private:
     VST3Instance(VST3PluginID plugin, std::shared_ptr<Impl> impl);
     void startLatencyTimer();
-    void resetNow();  // DW-242, on the reset worker
+    void clearState();  // DW-242: the reset itself (PluginReset's work)
     bool addMappedController(uint8_t channel, uint32_t controller, double normalized, uint32_t frame) DAW_RT;
 
     VST3PluginID plugin_;

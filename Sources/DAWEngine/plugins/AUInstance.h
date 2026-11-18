@@ -139,11 +139,14 @@ public:
     void releaseHeldNotes(uint32_t frame) DAW_RT;
     bool holdsNotes() const DAW_RT;
 
-    // DW-242 (T-097): clears the AU's rendering state (-reset, i.e. AudioUnitReset(global, 0)) on
-    // the reset worker; parameters and state stay. RT entry (an offline render's reset,
-    // PluginReset.h): waits for the worker; false if it timed out, and resetBusy() until it is
-    // done (don't render).
-    bool reset() DAW_RT;
+    // DW-242 (T-097): clears the AU's rendering state (-reset, i.e. AudioUnitReset(global, 0));
+    // parameters and state stay (PluginReset.h). Same calls as VST3Instance's:
+    //   resetNow: non-RT, synchronous, while nothing renders the instance (before an export).
+    //   consumeFreshReset: RT, true once after resetNow (the node's reset() has nothing to do).
+    //   requestReset: RT, never waits: the reset worker does it, resetBusy() until then.
+    void resetNow();
+    bool consumeFreshReset() DAW_RT;
+    void requestReset() DAW_RT;
     bool resetBusy() const DAW_RT;
     uint64_t resetsDone() const;  // tests
     // RT. What the AU's musicalContextBlock / transportStateBlock report during the next render.
@@ -177,7 +180,7 @@ public:
 
 private:
     explicit AUInstance(const AUComponentID& component);
-    void resetNow();  // DW-242, on the reset worker
+    void clearState();  // DW-242: the reset itself (PluginReset's work)
 
     AUComponentID component_;
     Impl* impl_ = nullptr;

@@ -1135,6 +1135,10 @@ void EngineFacade::Impl::runExport(JobID jobID, Tick from, Tick to, const Export
     if (render) {
         // DW-064: the driver doesn't touch the recording flag, and an export never records.
         (void)engine.transport().setRecording(false);
+        // DW-242 (T-097): hosted plugins are reset here, on daw.export before the first block with
+        // the device stopped, so the DW-063 reset of the render's first block finds them clean.
+        plugins->resetAll();
+        vst3Plugins->resetAll();
         OfflineDriver offline;
         auto progress = [this, jobID](const OfflineProgress& p) {
             std::lock_guard lock(mutex);
