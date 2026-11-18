@@ -87,6 +87,26 @@ public final class EngineSync {
         }
     }
 
+    /// DW-266 (T-095, docs/autobuild/DECISIONS.md "T-095 app decisions"): the AU/VST3 slots enabled
+    /// one at a time while in safe mode ("Enable this plugin"). Session-only like safe mode itself:
+    /// nothing is written to the project and there is no undo entry. While `arePluginsBypassed`,
+    /// these slots are built with their plugin and keep their own bypass; the rest stay absent.
+    /// It means nothing outside safe mode. Changing it re-applies the graph (the slot's node is
+    /// re-created with its plugin) and writes the bypass slots at once.
+    public var pluginsEnabledInSafeMode: Set<NodeIDValue> = [] {
+        didSet {
+            guard pluginsEnabledInSafeMode != oldValue, !isInvalidated else { return }
+            writeParams()
+            candidate = nil
+            scheduleApply()
+        }
+    }
+
+    /// DW-277 (T-095): the store's automation recorder (AUTO-006/007), offered every plugin-side edit
+    /// before `pluginEdits`, as a UI control's gesture is. It attaches itself (`AutomationRecorder`
+    /// does, at each transport poll), so a newly attached engine finds it too.
+    public weak var automationRecorder: AutomationRecorder?
+
     /// DW-204 (T-063): a plugin's own edits (`pluginParamEdited`) → undoable `SetParam` gestures.
     /// `ProjectStore.attachEngine` points it at the store.
     public let pluginEdits = PluginEditRecorder()
@@ -186,7 +206,8 @@ public final class EngineSync {
         pushMidiInputs()  // T-093: before arming, so a track never hears the wrong input
         pushMidiArms()
         pushMonitorInput()
-        let graph = GraphDescriptionBuilder.build(project, runtime: runtime, pluginsDisabled: arePluginsBypassed)
+        let graph = GraphDescriptionBuilder.build(project, runtime: runtime, pluginsDisabled: arePluginsBypassed,
+                                                  enabledInSafeMode: pluginsEnabledInSafeMode)
         candidate = graph
         if graph != appliedGraph || hasUnusedParams() { scheduleApply() }
     }
@@ -216,7 +237,8 @@ public final class EngineSync {
         pendingApply?.cancel()
         pendingApply = nil
         guard !isInvalidated else { return }
-        var graph = candidate ?? GraphDescriptionBuilder.build(project, runtime: runtime, pluginsDisabled: arePluginsBypassed)
+        var graph = candidate ?? GraphDescriptionBuilder.build(project, runtime: runtime, pluginsDisabled: arePluginsBypassed,
+                                                  enabledInSafeMode: pluginsEnabledInSafeMode)
         bumpChangedPlayers(&graph)
         if graph != appliedGraph {
             engine.applyGraph(graph)
@@ -263,7 +285,13 @@ public final class EngineSync {
             lastError = event.error
         case .pluginParamEdited:
             // DW-204 (T-063): ungestured ones are grouped per poll (pollEvents ends the batch).
-            if let edit = event.pluginEdit { pluginEdits.handle(slot: event.subject, edit: edit) }
+            // DW-277 (T-095): the automation recorder takes the edit first (AUTO-006/007): it records
+            // while playing on a touch/latch/write lane, or edits the point under the playhead.
+            if let edit = event.pluginEdit {
+                if let recorder = automationRecorder, recorder.store.engineSync === self,
+                   recorder.pluginEdited(slot: event.subject, edit: edit) { break }
+                pluginEdits.handle(slot: event.subject, edit: edit)
+            }
         case .recordingFinalized:
             // REC-004 (T-052): the store turns the take into ImportAsset + AddClip.
             if let take = event.recording { onRecordingFinalized?(take, event.error) }
@@ -500,7 +528,7 @@ public final class EngineSync {
     private func writeParams() {
         var values = GraphDescriptionBuilder.paramValues(
             project, runtime: runtime, catalog: catalog, metronomeSuppressed: isMetronomeSuppressed,
-            pluginsBypassed: arePluginsBypassed)
+            pluginsBypassed: arePluginsBypassed, enabledInSafeMode: pluginsEnabledInSafeMode)
         // T-063 ("T-063 first-edit undo"): a plugin param the document doesn't set gets the plugin's
         // own value from before its first editor gesture, so undoing that edit reverts the plugin.
         for (key, baseline) in pluginBaselines {

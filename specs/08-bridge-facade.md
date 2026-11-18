@@ -428,6 +428,17 @@ Swift (`EngineProtocol.swift`, block "T-093 additions"): `setMidiInput(track:_: 
 
 Affected: T-093 only. Tests: `MidiInputTests` (`perTrackFilter`, `filterChangeNeverHangs`, `recordsPerTrack`, the facade end-to-end and the real CoreMIDI source filtered by its unique ID), `TrackMidiInputTests`, `TrackMidiInputControlTests`, `TrackMidiInputUITests`.
 
+### Contract delta (T-099), accepted (autobuild, see docs/autobuild/DECISIONS.md "T-099 telemetry delta")
+Additive and defaulted (zero); no existing field changes meaning. Closes DW-083, DW-170 and DW-192.
+```cpp
+// TelemetryPOD gains:  uint64_t clippedSamples = 0; uint64_t midiEventsDropped = 0; uint32_t bufferFrames = 0;
+```
+- **`clippedSamples`** (DW-083): samples the master's MIX-009 safety limiter clipped (or zeroed as NaN), summed over every master node since the engine was created, offline renders included. It is only nonzero while the limiter slot is on (the model writes 0). Engine side: `Telemetry::countClippedSamples` (`TelemetrySnapshot.clippedSamples`); `MasterNode` takes an optional `Telemetry*`, which `registerBuiltinNodes` passes, so a replaced master doesn't reset the count. `MasterNode::clippedSamples()` (per instance) is unchanged.
+- **`midiEventsDropped`** (DW-170): MIDI events a MIDI edge's `MidiDelayLine` (MIX-021 for MIDI, 05 "MIDI routing") dropped under its overflow policy, all time. `Engine::render` sums them after each block (`RenderGraph::takeMidiDrops` → `MidiDelayLine::takeNewDrops`, an audio-thread delta of the line's own counter), so each drop counts once even when a rebuild carries the line over. It is distinct from `midiInputDrops` (REC-010/011: live MIDI input dropped before the graph).
+- **`bufferFrames`** (DW-192): the frames per IO cycle the running device uses (`RunningConfig.bufferFrames`; 0 while no device runs, and always in offline mode). `CoreAudioDriver` now reports the buffer size the output device returns after it is set (what IO-005's latency already counted), falling back to the request. **`inputLatency`**: not added. `deviceInputLatency` (T-052) already is IO-005's input latency (device + safety offset + buffer + stream of the input device running; 0 while no input runs, IO-001), so DW-192's input part is closed by that field.
+
+Swift (`EngineProtocol.swift`): `EngineTelemetry.clippedSamples/midiEventsDropped/bufferFrames`, filled by `EngineClient.telemetry()` (add-only; T-098 maps them in the shared conversion). Affected: T-099; T-098 (shared telemetry conversion); app audio panels may show `bufferFrames` (T-095 lane). Tests: `EngineCounterTests` (DAWEngineTests), `TelemetryFieldsTests` (DAWModelTests).
+
 ### Contract delta (T-097), accepted (autobuild, see docs/autobuild/DECISIONS.md "T-097 hosted-plugin decisions")
 No API change; behavior only. The hosting side is in 10 "Contract delta (T-097)".
 - **Offline engines prepare in offline mode (DW-211).** An `EngineMode::offline` facade builds its graphs with `PrepareInfo::offline` set (02 "Contract delta (T-097)"). Its VST3 plugins run in `kOffline` and its AUs with `renderingOffline`. A realtime facade keeps `kRealtime`, its exports included (they render the live graph; see the T-097 report).

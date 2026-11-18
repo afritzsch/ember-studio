@@ -30,7 +30,7 @@ Named threads, created only by `DAWEngine`:
 |---|---|
 | `daw.audio` | CoreAudio render callback (joined to the device `os_workgroup`) |
 | `daw.compile` | Builds RenderGraphs from GraphDescriptions |
-| `daw.reclaim` | Frees retired snapshots and other RT-retired objects |
+| `daw.reclaim` | Frees retired snapshots and other RT-retired objects (QoS `QOS_CLASS_UTILITY`, DW-035) |
 | `daw.diskwrite` | Writes recorded audio from FIFOs to disk |
 | `daw.loader` | Decodes and resamples audio files into RAM |
 | `daw.export` | Runs offline render jobs (export, `render.offline`) for the facade, off the main thread (T-014, DW-080) |

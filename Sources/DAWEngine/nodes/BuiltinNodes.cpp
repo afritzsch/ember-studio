@@ -9,6 +9,7 @@
 #include "nodes/Compressor.h"
 #include "nodes/Delay.h"
 #include "nodes/Eq.h"
+#include "graph/MasterNode.h"
 #include "nodes/GainNode.h"
 #include "nodes/Metronome.h"
 #include "nodes/MidiClipPlayer.h"
@@ -45,6 +46,11 @@ Result<void> registerBuiltinNodes(NodeRegistry& registry, AssetLookup lookup, Te
     if (auto r = registry.set(NodeKind::reverb, Reverb::kindInfo(telemetry)); !r) return r;  // DSP-033
     if (auto r = registry.set(NodeKind::delay, Delay::kindInfo(telemetry)); !r) return r;  // DSP-032
     if (auto r = registry.set(NodeKind::eq, Eq::kindInfo(telemetry)); !r) return r;  // DSP-030
+    // DW-083 (T-099): the master's limiter overs count into the engine's telemetry (clippedSamples).
+    auto master = [telemetry](const NodeCreateInfo& info) -> Result<std::unique_ptr<Node>> {
+        return std::unique_ptr<Node>(std::make_unique<MasterNode>(info.desc.firstParam, info.desc.numParams, telemetry));
+    };
+    if (auto r = registry.set(NodeKind::master, {std::move(master)}); !r) return r;  // MIX-009
 
     auto gain = [](const NodeCreateInfo& info) -> Result<std::unique_ptr<Node>> {
         if (info.desc.numParams < GainNode::kMinNumParams)

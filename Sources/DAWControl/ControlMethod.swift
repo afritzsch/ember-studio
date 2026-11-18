@@ -39,6 +39,12 @@ public enum ControlMethod: String, CaseIterable, Hashable, Sendable {
     case uiSnapshot = "ui.snapshot"
     case uiPerform = "ui.perform"
     case testFixture = "test.fixture"
+    case pluginsScan = "plugins.scan"  // T-098 (DW-016)
+    case pluginsList = "plugins.list"
+    case pluginsBlocked = "plugins.blocked"
+    case pluginsRetry = "plugins.retry"
+    case pluginsUnblock = "plugins.unblock"
+    case engineParamDisplay = "engine.paramDisplay"  // T-098 (DW-289)
 
     /// CTL-005: these need the running app (attach mode).
     public var isAttachOnly: Bool {
@@ -82,6 +88,11 @@ public enum ControlMethod: String, CaseIterable, Hashable, Sendable {
         case .uiSnapshot: UISnapshotParams.self
         case .uiPerform: UIPerformParams.self
         case .testFixture: TestFixtureParams.self
+        case .pluginsScan: PluginsScanParams.self  // T-098
+        case .pluginsList, .pluginsBlocked: NoParams.self
+        case .pluginsRetry: PluginsRetryParams.self
+        case .pluginsUnblock: PluginsUnblockParams.self
+        case .engineParamDisplay: EngineParamDisplayParams.self
         }
     }
 
@@ -121,11 +132,17 @@ public enum ControlMethod: String, CaseIterable, Hashable, Sendable {
         case .deviceSet: "Switch the output/input device or rate {outputDevice?, inputDevice?, sampleRate?, bufferFrames?} (realtime engine)"
         case .deviceSimulate: "Make the fake device lose, restore, change rate or overload {kind, deviceID?, sampleRate?} → {outputDeviceID, sampleRate, events}"
         case .midiInputs: "MIDI input sources (REC-010) → {inputs: [{uniqueID, name, connected}]}"
-        case .midiInject: "Feed MIDI messages as if from a controller (test seam, realtime engines) {events: [{sample | framesFromNow, status, data1?, data2?}]} → {accepted}"
+        case .midiInject: "Feed MIDI messages as if from a controller (test seam, realtime engines) {events: [{sample | framesFromNow, status, data1?, data2?, source?}]} → {accepted} (source: a CoreMIDI unique ID from midi.inputs, for a track's MIDI input filter)"
         case .uiState: "UI state dump (attach only)"
         case .uiSnapshot: "Window snapshot as PNG {path?, pluginEditor?: slot} → {pngPath} (attach only)"
         case .uiPerform: "Click or toggle a control {accessibilityId, action} (attach only)"
         case .testFixture: "Build a fixture project from its script {name}"
+        case .pluginsScan: "Scan new or changed AU/VST3 plugins out of process {timeoutSeconds?} → {scanned, unchanged, removed, plugins, blocked}"
+        case .pluginsList: "Usable plugins in the scan cache → {plugins: [{format, identifier, name, vendor, version, isInstrument, …}], cachePath}"
+        case .pluginsBlocked: "Plugins whose scan crashed, hung or failed → {blocked: [{identifier, name, reason, timedOut?, …}], cachePath}"
+        case .pluginsRetry: "Scan blocked plugins again {id?, timeoutSeconds?} → {retried, scan, stillBlocked} (timed-out ones get 120 s)"
+        case .pluginsUnblock: "Forget blocked plugins so the next plugins.scan tries them again {id?} → {unblocked}"
+        case .engineParamDisplay: "A hosted plugin's own display string for a param value {node, param, value?} → {node, param, value, display}"
         }
     }
 }

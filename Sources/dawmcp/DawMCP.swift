@@ -20,6 +20,12 @@ struct DawMCP {
         An MCP server on stdin/stdout exposing the Ember Studio control methods as daw_* tools.
         options:
           --fixtures <dir>  also look for daw_test_fixture scripts here (repeatable; $DAWCTL_FIXTURES too)
+        Tool calls run one at a time in the order they arrive (daw_render_cancel excepted).
+        When this binary is rebuilt while it runs, every tool result adds the warning
+        "stale: dawmcp binary rebuilt since launch; restart the MCP server"; it keeps running the
+        old build (and the session's project) until the client restarts it.
+        plugins.* (daw_plugins_*) use PluginScanner next to this binary and the scan cache
+        <checkout>/.build/plugins/plugins.json ($DAWCTL_PLUGIN_CACHE, $DAWCTL_VST3_DIRS, $DAWCTL_AU=0).
         """
 
     @MainActor
@@ -47,17 +53,30 @@ struct DawMCP {
         let dispatcher = Dispatcher(configuration: .init(
             fixtureDirectories: extraFixtures + ControlFixtures.defaultDirectories()))
         let tools = DawTools(dispatcher: dispatcher)
+        // DW-147/151 (T-098): results say when this binary was rebuilt after launch.
+        let watch = StaleBinaryWatch()
+        tools.staleCheck = { watch.check() }
         let server = Server(name: "dawmcp", version: "1.0.0", capabilities: .init(tools: .init(listChanged: false)))
         await server.withMethodHandler(ListTools.self) { _ in ListTools.Result(tools: DawTools.tools) }
         // CTL-031 / DW-133: progress of long calls as MCP notifications/progress.
         tools.sendProgress = { [weak server] progress in
             try? await server?.notify(ProgressNotification.message(progress))
         }
+        // DW-163 (T-098): tools/call runs in arrival order; stdin passes through a tagger that numbers
+        // the calls before the SDK, which handles each request in a task of its own, sees them.
+        let sequencer = CallSequencer()
+        let stdinPipe = Pipe()
+        CallOrderTagger(sequencer: sequencer, input: .standardInput, output: stdinPipe.fileHandleForWriting).start()
         await server.withMethodHandler(CallTool.self) { params in
-            await tools.call(params.name, arguments: params.arguments, meta: params._meta)
+            let seq = params._meta?[CallOrder.metaKey]?.intValue
+            if let seq { await sequencer.waitTurn(seq) }
+            defer { if let seq { sequencer.finish(seq) } }
+            return await tools.call(params.name, arguments: params.arguments, meta: params._meta)
         }
         do {
-            let transport = StdioTransport(input: .standardInput, output: FileDescriptor(rawValue: protocolOut))
+            let transport = StdioTransport(
+                input: FileDescriptor(rawValue: stdinPipe.fileHandleForReading.fileDescriptor),
+                output: FileDescriptor(rawValue: protocolOut))
             try await server.start(transport: transport)
         } catch {
             fail("cannot start the MCP server: \(error)")

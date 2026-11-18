@@ -169,10 +169,51 @@ struct KeyBindingTests {
         #expect(KeyChord(characters: " ", modifiers: []) == KeyChord(.space))
         #expect(KeyChord(characters: "\u{7F}", modifiers: []) == KeyChord(.delete))
         #expect(KeyChord(characters: "\u{F728}", modifiers: []) == KeyChord(.delete), "forward delete")
-        #expect(KeyChord(characters: "\u{F702}", modifiers: []) == nil, "← is a function key")
+        // DW-179 (T-095): the arrows are kept (function keys with a direction); other function keys aren't.
+        #expect(KeyChord(characters: "\u{F702}", modifiers: []) == KeyChord(.arrow(.left)))
+        #expect(KeyChord(characters: "\u{F700}", modifiers: []) == KeyChord(.arrow(.up)))
+        #expect(KeyChord(characters: "\u{F701}", modifiers: []) == KeyChord(.arrow(.down)))
+        #expect(KeyChord(characters: "\u{F703}", modifiers: []) == KeyChord(.arrow(.right)))
+        #expect(KeyChord(characters: "\u{F704}", modifiers: []) == nil, "F1 is a function key")
+        #expect(KeyChord(.arrow(.left)).description == "←")
         #expect(KeyChord(characters: "", modifiers: []) == nil)
         #expect(KeyChord("t", [.command, .shift]).description == "⇧⌘T")
         #expect(KeyChord(.space).description == "Space" && KeyChord(.delete).description == "⌫")
+    }
+
+    @Test("DW-179: arrow keys nudge the selected clips a grid step (←/→) or a track (↑/↓), one undo entry each; nothing selected or the piano roll focused passes them on")
+    func arrowNudge() throws {
+        let (model, _, asset) = try makeArrange()
+        let clip = try model.addAudioClip(track: 0, start: 960, asset: asset)
+        #expect(!press(model, KeyChord(.arrow(.right))), "no selection: the key goes on to the focused view")
+        #expect(try model.audio(clip).start == Tick(960))
+        model.selectedClips = [clip]
+        model.arrange.snap = .beat
+        #expect(press(model, KeyChord(.arrow(.right))))
+        #expect(try model.audio(clip).start == Tick(1920))
+        #expect(model.store.undoLabel == "Move Clip")
+        #expect(press(model, KeyChord(.arrow(.right)), repeat: true), "a held arrow repeats")
+        #expect(try model.audio(clip).start == Tick(2880))
+        #expect(press(model, KeyChord(.arrow(.left))))
+        #expect(try model.audio(clip).start == Tick(1920))
+        model.arrange.snap = .bar
+        #expect(press(model, KeyChord(.arrow(.left))))
+        #expect(try model.audio(clip).start == Tick(0), "a bar back, clamped at 0")
+        #expect(press(model, KeyChord(.arrow(.down))))
+        #expect(model.trackOf(clip) == model.project.tracks[1].id)
+        #expect(press(model, KeyChord(.arrow(.up))))
+        #expect(model.trackOf(clip) == model.project.tracks[0].id)
+        model.store.undo()
+        #expect(model.trackOf(clip) == model.project.tracks[1].id, "each press is one undo entry")
+        // UI-020: with the piano roll focused its view transposes on the arrows; they don't move clips.
+        let midiTrack = model.project.tracks[2].id
+        try model.store.perform(AddClip(trackID: midiTrack, start: 0, length: 3840))
+        model.pianoRoll.open(try #require(model.project.track(midiTrack)?.clips.first?.id))
+        model.selectedClips = [clip]
+        model.pianoRoll.hasKeyFocus = true
+        #expect(!press(model, KeyChord(.arrow(.up))))
+        #expect(model.trackOf(clip) == model.project.tracks[1].id)
+        #expect(!press(model, KeyChord(.arrow(.left), .shift)), "only the plain arrows are bound")
     }
 
     @Test("UI-002, UI-052: every binding names a control the window has; chords are unique")
@@ -210,6 +251,62 @@ struct ToolbarTests {
         #expect(model.signature == "3/4" && model.tempo == 60)
         #expect(model.positionBBT == "2.3.120", "3/4: bar 2 starts at beat 3")
         #expect(model.positionTime == "0:05.125")
+    }
+
+    @Test("DW-180: the tempo and signature fields set bar 1's value, one undo entry per commit; invalid or unchanged input changes nothing")
+    func editableTempoAndSignature() throws {
+        let (model, engine) = try makeWindow()
+        #expect(model.tempoFieldText == "120")
+        #expect(model.commitTempo("128.5"))
+        #expect(model.tempoAtBar1 == 128.5 && model.tempo == 128.5 && model.tempoFieldText == "128.5")
+        #expect(model.store.undoLabel == "Set Tempo")
+        #expect(model.project.tempoMap.tempoEvents.count == 1 && model.project.tempoMap.tempoEvents[0].tick == Tick(0))
+        #expect(model.commitTempo(" 90,25 BPM "))
+        #expect(model.tempoAtBar1 == 90.25)
+        model.store.undo()
+        #expect(model.tempoAtBar1 == 128.5, "one commit, one undo entry")
+        let undoLabel = model.store.undoLabel
+        let applied = engine.appliedGraphs.count
+        for bad in ["", "fast", "0", "1001", "-5", "1e3", "nan", "12/8"] {
+            #expect(!model.commitTempo(bad), "\(bad)")
+        }
+        #expect(model.commitTempo("128.5"), "the same value: accepted, nothing to do")
+        #expect(model.tempoAtBar1 == 128.5 && model.store.undoLabel == undoLabel && engine.appliedGraphs.count == applied)
+
+        #expect(model.commitSignature("7/8"))
+        #expect(model.signature == "7/8" && model.store.undoLabel == "Set Time Signature")
+        #expect(model.commitSignature(" 3 / 4 "))
+        #expect(model.signature == "3/4")
+        for bad in ["", "3", "3/5", "0/4", "65/4", "3/128", "a/b", "3/4/4"] {
+            #expect(!model.commitSignature(bad), "\(bad)")
+        }
+        #expect(model.signature == "3/4")
+        model.store.undo()
+        #expect(model.signature == "7/8")
+
+        // With a later tempo event, the field edits bar 1's, which the playhead shows there.
+        try model.store.perform(SetTempoEvent(tick: Tick(3840 * 4), bpm: 90))
+        #expect(model.commitTempo("100"))
+        #expect(model.project.tempoMap.tempoEvents.map(\.bpm) == [100, 90])
+    }
+
+    @Test("DW-180: transport.tempo.up|down and the transport.signature.<n>.<d> menu (UI-052), each one undo entry; ui.state toolbar has bar 1's values")
+    func tempoSignatureControls() throws {
+        let (model, _) = try makeWindow()
+        try model.control("transport.tempo.up").action()
+        #expect(model.tempoAtBar1 == 121 && model.store.undoLabel == "Set Tempo")
+        try model.control("transport.tempo.down").action()
+        try model.control("transport.tempo.down").action()
+        #expect(model.tempoAtBar1 == 119)
+        #expect(try model.control("transport.signature.4.4").isOn == true)
+        try model.control("transport.signature.6.8").action()
+        #expect(model.signature == "6/8" && model.store.undoLabel == "Set Time Signature")
+        #expect(try model.control("transport.signature.6.8").isOn == true && model.control("transport.signature.4.4").isOn == false)
+        let json = UIStateDumper.dump(model, isMain: true)
+        #expect(json["toolbar"]?["tempoAtBar1"]?.doubleValue == 119)
+        #expect(json["toolbar"]?["signatureAtBar1"] == "6/8")
+        try model.store.perform(SetTempoEvent(tick: Tick(0), bpm: TempoMap.maxBPM))
+        #expect(try !model.control("transport.tempo.up").isEnabled)
     }
 
     @Test("ui.state carries the toolbar readouts, the loop and the key bindings")

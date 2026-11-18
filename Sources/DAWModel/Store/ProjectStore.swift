@@ -37,6 +37,15 @@ public final class ProjectStore {
         didSet { engineSync?.arePluginsBypassed = isSafeMode }
     }
 
+    /// DW-266 (T-095, docs/autobuild/DECISIONS.md "T-095 app decisions"): the AU/VST3 slots enabled one
+    /// at a time while in safe mode ("Enable this plugin"). Session-only like `isSafeMode`: not saved,
+    /// not undoable, the project isn't dirtied. The attached engine builds these slots with their plugin
+    /// and their own bypass while safe mode is on (`EngineSync.pluginsEnabledInSafeMode`); a newly
+    /// attached engine starts with it (engine handover). It means nothing outside safe mode.
+    public var safeModeEnabledSlots: Set<NodeIDValue> = [] {
+        didSet { engineSync?.pluginsEnabledInSafeMode = safeModeEnabledSlots }
+    }
+
     /// MODEL-040: the project folder, once opened or saved. Nil for a new project.
     public private(set) var folderURL: URL?
     /// What open found (MODEL-042/045/046, DW-111); `loadAssets` updates the offline assets.
@@ -178,6 +187,12 @@ public final class ProjectStore {
     ) throws(DAWError) -> EngineSync {
         detachEngine()
         let sync = try EngineSync(engine: engine, project: project, debounce: debounce, pluginsBypassed: isSafeMode)
+        // DW-266 (T-095): slots enabled one by one in safe mode keep their plugin on this engine too
+        // (applied now, so a plugin state restored right after attaching finds the plugin's node).
+        if isSafeMode && !safeModeEnabledSlots.isEmpty {
+            sync.pluginsEnabledInSafeMode = safeModeEnabledSlots
+            sync.flush()
+        }
         // DW-130 (T-056): the document follows a session-rate change the engine made by itself.
         sync.onEngineSampleRateChange = { [weak self] rate in self?.followEngineSampleRate(rate) }
         connectRecording(sync)  // T-052: recordings folder, REC-004 takes → ImportAsset + AddClip

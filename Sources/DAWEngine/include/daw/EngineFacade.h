@@ -262,6 +262,15 @@ struct TelemetryPOD {
     // runs. monitorInput: setMonitorInput's flag.
     uint32_t monitoringLatency = 0;
     bool monitorInput = false;
+    // T-099 (08 "Contract delta (T-099)"). DW-083: samples the master's MIX-009 safety limiter
+    // clipped, all masters since the engine was created. DW-170: MIDI events the graph's PDC delay
+    // lines dropped (their overflow policy, MIX-021), all time; live MIDI input drops are
+    // midiInputDrops. DW-192: the frames per IO cycle the running device uses (what it reports
+    // after the facade set it; 0 while no device runs). IO-005's input latency is
+    // deviceInputLatency above.
+    uint64_t clippedSamples = 0;
+    uint64_t midiEventsDropped = 0;
+    uint32_t bufferFrames = 0;
 };
 
 struct NodeLatencyPOD {

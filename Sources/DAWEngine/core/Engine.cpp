@@ -143,6 +143,8 @@ void Engine::render(RenderTarget& target, uint32_t numFrames) DAW_RT {
         if (liveMidi_ != nullptr) liveMidi_->idleBlock(n, cycleHostTicks);  // inputs keep draining
     } else {
         renderGraph(*graph, target, n, cycleHostTicks);
+        // DW-170 (T-099): MIDI the graph's delay lines dropped this block (pre-roll included).
+        telemetry_.countMidiEventsDropped(graph->takeMidiDrops());
     }
 
     // ENG-050, MIX-020/023: per-node latencies and the graph latency of the graph being heard,

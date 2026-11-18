@@ -10,6 +10,13 @@ struct KeyChord: Hashable, Sendable, CustomStringConvertible {
         case space
         /// ⌫ (backspace) and ⌦ (forward delete) both delete.
         case delete
+        /// DW-179 (T-095): the arrow keys. AppKit reports them as function keys (`.function`,
+        /// `.numericPad` flags, characters in U+F700…F703); only the direction is kept.
+        case arrow(Arrow)
+    }
+
+    enum Arrow: Hashable, Sendable {
+        case up, down, left, right
     }
 
     struct Modifiers: OptionSet, Hashable, Sendable {
@@ -36,7 +43,8 @@ struct KeyChord: Hashable, Sendable, CustomStringConvertible {
     /// Normalizes what a key event reports (`charactersIgnoringModifiers`, which keeps ⇧'s effect):
     /// letters are lowercased and keep ⇧ as a modifier; for other characters ⇧ is already in the
     /// character (⇧= is "+"), so it is dropped. That makes ⌘+ the same chord on keyboards where +
-    /// needs ⇧ and on the keypad, where it doesn't. Nil for keys no binding can use (arrows, F-keys).
+    /// needs ⇧ and on the keypad, where it doesn't. The arrow keys become `.arrow` (DW-179); nil
+    /// for the other keys no binding can use (F-keys, Home, …).
     init?(characters: String, modifiers: Modifiers) {
         guard characters.count == 1, let c = characters.first else { return nil }
         let mods = modifiers.intersection([.command, .shift, .option, .control])
@@ -47,6 +55,10 @@ struct KeyChord: Hashable, Sendable, CustomStringConvertible {
             self.init(.delete, mods)
         case _ where c.isLetter:
             self.init(.character(Character(c.lowercased())), mods)
+        case "\u{F700}": self.init(.arrow(.up), mods)  // NSUpArrowFunctionKey
+        case "\u{F701}": self.init(.arrow(.down), mods)
+        case "\u{F702}": self.init(.arrow(.left), mods)
+        case "\u{F703}": self.init(.arrow(.right), mods)
         case _ where c.unicodeScalars.allSatisfy({ (0xF700...0xF8FF).contains($0.value) }):
             return nil  // AppKit function keys (arrows, F1…, Home, …)
         default:
@@ -64,6 +76,10 @@ struct KeyChord: Hashable, Sendable, CustomStringConvertible {
         switch key {
         case .space: text += "Space"
         case .delete: text += "⌫"
+        case .arrow(.up): text += "↑"
+        case .arrow(.down): text += "↓"
+        case .arrow(.left): text += "←"
+        case .arrow(.right): text += "→"
         case .character(let c): text += c.uppercased()
         }
         return text
@@ -93,6 +109,13 @@ enum KeyBindings {
         KeyBinding(chord: KeyChord("e", .command), controlID: "edit.split"),
         KeyBinding(chord: KeyChord(.delete), controlID: "edit.delete"),
         KeyBinding(chord: KeyChord("d", .command), controlID: "edit.duplicate"),
+        // DW-179 (T-095, DECISIONS "T-095 app decisions"): the arrows nudge the selected clips, a
+        // grid step left/right or a track up/down (UI-013). Disabled without a selection, so the
+        // key then goes on to the focused view; a text field keeps its arrows (KeyMonitor).
+        KeyBinding(chord: KeyChord(.arrow(.left)), controlID: "clip.nudge.left", repeats: true),
+        KeyBinding(chord: KeyChord(.arrow(.right)), controlID: "clip.nudge.right", repeats: true),
+        KeyBinding(chord: KeyChord(.arrow(.up)), controlID: "clip.nudge.up", repeats: true),
+        KeyBinding(chord: KeyChord(.arrow(.down)), controlID: "clip.nudge.down", repeats: true),
         KeyBinding(chord: KeyChord("+", .command), controlID: "zoom.in", repeats: true),
         KeyBinding(chord: KeyChord("=", .command), controlID: "zoom.in", repeats: true),
         KeyBinding(chord: KeyChord("-", .command), controlID: "zoom.out", repeats: true),
@@ -103,8 +126,8 @@ enum KeyBindings {
         KeyBinding(chord: KeyChord(",", .command), controlID: "prefs.audio"),
     ]
 
-    /// UI-020 (T-043): while the piano roll has focus these come first (the arrows transpose in
-    /// the view itself: KeyChord leaves function keys out).
+    /// UI-020 (T-043): while the piano roll has focus these come first. The arrows transpose in the
+    /// view itself, so with the piano roll focused they never reach the clip nudges (DW-179).
     static let pianoRoll: [KeyBinding] = [
         KeyBinding(chord: KeyChord(.delete), controlID: "pianoRoll.delete"),
         KeyBinding(chord: KeyChord("a", .command), controlID: "pianoRoll.selectAll"),
