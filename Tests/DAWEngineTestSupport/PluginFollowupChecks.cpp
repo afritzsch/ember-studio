@@ -379,7 +379,7 @@ std::vector<uint8_t> emberState(float gain, float mix) {
 
 } // namespace
 
-CheckResult pluginOfflineModeAndExportReset() {
+CheckResult pluginOfflineModeAndExportReset(bool au) {
     CheckResult checks;
     DAW_CHECK(RtTrap::install());
     DAW_CHECK(emberReady());
@@ -389,17 +389,17 @@ CheckResult pluginOfflineModeAndExportReset() {
     // A builder with PrepareInfo::offline (an offline engine's) and one without.
     for (bool offline : {true, false}) {
         auto vst3 = std::make_shared<VST3PluginHost>();
-        auto au = std::make_shared<AUPluginHost>();
+        auto auHost = std::make_shared<AUPluginHost>();
         NodeRegistry registry = NodeRegistry::withBuiltins();
         (void)registry.set(NodeKind::vst3Plugin, vst3->kindInfo());
-        (void)registry.set(NodeKind::auPlugin, au->kindInfo());
+        (void)registry.set(NodeKind::auPlugin, auHost->kindInfo());
         Engine engine;
         GraphBuilder builder(std::move(registry), kRate, kMaxBlock, offline);
+        // One format per run: the AU and VST3 suites run in parallel and count their live plugins.
         GraphDescription d = baseDescription();
-        d.nodes.push_back(NodeDesc{20, NodeKind::vst3Plugin, 1, 0, 0, VST3PluginConfig::makeJSON(emberIdentifier(kEffectUID), {})});
-        d.nodes.push_back(NodeDesc{21, NodeKind::auPlugin, 1, 0, 0, AUPluginConfig::makeJSON(kFake, {})});
-        d.edges.push_back(EdgeDesc{1, 20, 21, EdgeKind::audio, 0});
-        d.edges.push_back(EdgeDesc{2, 21, 1, EdgeKind::audio, 0});
+        if (au) d.nodes.push_back(NodeDesc{21, NodeKind::auPlugin, 1, 0, 0, AUPluginConfig::makeJSON(kFake, {})});
+        else d.nodes.push_back(NodeDesc{20, NodeKind::vst3Plugin, 1, 0, 0, VST3PluginConfig::makeJSON(emberIdentifier(kEffectUID), {})});
+        d.edges.push_back(EdgeDesc{2, au ? 21u : 20u, 1, EdgeKind::audio, 0});
         auto graph = builder.build(d, engine.nodes(), engine.params());
         DAW_CHECK(graph.ok());
         if (!graph) continue;
@@ -415,14 +415,17 @@ CheckResult pluginOfflineModeAndExportReset() {
             violations += scope.violations();
         }
         DAW_CHECK(violations == 0);
+        if (au) {
+            const auto unit = auHost->instance(21);
+            DAW_CHECK(unit && unit->preparedOffline() == offline);
+            DAW_CHECK(fake(unit).renderingOffline == (offline ? 1 : 0));
+            continue;
+        }
         const auto instance = vst3->instance(20);
         const ProcessStats s = stats(instance);
         // DW-211: kOffline is 2, kRealtime 0, in setupProcessing and in every process call.
         DAW_CHECK(s.ok && s.setupMode == (offline ? 2 : 0) && s.dataMode == (offline ? 2 : 0) && s.blocks >= 4);
         DAW_CHECK(instance && instance->preparedOffline() == offline);
-        const auto unit = au->instance(21);
-        DAW_CHECK(unit && unit->preparedOffline() == offline);
-        DAW_CHECK(fake(unit).renderingOffline == (offline ? 1 : 0));
         // A mode change re-prepares the same instance in the other mode.
         if (instance) {
             DAW_CHECK(instance->prepare(kRate, kMaxBlock, !offline).ok() && instance->preparedOffline() == !offline);
@@ -430,6 +433,7 @@ CheckResult pluginOfflineModeAndExportReset() {
         }
     }
 
+    if (au) return checks;
     // Through an offline facade: kOffline, and every export resets the plugin once (one setActive
     // cycle) before its first block. The facade hides its hosts, so the instance is found by a
     // unique gain in its state.

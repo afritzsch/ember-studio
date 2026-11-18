@@ -27,7 +27,7 @@ CheckResult auResetClearsTail();
 // (setupProcessing and every process call) and an AU with renderingOffline; each export resets
 // every hosted plugin once before its first block (a setActive cycle; the fake AU's -reset). A
 // realtime builder (no PrepareInfo::offline) prepares kRealtime.
-CheckResult pluginOfflineModeAndExportReset();
+CheckResult pluginOfflineModeAndExportReset(bool au);  // the AU half (builder only) or the VST3 half
 
 // DW-233 / AUTO-003: in a block where automation wraps, a VST3 parameter gets the block's value at
 // offset 0, held up to the frame before the wrap and the after-wrap value at the wrap frame
