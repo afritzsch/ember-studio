@@ -58,6 +58,9 @@ public:
     // Nodes are prepared at `sampleRate`, for blocks of up to `maxBlock` frames, stereo in and
     // out (MIX-004). A format change needs a new builder, which re-creates every node.
     GraphBuilder(NodeRegistry registry, double sampleRate, uint32_t maxBlock = kMaxBlock);
+    // DW-211 (T-097): nodes are prepared with PrepareInfo::offline set (an offline engine's builder).
+    GraphBuilder(NodeRegistry registry, double sampleRate, uint32_t maxBlock, bool offline)
+        : GraphBuilder(std::move(registry), sampleRate, maxBlock) { offline_ = offline; }
 
     // MIX-001. Non-RT; meant for daw.compile. Errors:
     //   cycle: the edges form a cycle. Error::nodes holds the NodeIDs on it, ascending, and the
@@ -109,6 +112,7 @@ private:
     NodeRegistry registry_;
     double sampleRate_;
     uint32_t maxBlock_;
+    bool offline_ = false;  // DW-211 (T-097)
     std::unordered_map<NodeID, Instance> instances_;
 
     // DW-048: MeterIDs of metering nodes, kept per NodeID; released IDs are reused.

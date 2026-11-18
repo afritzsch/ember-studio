@@ -119,8 +119,10 @@ Result<std::unique_ptr<Node>> VST3PluginHost::create(const NodeCreateInfo& info)
         slot.disabled = false;
         if (pending) slot.pending.reset();
     }
-    return std::unique_ptr<Node>(std::make_unique<VST3PluginNode>(desc.id, instance, desc.firstParam, desc.numParams,
-                                                                  info.latency, weak_from_this(), health, telemetry));
+    auto node = std::make_unique<VST3PluginNode>(desc.id, instance, desc.firstParam, desc.numParams, info.latency,
+                                                 weak_from_this(), health, telemetry);
+    node->setBypassParam(desc.bypassParam);  // DW-225 (T-097)
+    return std::unique_ptr<Node>(std::move(node));
 }
 
 Result<void> VST3PluginHost::instantiate(NodeID slotID, std::string_view identifier) {

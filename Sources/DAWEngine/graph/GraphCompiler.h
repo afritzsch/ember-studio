@@ -52,6 +52,8 @@ public:
 
     // Starts daw.compile. Graphs are built for `sampleRate` and `maxBlock` (see GraphBuilder).
     GraphCompiler(Engine& engine, NodeRegistry registry, double sampleRate, uint32_t maxBlock = kMaxBlock);
+    // DW-211 (T-097): an offline engine's compiler prepares its nodes with PrepareInfo::offline.
+    GraphCompiler(Engine& engine, NodeRegistry registry, double sampleRate, uint32_t maxBlock, bool offline);
     // Finishes the build in progress, drops anything still queued, and joins daw.compile.
     ~GraphCompiler();
     GraphCompiler(const GraphCompiler&) = delete;

@@ -504,7 +504,8 @@ EngineFacade::Impl::Impl(EngineMode m, const DriverConfigPOD& cfg, FacadeOptions
         pushEvent(std::move(event));
     }
     compiler = std::make_shared<GraphCompiler>(
-        engine, registry ? std::move(registry).value() : NodeRegistry::withBuiltins(), sampleRate);
+        engine, registry ? std::move(registry).value() : NodeRegistry::withBuiltins(), sampleRate, kMaxBlock,
+        mode == EngineMode::offline);  // DW-211 (T-097): an offline engine's plugins render in offline mode
     exportThread = std::thread([this] { exportLoop(); });
     if (options.coreMidi) coreMidi = std::make_unique<CoreMidiInput>(midi);  // REC-010 (T-053)
     if (driver) {
@@ -731,7 +732,8 @@ Result<void> EngineFacade::Impl::replaceCompiler(double rate) {
     }
     sampleRate = rate;
     compiler = std::make_shared<GraphCompiler>(
-        engine, registry ? std::move(registry).value() : NodeRegistry::withBuiltins(), sampleRate);
+        engine, registry ? std::move(registry).value() : NodeRegistry::withBuiltins(), sampleRate, kMaxBlock,
+        mode == EngineMode::offline);  // DW-211 (T-097): an offline engine's plugins render in offline mode
     ticketBase = submitted;
 
     // IO-021 (5): every node re-prepared at the new rate — the new compiler creates them all.

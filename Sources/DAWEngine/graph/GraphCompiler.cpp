@@ -13,6 +13,12 @@ GraphCompiler::GraphCompiler(Engine& engine, NodeRegistry registry, double sampl
     builder_.latencyRelay()->attach(this);
 }
 
+// DW-211 (T-097).
+GraphCompiler::GraphCompiler(Engine& engine, NodeRegistry registry, double sampleRate, uint32_t maxBlock, bool offline)
+    : engine_(engine), builder_(std::move(registry), sampleRate, maxBlock, offline), thread_([this] { run(); }) {
+    builder_.latencyRelay()->attach(this);
+}
+
 GraphCompiler::~GraphCompiler() {
     // MIX-024: nodes may outlive the compiler (the engine's pool); their reports go nowhere now.
     builder_.latencyRelay()->detach();
