@@ -277,6 +277,73 @@ struct AUInstance::EditState {
     }
 };
 
+// DW-204 / DW-276 (T-094): the parameter tree the automation observer is on. A V2 bridge builds a
+// new tree when the AU reports a parameter-list change, and it can do so after the step that caused
+// it has returned (seen after prepare under heavy load): an observer left on the old tree never
+// hears the editor again. So the observer follows the unit's `parameterTree` by KVO as well as after
+// every non-RT step that may change it. Shared (the KVO callback may run on any thread, and after
+// the instance has begun to go away), with its own lock, never taken on the audio thread.
+struct EditTreeObserver {
+    std::mutex mutex;
+    AUParameterTree* tree = nil;
+    AUParameterObserverToken token = nullptr;
+    std::weak_ptr<AUInstance::EditState> edits;
+    bool closed = false;
+
+    // Moves the automation observer to `next` (a no-op if it is there already, or after close).
+    void follow(AUParameterTree* next) {
+        std::lock_guard lock(mutex);
+        if (closed || next == tree) return;
+        if (tree != nil && token != nullptr) [tree removeParameterObserver:token];
+        tree = next;
+        token = nullptr;
+        if (next == nil) return;
+        std::weak_ptr<AUInstance::EditState> weak = edits;
+        token = [next tokenByAddingParameterAutomationObserver:^(NSInteger count, const AUParameterAutomationEvent* events) {
+            auto state = weak.lock();
+            if (!state) return;
+            for (NSInteger e = 0; e < count; ++e)
+                AUInstance::EditState::observe(state, events[e].address, events[e].value, events[e].eventType);
+        }];
+    }
+
+    void close() {
+        std::lock_guard lock(mutex);
+        if (tree != nil && token != nullptr) [tree removeParameterObserver:token];
+        tree = nil;
+        token = nullptr;
+        closed = true;
+    }
+};
+
+} // namespace daw
+
+// KVO on AUAudioUnit.parameterTree (DW-276): any thread; moves the edit observer to the new tree.
+@interface DAWAUTreeObserver : NSObject {
+@public
+    std::shared_ptr<daw::EditTreeObserver>* state;
+}
+@end
+
+@implementation DAWAUTreeObserver
+- (void)dealloc {
+    delete state;
+}
+- (void)observeValueForKeyPath:(NSString*)keyPath
+                      ofObject:(id)object
+                        change:(NSDictionary<NSKeyValueChangeKey, id>*)change
+                       context:(void*)context {
+    (void)keyPath;
+    (void)change;
+    (void)context;
+    if (![object isKindOfClass:[AUAudioUnit class]]) return;
+    std::shared_ptr<daw::EditTreeObserver> shared = *state;
+    shared->follow(((AUAudioUnit*)object).parameterTree);
+}
+@end
+
+namespace daw {
+
 // What the host transport blocks report (written by setTransport on the audio thread, read by the
 // AU from the same thread during render).
 struct HostTransport {
@@ -318,32 +385,30 @@ struct AUInstance::Impl {
     bool labelsRead = false;
     // DW-204: the automation observer and the tree it is on. A V2 bridge builds a new tree when
     // the AU reports a parameter-list change (setting its formats or state can), so the observer
-    // moves to the unit's current tree after every non-RT step that may change it.
-    AUParameterTree* editTree = nil;
-    AUParameterObserverToken editToken = nullptr;
-    std::weak_ptr<AUInstance::EditState> edits;
+    // moves to the unit's current tree after every non-RT step that may change it, and whenever
+    // the unit's `parameterTree` changes (KVO, DW-276: the bridge may rebuild it later).
+    std::shared_ptr<EditTreeObserver> editTree = std::make_shared<EditTreeObserver>();
+    DAWAUTreeObserver* treeObserver = nil;  // registered on unit
 
-    void observeEdits() {
-        AUParameterTree* tree = unit.parameterTree;
-        if (tree == editTree) return;
-        if (editTree != nil && editToken != nullptr) [editTree removeParameterObserver:editToken];
-        editTree = tree;
-        editToken = nullptr;
-        if (tree == nil) return;
-        std::weak_ptr<AUInstance::EditState> weak = edits;
-        editToken = [tree tokenByAddingParameterAutomationObserver:^(NSInteger count,
-                                                                     const AUParameterAutomationEvent* events) {
-            auto state = weak.lock();
-            if (!state) return;
-            for (NSInteger e = 0; e < count; ++e)
-                AUInstance::EditState::observe(state, events[e].address, events[e].value, events[e].eventType);
-        }];
+    void observeEdits() { editTree->follow(unit.parameterTree); }
+
+    // From instantiation on: the edits go to `state`; the tree is followed by KVO from now on.
+    void startObservingEdits(const std::shared_ptr<AUInstance::EditState>& state) {
+        {
+            std::lock_guard lock(editTree->mutex);
+            editTree->edits = state;
+        }
+        treeObserver = [[DAWAUTreeObserver alloc] init];
+        treeObserver->state = new std::shared_ptr<EditTreeObserver>(editTree);
+        [unit addObserver:treeObserver forKeyPath:@"parameterTree" options:0 context:nullptr];
+        observeEdits();  // after registering, so a change in between is followed either way
     }
 
     ~Impl() {
         if (unit != nil) {
             if (observer != nil) [unit removeObserver:observer forKeyPath:@"latency"];
-            if (editTree != nil && editToken != nullptr) [editTree removeParameterObserver:editToken];  // DW-204
+            if (treeObserver != nil) [unit removeObserver:treeObserver forKeyPath:@"parameterTree"];  // DW-276
+            editTree->close();  // DW-204: a KVO callback still running finds it closed
             std::lock_guard lifecycle(gLifecycleMutex);  // DW-214
             if (unit.renderResourcesAllocated) [unit deallocateRenderResources];
             // The host blocks point at this Impl, which is going away (the unit may outlive it).
@@ -546,8 +611,7 @@ Result<std::shared_ptr<AUInstance>> AUInstance::instantiate(const AUComponentID&
 
         // DW-204 (T-063): the plugin's own edits (its editor's gestures), from now on.
         instance->edits_->size(instance->params_);
-        impl.edits = instance->edits_;
-        impl.observeEdits();
+        impl.startObservingEdits(instance->edits_);
         // PLUG-013: observe latency changes from now on.
         impl.observer = [[DAWAULatencyObserver alloc] init];
         impl.observer->state = new std::shared_ptr<LatencyState>(instance->latency_);
