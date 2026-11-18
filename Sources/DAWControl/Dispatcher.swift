@@ -850,7 +850,8 @@ public final class Dispatcher {
         for event in params.events {
             let relative = event.framesFromNow != nil
             try engine.injectMidi(atSample: event.sample ?? event.framesFromNow ?? 0, relativeToNow: relative,
-                                  status: event.status, data1: event.data1 ?? 0, data2: event.data2 ?? 0)
+                                  status: event.status, data1: event.data1 ?? 0, data2: event.data2 ?? 0,
+                                  source: event.source)  // T-093
         }
         return MidiInjectResult(accepted: params.events.count)
     }

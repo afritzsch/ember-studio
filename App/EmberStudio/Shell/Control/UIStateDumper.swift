@@ -13,7 +13,9 @@ import Foundation
 ///        "zoom": {"pixelsPerBeat": 32}, "scroll": {"x": 0, "y": 0, "viewportHeight": 480},
 ///        "visibleTracks": [ids],
 ///        "tracks": [{"id", "name", "kind", "mute", "solo", "selected", "armed", "inputPair", "monitoring",
-///                    "monitoringLatency": {"samples", "ms"} | null (T-054, REC-021; null for MIDI tracks)}],
+///                    "monitoringLatency": {"samples", "ms"} | null (T-054, REC-021; null for MIDI tracks),
+///                    "midiInput": {"source": "all" | "<unique ID>", "channel": 0…16, "name", "connected"} | null
+///                                 (T-093; null for audio tracks)}],
 ///        "transport": {"playing", "recording", "tick"},
 ///        "toolbar": {"position", "time", "tempo", "signature", "loop": {"enabled", "start", "end"} | null,
 ///                    "metronome", "dspLoadPercent", "xruns"},
@@ -116,6 +118,8 @@ enum UIStateDumper {
                     "monitoringLatency": track.monitoringLatency.map { latency -> JSONValue in
                         ["samples": .int(Int64(latency.samples)), "ms": .double(latency.milliseconds)]
                     } ?? .null,
+                    // T-093 (DW-216): a MIDI track's input; channel 0 is omni.
+                    "midiInput": track.midiInputMenu.map(midiInput) ?? .null,
                 ]
             }),
             "transport": [
@@ -355,6 +359,7 @@ enum UIStateDumper {
     ///
     ///     {"open", "gesture", "strips": [{id, kind (audio|midi|bus|master), name, controlPrefix,
     ///      selected, gain, gainDB, faderPosition, pan, panLabel, mute, solo, armed?, inputPair?, monitoring?,
+    ///      midiInput? (T-093: a track strip's, as in `tracks`; null for audio),
     ///      output: {kind, id?, name} | null, outputChoices: [{id, name, current}],
     ///      sends: [{id, target, targetName, level, levelDB, tap, levelPosition, controls}],
     ///      sendTargets: [{id, name}], inserts: [{id, name, bypass}],
@@ -401,8 +406,17 @@ enum UIStateDumper {
             json["armed"] = .bool(strip.armed)
             json["inputPair"] = .int(Int64(strip.inputPair))
             json["monitoring"] = .string(strip.monitoring.rawValue)
+            json["midiInput"] = strip.header?.midiInputMenu.map(midiInput) ?? .null  // T-093
         }
         return .object(json)
+    }
+
+    /// T-093: `{"source", "channel", "name", "connected"}`.
+    private static func midiInput(_ menu: TrackMidiInputMenu) -> JSONValue {
+        [
+            "source": .string(menu.input.source.description), "channel": .int(Int64(menu.input.channel)),
+            "name": .string(menu.sourceName), "connected": .bool(menu.connected),
+        ]
     }
 
     private static func gainDB(_ gain: Float) -> JSONValue {

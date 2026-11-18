@@ -186,6 +186,9 @@ extension Track {
     /// Everything about the track that doesn't depend on the rest of the project.
     func validateContents() throws(DAWError) {
         try strip.validate(id)
+        // T-093: only a MIDI track has a MIDI input other than the default.
+        try midiInput.validate(id)
+        guard kind == .midi || midiInput.isDefault else { throw .invariant("audio track \(id) has a MIDI input") }
         for send in sends { try send.validate() }
         if let instrument {
             // T-042: the instrument slot is a MIDI track's; a built-in one is the sampler (D-19).

@@ -124,6 +124,9 @@ Additive. New methods and one new `render.offline` param; tools `daw_render_canc
 - **`engine.previewNote {track, pitch, velocity? = 100, durationMs? = 500}` → `{track, pitch, velocity, durationMs}`** (DW-189): UI-021's audition through `EngineProtocol.previewNote`: the note-on now, its note-off `durationMs` later; the call returns at once. Realtime engines only (`project.new {engine: {mode: "realtime"}}`, fake device included): an offline engine answers -32006 `notSupported`. `track` must be a MIDI track with an instrument (`invalidArgument` otherwise, `notFound` if unknown); `pitch` 0…127, `velocity` 1…127, `durationMs` 1…60000 (`invalidParams`). To hear it, read `engine.meters` while it sounds.
 - **App** (12 *Export dialog details*): while an export runs the dialog shows Cancel, `ui.perform` id **`export.cancel`** (disabled once pressed). It cancels the engine job; the dialog stays open, posts an info toast "Export cancelled", and sets no error.
 
+### Contract delta (T-093), accepted (autobuild, see docs/autobuild/DECISIONS.md "T-093 model shape")
+Additive. `midi.inject` events take `source?`, a CoreMIDI unique ID (a number, as `midi.inputs` reports it): the message arrives as if from that source, so a track's MIDI input filter can be driven headless (up to 4 distinct IDs per engine). Without it, only tracks hearing all sources get the message (T-053's seam). The input itself is the command `SetTrackMidiInput` (07) through `command.apply`; `project.get` shows `tracks[i].midiInput` once it isn't the default. In the app, `ui.state`/`ui.perform` cover the picker (12 same heading).
+
 ### `dawctl`
 | ID | Requirement |
 |---|---|

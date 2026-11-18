@@ -15,6 +15,7 @@
 #include <memory>
 #include <numbers>
 #include <thread>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -453,7 +454,7 @@ CheckResult midiMergesIntoPlayerOutput() {
         (void)rig.block();
         inject(rig.router, 0, kOn, 60, 100);
         DAW_CHECK(!rig.router.blockActive());  // between blocks: no live span
-        DAW_CHECK(rig.router.events().empty());
+        DAW_CHECK(rig.router.events(kPlayer).empty());
         DAW_CHECK(rig.block() == (std::vector<Ev>{{0, kOn, 60, 100}}));
     }
     return checks;
@@ -504,6 +505,303 @@ CheckResult midiOverflowIsCounted() {
         DAW_CHECK(takes.size() == 1);
         if (takes.size() == 1) DAW_CHECK(takes[0].droppedEvents > 0 && !takes[0].notes.empty());
         DAW_CHECK(rig.router.droppedEvents() > 0);
+        DAW_CHECK(rig.violations == 0);
+    }
+    return checks;
+}
+
+// MARK: T-093 per-track input
+
+namespace {
+
+// Two armed MIDI tracks, each with its own player, rendered like Engine::render.
+class TwoTrackRig {
+public:
+    static constexpr NodeID kTrackA = 5, kPlayerA = 2, kTrackB = 6, kPlayerB = 3;
+
+    TwoTrackRig() : tempo_(makeTempo()) {
+        a_ = MidiClipPlayer::create({}, nullptr, kPlayerA, &router);
+        b_ = MidiClipPlayer::create({}, nullptr, kPlayerB, &router);
+        a_->prepare(PrepareInfo{kRate, kMaxBlock, 0, 0});
+        b_->prepare(PrepareInfo{kRate, kMaxBlock, 0, 0});
+    }
+
+    void playAndRecord() {
+        transport_.setRecording(true);
+        transport_.play();
+        (void)router.prepare(kRate);
+    }
+
+    // One block; what each player wrote.
+    std::pair<std::vector<Ev>, std::vector<Ev>> block() {
+        const uint64_t host = hostTicks(double(rendered_) / kRate + 1.0);
+        rendered_ += kBlock;
+        NodeIO ioA, ioB;
+        std::vector<MidiEvent> storageA(GraphBuilder::kMidiCapacity), storageB(GraphBuilder::kMidiCapacity);
+        ioA.midiOut = MidiEventWriter(storageA.data(), static_cast<uint32_t>(storageA.size()));
+        ioB.midiOut = MidiEventWriter(storageB.data(), static_cast<uint32_t>(storageB.size()));
+        {
+            RtScope scope;
+            const TransportBlock& b = transport_.advance(tempo_, kBlock);
+            router.beginBlock(transport_, kBlock, kRate, host);
+            ProcessContext ctx{kBlock, kRate, b, params_};
+            a_->process(ctx, ioA);
+            b_->process(ctx, ioB);
+            router.endBlock();
+            violations += scope.violations();
+        }
+        return {events(ioA), events(ioB)};
+    }
+
+    MidiInputRouter router;
+    uint64_t violations = 0;
+
+private:
+    static std::vector<Ev> events(NodeIO& io) {
+        std::vector<Ev> out;
+        for (const MidiEvent& e : io.midiOut.written()) {
+            if (e.size == 3 && e.data[1] == 123 && (e.data[0] & 0xF0) == kCC) continue;
+            out.push_back({e.frameOffset, e.data[0], e.data[1], e.size > 2 ? e.data[2] : uint8_t(0)});
+        }
+        return out;
+    }
+
+    Transport transport_;
+    TempoMap tempo_;
+    ParamSlotTable params_;
+    std::unique_ptr<MidiClipPlayer> a_, b_;
+    uint64_t rendered_ = 0;
+};
+
+// Events from several inputs struck at the same sample come in slot order; compare as a set.
+std::vector<Ev> sorted(std::vector<Ev> events) {
+    std::sort(events.begin(), events.end(), [](const Ev& x, const Ev& y) {
+        return std::tie(x.frame, x.status, x.d1, x.d2) < std::tie(y.frame, y.status, y.d1, y.d2);
+    });
+    return events;
+}
+
+MidiInputFilter fromSource(int32_t source, uint8_t channel = 0) { return MidiInputFilter{false, source, channel}; }
+MidiInputFilter allSources(uint8_t channel) { return MidiInputFilter{true, 0, channel}; }
+
+bool send(MidiInputRouter& router, int slot, uint8_t status, uint8_t d1, uint8_t d2) {
+    const uint8_t bytes[3] = {status, d1, d2};
+    return router.receive(slot, 0, bytes, 3);
+}
+
+} // namespace
+
+CheckResult midiPerTrackFilter() {
+    CheckResult checks;
+    using R = TwoTrackRig;
+    constexpr int32_t kKeys = 1001, kPads = 1002;
+    {
+        // A hears source kKeys (any channel), B every source on channel 2 only.
+        R rig;
+        const int keys = rig.router.openInput(kKeys), pads = rig.router.openInput(kPads);
+        DAW_CHECK(keys >= 0 && pads >= 0);
+        rig.router.setInputFilter(R::kTrackA, fromSource(kKeys));
+        rig.router.setArmed(R::kTrackA, R::kPlayerA, true);
+        rig.router.setArmed(R::kTrackB, R::kPlayerB, true);
+        rig.router.setInputFilter(R::kTrackB, allSources(2));  // set while armed: from the next block
+        DAW_CHECK(rig.router.inputFilter(R::kTrackA) == fromSource(kKeys));
+        (void)rig.block();
+
+        DAW_CHECK(send(rig.router, keys, kOn, 60, 100));         // keys, channel 1
+        DAW_CHECK(send(rig.router, pads, kOn | 1, 62, 90));      // pads, channel 2
+        DAW_CHECK(send(rig.router, keys, kOn | 1, 64, 80));      // keys, channel 2: both
+        DAW_CHECK(send(rig.router, pads, 0xC0 | 1, 5, 0));        // program change (2 bytes), pads ch 2
+        auto [a, b] = rig.block();
+        DAW_CHECK(a == (std::vector<Ev>{{0, kOn, 60, 100}, {0, kOn | 1, 64, 80}}));
+        DAW_CHECK(sorted(b) == sorted({{0, kOn | 1, 62, 90}, {0, kOn | 1, 64, 80}, {0, 0xC1, 5, 0}}));
+
+        // The same key from both sources on channel 2: B (hears both) sounds it once and ends it at
+        // the last release; A only hears keys'.
+        DAW_CHECK(send(rig.router, pads, kOn | 1, 64, 70));
+        std::tie(a, b) = rig.block();
+        DAW_CHECK(a.empty() && b.empty());
+        DAW_CHECK(send(rig.router, keys, kOff | 1, 64, 0));
+        std::tie(a, b) = rig.block();
+        DAW_CHECK(a == (std::vector<Ev>{{0, kOff | 1, 64, 64}}));
+        DAW_CHECK(b.empty());
+        DAW_CHECK(send(rig.router, pads, kOff | 1, 64, 0));
+        std::tie(a, b) = rig.block();
+        DAW_CHECK(a.empty());
+        DAW_CHECK(b == (std::vector<Ev>{{0, kOff | 1, 64, 64}}));
+
+        // A source that isn't connected keeps the selection and delivers nothing.
+        rig.router.setInputFilter(R::kTrackA, fromSource(4242));
+        std::tie(a, b) = rig.block();
+        DAW_CHECK(a == (std::vector<Ev>{{0, kOff, 60, 64}}));  // the retarget ends keys' note
+        DAW_CHECK(send(rig.router, keys, kOn, 67, 100));
+        DAW_CHECK(send(rig.router, pads, kOn, 68, 100));
+        std::tie(a, b) = rig.block();
+        DAW_CHECK(a.empty() && b.empty());
+        // The default filter (all sources, omni) is every input on every channel again; it hears
+        // the keys still held (60, 67, 68 and 62 on channel 2) from now on.
+        rig.router.setInputFilter(R::kTrackA, MidiInputFilter{});
+        std::tie(a, b) = rig.block();
+        DAW_CHECK(a.size() == 4);
+        DAW_CHECK(std::count(a.begin(), a.end(), Ev{0, kOn, 60, 100}) == 1);
+        DAW_CHECK(std::count(a.begin(), a.end(), Ev{0, kOn, 67, 100}) == 1);
+        DAW_CHECK(std::count(a.begin(), a.end(), Ev{0, kOn, 68, 100}) == 1);
+        DAW_CHECK(std::count(a.begin(), a.end(), Ev{0, kOn | 1, 62, 90}) == 1);
+        DAW_CHECK(rig.violations == 0);
+    }
+    {
+        // The test seam poses as a source: an injected message with a source ID reaches only the
+        // tracks that hear that source; one without an ID only "all sources" tracks.
+        R rig;
+        rig.router.setInputFilter(R::kTrackA, fromSource(kKeys));
+        rig.router.setArmed(R::kTrackA, R::kPlayerA, true);
+        rig.router.setArmed(R::kTrackB, R::kPlayerB, true);
+        (void)rig.block();
+        const uint8_t on60[3] = {kOn, 60, 100}, on61[3] = {kOn, 61, 100};
+        DAW_CHECK(rig.router.inject(kKeys, 0, true, on60, 3));
+        DAW_CHECK(rig.router.inject(0, true, on61, 3));
+        auto [a, b] = rig.block();
+        DAW_CHECK(a == (std::vector<Ev>{{0, kOn, 60, 100}}));
+        DAW_CHECK(sorted(b) == sorted({{0, kOn, 60, 100}, {0, kOn, 61, 100}}));
+        // A handful of injected source IDs, then refused.
+        for (int32_t id = 1; id < int32_t(MidiInputRouter::kMaxInjectedSources); ++id)
+            DAW_CHECK(rig.router.inject(id, 0, true, on60, 3));
+        DAW_CHECK(!rig.router.inject(77, 0, true, on60, 3));
+        DAW_CHECK(rig.violations == 0);
+    }
+    return checks;
+}
+
+CheckResult midiFilterChangeNeverHangs() {
+    CheckResult checks;
+    using R = TwoTrackRig;
+    constexpr int32_t kKeys = 1001, kPads = 1002;
+    R rig;
+    const int keys = rig.router.openInput(kKeys), pads = rig.router.openInput(kPads);
+    rig.router.setArmed(R::kTrackA, R::kPlayerA, true);
+    rig.router.setInputFilter(R::kTrackA, fromSource(kKeys));
+    (void)rig.block();
+
+    // A note, the pedal and a bend from keys on channel 1; a note from pads.
+    DAW_CHECK(send(rig.router, keys, kOn, 60, 100));
+    DAW_CHECK(send(rig.router, keys, kCC, 64, 127));
+    DAW_CHECK(send(rig.router, keys, 0xE0, 0, 90));
+    DAW_CHECK(send(rig.router, pads, kOn, 72, 100));
+    auto [a, b] = rig.block();
+    DAW_CHECK(a == (std::vector<Ev>{{0, kOn, 60, 100}, {0, kCC, 64, 127}, {0, 0xE0, 0, 90}}));
+
+    // Switch A to pads: keys' note, pedal and bend end at frame 0 of the next block; pads' held
+    // key sounds.
+    rig.router.setInputFilter(R::kTrackA, fromSource(kPads));
+    std::tie(a, b) = rig.block();
+    DAW_CHECK(a.size() == 4);
+    DAW_CHECK(std::count(a.begin(), a.end(), Ev{0, kOff, 60, 64}) == 1);
+    DAW_CHECK(std::count(a.begin(), a.end(), Ev{0, kCC, 64, 0}) == 1);
+    DAW_CHECK(std::count(a.begin(), a.end(), Ev{0, 0xE0, 0, 64}) == 1);
+    DAW_CHECK(std::count(a.begin(), a.end(), Ev{0, kOn, 72, 100}) == 1);
+    // Keys' release no longer concerns A; pads' does.
+    DAW_CHECK(send(rig.router, keys, kOff, 60, 0));
+    DAW_CHECK(send(rig.router, pads, kOff, 72, 0));
+    std::tie(a, b) = rig.block();
+    DAW_CHECK(a == (std::vector<Ev>{{0, kOff, 72, 64}}));
+
+    // A channel change: omni → channel 3 ends the channel-1 note held through the same source.
+    DAW_CHECK(send(rig.router, pads, kOn, 50, 100));
+    DAW_CHECK(send(rig.router, pads, kOn | 2, 51, 100));
+    std::tie(a, b) = rig.block();
+    DAW_CHECK(a.size() == 2);
+    rig.router.setInputFilter(R::kTrackA, fromSource(kPads, 3));
+    std::tie(a, b) = rig.block();
+    DAW_CHECK(a == (std::vector<Ev>{{0, kOff, 50, 64}}));
+    DAW_CHECK(send(rig.router, pads, kOff | 2, 51, 0));
+    DAW_CHECK(send(rig.router, pads, kOff, 50, 0));
+    std::tie(a, b) = rig.block();
+    DAW_CHECK(a == (std::vector<Ev>{{0, kOff | 2, 51, 64}}));
+    // Nothing left on: the player has nothing to release when disarmed.
+    rig.router.setArmed(R::kTrackA, R::kPlayerA, false);
+    std::tie(a, b) = rig.block();
+    DAW_CHECK(a.empty());
+
+    // The filter outlives the arm: re-armed, A still hears only pads on channel 3.
+    rig.router.setArmed(R::kTrackA, R::kPlayerA, true);
+    (void)rig.block();
+    DAW_CHECK(send(rig.router, pads, kOn, 40, 100));
+    DAW_CHECK(send(rig.router, pads, kOn | 2, 41, 100));
+    std::tie(a, b) = rig.block();
+    DAW_CHECK(a == (std::vector<Ev>{{0, kOn | 2, 41, 100}}));
+    DAW_CHECK(rig.violations == 0);
+    return checks;
+}
+
+CheckResult midiRecordsPerTrack() {
+    CheckResult checks;
+    using R = TwoTrackRig;
+    constexpr int32_t kKeys = 1001, kPads = 1002;
+    {
+        R rig;
+        const int keys = rig.router.openInput(kKeys), pads = rig.router.openInput(kPads);
+        rig.router.setInputFilter(R::kTrackA, fromSource(kKeys));
+        rig.router.setInputFilter(R::kTrackB, allSources(2));
+        rig.router.setArmed(R::kTrackA, R::kPlayerA, true);
+        rig.router.setArmed(R::kTrackB, R::kPlayerB, true);
+        rig.playAndRecord();
+        for (int i = 0; i < 4; ++i) (void)rig.block();
+        DAW_CHECK(send(rig.router, keys, kOn, 60, 100));      // A
+        DAW_CHECK(send(rig.router, pads, kOn | 1, 62, 90));   // B
+        DAW_CHECK(send(rig.router, keys, kOn | 1, 64, 80));   // both
+        (void)rig.block();
+        // Mid-take, A switches to pads: its take follows what it heard. Keys' notes end at the
+        // switch, pads' held 62 (channel 2) starts there, and what it hears afterwards is recorded.
+        rig.router.setInputFilter(R::kTrackA, fromSource(kPads));
+        (void)rig.block();
+        DAW_CHECK(send(rig.router, pads, kOn, 66, 70));       // A (now pads) only
+        DAW_CHECK(send(rig.router, keys, kOff, 60, 0));
+        DAW_CHECK(send(rig.router, keys, kOff | 1, 64, 0));
+        DAW_CHECK(send(rig.router, pads, kOff | 1, 62, 0));
+        DAW_CHECK(send(rig.router, pads, kOff, 66, 0));
+        (void)rig.block();
+        (void)rig.block();
+        const auto takes = rig.router.finalize();
+        DAW_CHECK(takes.size() == 2);
+        for (const FinalizedMidiTake& take : takes) {
+            std::vector<uint8_t> pitches;
+            for (const RecordedMidiNote& n : take.notes) pitches.push_back(n.pitch);
+            std::sort(pitches.begin(), pitches.end());
+            if (take.track == R::kTrackA) {
+                DAW_CHECK(pitches == (std::vector<uint8_t>{60, 62, 64, 66}));
+                const RecordedMidiNote* n60 = noteWithPitch(take.notes, 60);
+                const RecordedMidiNote* n62 = noteWithPitch(take.notes, 62);
+                const RecordedMidiNote* n64 = noteWithPitch(take.notes, 64);
+                const RecordedMidiNote* n66 = noteWithPitch(take.notes, 66);
+                DAW_CHECK(n60 && n62 && n64 && n66);
+                if (n60 && n62 && n64 && n66) {
+                    DAW_CHECK(n60->end == n64->end && n62->start == n60->end);  // the switch
+                    DAW_CHECK(n60->end < n66->start && n66->end < take.endSample && n62->end < take.endSample);
+                    DAW_CHECK(n62->velocity == 90);
+                }
+            } else {
+                DAW_CHECK(take.track == R::kTrackB);
+                DAW_CHECK(pitches == (std::vector<uint8_t>{62, 64}));
+                const RecordedMidiNote* n62 = noteWithPitch(take.notes, 62);
+                DAW_CHECK(n62 && n62->end < take.endSample);
+            }
+        }
+        DAW_CHECK(rig.violations == 0);
+    }
+    {
+        // A track whose filter heard nothing gets no take; the other one does.
+        R rig;
+        const int keys = rig.router.openInput(kKeys);
+        rig.router.setInputFilter(R::kTrackB, fromSource(kPads));
+        rig.router.setArmed(R::kTrackA, R::kPlayerA, true);
+        rig.router.setArmed(R::kTrackB, R::kPlayerB, true);
+        rig.playAndRecord();
+        (void)rig.block();
+        DAW_CHECK(send(rig.router, keys, kOn, 60, 100));
+        (void)rig.block();
+        DAW_CHECK(send(rig.router, keys, kOff, 60, 0));
+        (void)rig.block();
+        const auto takes = rig.router.finalize();
+        DAW_CHECK(takes.size() == 1 && takes[0].track == R::kTrackA && takes[0].notes.size() == 1);
         DAW_CHECK(rig.violations == 0);
     }
     return checks;
@@ -622,6 +920,32 @@ CheckResult midiThroughFacade() {
     DAW_CHECK(after.midiInputDrops == 0);
     DAW_CHECK(after.rtViolations == 0);
 
+    // T-093: the track's input filter through the facade. Filtered to source 5150: the plain seam
+    // (no source) isn't heard, the seam posing as 5150 is; retargeting while the key is held ends
+    // it (no hanging note); the default filter hears everything again.
+    DAW_CHECK(silent());  // the recorded note's tail has died away
+    facade->setMidiInputFilter(5, false, 5150, 0);
+    DAW_CHECK(facade->injectMidi(0, true, kOn, kNote, 127, 3).ok());
+    std::this_thread::sleep_for(50ms);
+    DAW_CHECK(level() < 1e-4f);
+    DAW_CHECK(facade->injectMidi(0, true, kOff, kNote, 0, 3).ok());
+    DAW_CHECK(facade->injectMidiFromSource(5150, 0, true, kOn, kNote, 127, 3).ok());
+    DAW_CHECK(sounds());
+    facade->setMidiInputFilter(5, false, 5151, 0);
+    DAW_CHECK(silent());
+    DAW_CHECK(facade->injectMidiFromSource(5150, 0, true, kOff, kNote, 0, 3).ok());
+    facade->setMidiInputFilter(5, false, 5150, 2);  // channel 2 only: a channel-1 note isn't heard
+    DAW_CHECK(facade->injectMidiFromSource(5150, 0, true, kOn, kNote, 127, 3).ok());
+    std::this_thread::sleep_for(50ms);
+    DAW_CHECK(level() < 1e-4f);
+    DAW_CHECK(facade->injectMidiFromSource(5150, 0, true, kOff, kNote, 0, 3).ok());
+    facade->setMidiInputFilter(5, true, 0, 0);
+    DAW_CHECK(facade->injectMidi(0, true, kOn, kNote, 127, 3).ok());
+    DAW_CHECK(sounds());
+    DAW_CHECK(facade->injectMidi(0, true, kOff, kNote, 0, 3).ok());
+    DAW_CHECK(silent());
+    DAW_CHECK(facade->telemetry().rtViolations == 0);
+
     // Offline: no input at all.
     {
         DriverConfigPOD offlineConfig;
@@ -630,6 +954,7 @@ CheckResult midiThroughFacade() {
         DAW_CHECK(offline != nullptr);
         if (offline) {
             DAW_CHECK(offline->injectMidi(0, true, kOn, 60, 100, 3).code == FacadeErrorCode::unsupported);
+            DAW_CHECK(offline->injectMidiFromSource(1, 0, true, kOn, 60, 100, 3).code == FacadeErrorCode::unsupported);
             releaseFacade(offline);
         }
     }
@@ -669,13 +994,29 @@ CheckResult midiCoreMidiVirtualSource() {
     }));
 
     // A note through a real MIDIEventList: a universal MIDI packet (type 2, channel voice).
+    const auto sendWord = [&](UInt32 word) {
+        MIDIEventList list{};
+        MIDIEventPacket* packet = MIDIEventListInit(&list, kMIDIProtocol_1_0);
+        packet = MIDIEventListAdd(&list, sizeof(list), packet, mach_absolute_time(), 1, &word);
+        return packet != nullptr && MIDIReceivedEventList(source, &list) == noErr;
+    };
+    // T-093: a track filtered to another source doesn't hear it; filtered to its unique ID it does.
+    rig->router.setInputFilter(kTrack, MidiInputFilter{false, uniqueID + 1, 0});
     (void)rig->block();
-    MIDIEventList list{};
-    MIDIEventPacket* packet = MIDIEventListInit(&list, kMIDIProtocol_1_0);
+    const UInt32 probeOn = (0x2u << 28) | (uint32_t{kOn} << 16) | (61u << 8) | 100u;
+    const UInt32 probeOff = (0x2u << 28) | (uint32_t{kOff} << 16) | (61u << 8);
+    DAW_CHECK(sendWord(probeOn));
+    bool heardProbe = false;
+    for (int i = 0; i < 40; ++i) {  // ~0.4 s of blocks
+        std::this_thread::sleep_for(10ms);
+        for (const Ev& e : rig->block()) heardProbe = heardProbe || (e.status == kOn && e.d1 == 61);
+    }
+    DAW_CHECK(!heardProbe);
+    DAW_CHECK(sendWord(probeOff));
+    rig->router.setInputFilter(kTrack, MidiInputFilter{false, uniqueID, 0});
+    (void)rig->block();
     const UInt32 noteOn = (0x2u << 28) | (uint32_t{kOn} << 16) | (60u << 8) | 100u;
-    packet = MIDIEventListAdd(&list, sizeof(list), packet, mach_absolute_time(), 1, &noteOn);
-    DAW_CHECK(packet != nullptr);
-    DAW_CHECK(MIDIReceivedEventList(source, &list) == noErr);
+    DAW_CHECK(sendWord(noteOn));
     bool on = false;
     DAW_CHECK(eventually([&] {
         for (const Ev& e : rig->block())

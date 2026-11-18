@@ -42,6 +42,9 @@ public final class FakeEngine: EngineProtocol {
         case setRecordOptions(midiLoopTakes: Bool)
         /// T-096 (DW-220).
         case cancelJob(JobID)
+        /// T-093 (REC-011 per track).
+        case setMidiInput(track: NodeIDValue, Track.MidiInput)
+        case injectMidiFromSource(Int32, status: UInt8, data1: UInt8, data2: UInt8)
     }
 
     private struct State {
@@ -65,6 +68,7 @@ public final class FakeEngine: EngineProtocol {
         var recordingDirectory = ""
         var armedMidi: Set<NodeIDValue> = []  // T-053
         var midiInputs: [MidiInputInfo] = []
+        var midiInputFilters: [NodeIDValue: Track.MidiInput] = [:]  // T-093
         var exportSpecs: [ExportSpec] = []  // T-082
         var failNextRender: DAWError?  // T-082
         var holdRenders = false  // T-096
@@ -294,6 +298,26 @@ public final class FakeEngine: EngineProtocol {
     /// T-053: recorded. Nothing is rendered; tests post `recordingFinalized` events themselves.
     public func injectMidi(atSample: Int64, relativeToNow: Bool, status: UInt8, data1: UInt8, data2: UInt8) throws(DAWError) {
         state.withLock { $0.calls.append(.injectMidi(atSample: atSample, relativeToNow: relativeToNow, status: status, data1: data1, data2: data2)) }
+    }
+
+    /// T-093: recorded; `midiInputFilters` holds the non-default ones, like the router.
+    public func setMidiInput(track: NodeIDValue, _ input: Track.MidiInput) {
+        state.withLock { s in
+            s.calls.append(.setMidiInput(track: track, input))
+            s.midiInputFilters[track] = input.isDefault ? nil : input
+        }
+    }
+
+    /// T-093: the tracks' MIDI input filters the engine has (non-default ones only).
+    public var midiInputFilters: [NodeIDValue: Track.MidiInput] { state.withLock { $0.midiInputFilters } }
+
+    /// T-093: recorded like `injectMidi`.
+    public func injectMidi(atSample: Int64, relativeToNow: Bool, status: UInt8, data1: UInt8, data2: UInt8,
+                           source: Int32?) throws(DAWError) {
+        guard let source else {
+            return try injectMidi(atSample: atSample, relativeToNow: relativeToNow, status: status, data1: data1, data2: data2)
+        }
+        state.withLock { $0.calls.append(.injectMidiFromSource(source, status: status, data1: data1, data2: data2)) }
     }
 
     /// T-052: the last `setRecordingDirectory`.

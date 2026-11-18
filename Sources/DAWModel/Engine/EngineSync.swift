@@ -121,6 +121,9 @@ public final class EngineSync {
     private var pushedArms: [NodeIDValue: UInt32] = [:]
     /// REC-011 (T-053): the MIDI tracks armed in the engine.
     private var pushedMidiArms: Set<NodeIDValue> = []
+    /// T-093: the MIDI tracks whose input filter the engine has as something other than the
+    /// default (all sources, omni), which is what it assumes for every other track.
+    private var pushedMidiInputs: [NodeIDValue: Track.MidiInput] = [:]
     /// T-054: the last `setMonitorInput` (device input for `on` monitoring without an arm).
     private var pushedMonitorInput = false
     /// REC-002 (T-052): the recordings directory last given to the engine.
@@ -153,6 +156,7 @@ public final class EngineSync {
         flush()
         pushLoop()
         pushArms()
+        pushMidiInputs()  // T-093: before arming, so a track never hears the wrong input
         pushMidiArms()
         pushMonitorInput()
     }
@@ -179,6 +183,7 @@ public final class EngineSync {
         writeParams()
         pushLoop()
         pushArms()
+        pushMidiInputs()  // T-093: before arming, so a track never hears the wrong input
         pushMidiArms()
         pushMonitorInput()
         let graph = GraphDescriptionBuilder.build(project, runtime: runtime, pluginsDisabled: arePluginsBypassed)
@@ -361,6 +366,23 @@ public final class EngineSync {
         pushedMidiArms = wanted
     }
 
+    /// T-093 (DW-216): each MIDI track's input filter, whenever it changes (armed or not, since the
+    /// engine keeps it). A track that goes away, or is back at the default, gets the default again.
+    private func pushMidiInputs() {
+        var wanted: [NodeIDValue: Track.MidiInput] = [:]
+        for track in project.tracks where track.kind == .midi && !track.midiInput.isDefault {
+            wanted[track.id] = track.midiInput
+        }
+        guard wanted != pushedMidiInputs else { return }
+        for track in pushedMidiInputs.keys.sorted() where wanted[track] == nil {
+            engine.setMidiInput(track: track, .default)
+        }
+        for (track, input) in wanted.sorted(by: { $0.key < $1.key }) where pushedMidiInputs[track] != input {
+            engine.setMidiInput(track: track, input)
+        }
+        pushedMidiInputs = wanted
+    }
+
     /// REC-020/021 (T-054): `on` monitors without an arm, so the device input must run while an
     /// audio track's mode is `on` (DW-067 runs it only while something is armed). The modes
     /// themselves reach the engine as slot values (`paramValues`); this only switches the input.
@@ -394,6 +416,9 @@ public final class EngineSync {
         pushedArms = [:]
         for track in pushedMidiArms.sorted() { engine.armMidiInput(track: track, armed: false) }  // T-053
         pushedMidiArms = []
+        // T-093: the engine outlives the sync (DW-156 hands it to another project): no filter stays.
+        for track in pushedMidiInputs.keys.sorted() { engine.setMidiInput(track: track, .default) }
+        pushedMidiInputs = [:]
         if pushedMonitorInput { engine.setMonitorInput(false) }  // T-054
         pushedMonitorInput = false
         for range in runtime.params.values { engine.freeParams(range.first, count: range.count) }

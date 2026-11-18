@@ -29,6 +29,14 @@ public struct Track: Identifiable, Hashable, Sendable, Codable {
     public var inputPair: UInt32 = 0
     public var monitoring: Monitoring
     public var automation: [AutomationLane]
+    /// T-093 (DW-216): the MIDI inputs a MIDI track hears (`SetTrackMidiInput`); audio tracks keep
+    /// the default. Stored as nil while it is the default, so it is written to JSON only when set
+    /// and files without it read the default (all sources, omni).
+    private var storedMidiInput: MidiInput?
+    public var midiInput: MidiInput {
+        get { storedMidiInput ?? .default }
+        set { storedMidiInput = newValue.isDefault ? nil : newValue }
+    }
 
     public init(
         id: NodeIDValue, name: String, kind: Kind, color: TrackColor = .gray, clips: [Clip] = [],
@@ -63,6 +71,7 @@ extension Track {
     private enum CodingKeys: String, CodingKey {
         case id, name, kind, color, clips, takeFolders, instrument, inserts, strip, sends, output, armed, inputPair,
             monitoring, automation
+        case storedMidiInput = "midiInput"  // T-093: optional, absent = all/omni
     }
 
     public init(from decoder: any Decoder) throws {
@@ -83,5 +92,6 @@ extension Track {
         monitoring = try c.decode(Monitoring.self, forKey: .monitoring)
         // T-074: lanes decode with a default of none (DECISIONS.md "T-074 contract").
         automation = try c.decodeIfPresent([AutomationLane].self, forKey: .automation) ?? []
+        midiInput = try c.decodeIfPresent(MidiInput.self, forKey: .storedMidiInput) ?? .default  // T-093
     }
 }

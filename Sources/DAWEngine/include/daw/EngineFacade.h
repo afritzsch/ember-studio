@@ -678,8 +678,9 @@ public:
 
     // MARK: MIDI input (09, T-053; accepted (autobuild, see docs/autobuild/DECISIONS.md))
     //
-    // REC-011: every connected CoreMIDI source reaches every armed MIDI track on all channels,
-    // and play-through doesn't depend on the monitoring mode. A MIDI take records while the
+    // REC-011: every connected CoreMIDI source reaches every armed MIDI track on all channels
+    // unless the track's filter says otherwise (setMidiInputFilter, T-093), and play-through
+    // doesn't depend on the monitoring mode. A MIDI take records while the
     // transport plays with setRecording(true) and some track is armed (realtime mode), and ends
     // like an audio take: it becomes one recordingFinalized event per armed track, with
     // `recording.midi` set and the notes, or nothing at all if no note was played.
@@ -697,6 +698,18 @@ public:
     // frames after the block about to render); a position already past, or a stopped transport,
     // means now. unsupported in offline mode; invalidArgument for a malformed message.
     FacadeError injectMidi(int64_t atSample, bool relativeToNow, uint8_t status, uint8_t data1, uint8_t data2, uint8_t size);
+
+    // T-093 (REC-011 per track, DW-216): what MIDI track `track` hears, armed or not (kept while
+    // disarmed). `allSources`, or only the CoreMIDI source whose unique ID is `source` (a source
+    // that isn't connected delivers nothing); `channel` 0 is omni, 1…16 one channel (channel
+    // voice messages; anything else is clamped to omni). The default (all, 0) is T-053's routing.
+    // Applies from the next block, live and to a take running: notes, pedal and bends the track
+    // no longer hears end at once (and held keys it now hears sound), so nothing hangs.
+    void setMidiInputFilter(NodeID track, bool allSources, int32_t source, uint8_t channel);
+    // T-093 test seam: injectMidi as if from the source with unique ID `source` (up to 4 distinct
+    // IDs per engine; io once they are used up), so a track's source filter can be tested.
+    FacadeError injectMidiFromSource(int32_t source, int64_t atSample, bool relativeToNow, uint8_t status,
+                                     uint8_t data1, uint8_t data2, uint8_t size);
 
     // MARK: Offline (IO-010..013, DW-057)
 

@@ -36,6 +36,20 @@ CheckResult midiMergesIntoPlayerOutput();
 // hanging. 0 RT violations.
 CheckResult midiOverflowIsCounted();
 
+// T-093 (REC-011 per track, DW-216): each armed track hears only its filter's source and
+// channel, live; the same key from two sources a track hears sounds once; a source that isn't
+// connected delivers nothing; the default filter is every input on every channel; the test seam's
+// source IDs reach only the tracks hearing them. 0 RT violations.
+CheckResult midiPerTrackFilter();
+
+// T-093: changing a track's filter while notes, the pedal or a bend are held ends them (and sounds
+// what the new filter hears held), so nothing hangs; the filter outlives a disarm. 0 RT violations.
+CheckResult midiFilterChangeNeverHangs();
+
+// T-093 (REC-012 per track): each track records only what its filter passed when it was played,
+// also across a filter change mid-take; a track that heard nothing gets no take.
+CheckResult midiRecordsPerTrack();
+
 // REC-010..012 end to end: a realtime facade on the fake device plays an injected note through a
 // sampler (audible on the strip meter) and records it, placed at its transport sample − output
 // latency, to the sample. 0 RT violations. Offline engines refuse injection.

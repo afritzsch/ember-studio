@@ -9,11 +9,19 @@
 //     that looks later than the block about to render is due now.
 //   - REC-011: per block the audio thread merges the queues in time order. Armed tracks' MIDI
 //     clip players read the result (events(), the block's live MIDI with frame offsets) and write
-//     it into their midiOut, the path the instrument already reads (T-045). Every armed MIDI
-//     track gets every input on all channels, and play-through ignores the monitoring mode
-//     (docs/autobuild/DECISIONS.md "T-053 routing"). Real events are always a little in the past
-//     at drain time, so they play at frame 0 of the next block; only the injected test input can
-//     be in the future.
+//     it into their midiOut, the path the instrument already reads (T-045). Play-through ignores
+//     the monitoring mode (docs/autobuild/DECISIONS.md "T-053 routing"). Real events are always a
+//     little in the past at drain time, so they play at frame 0 of the next block; only the
+//     injected test input can be in the future.
+//   - REC-011 per-track input (T-093, DW-216, DECISIONS "T-093 model shape"): each armed track
+//     has a filter (a source, by CoreMIDI unique ID, or all; a channel 1…16, or omni), by default
+//     all/omni, which is every input on every channel as before. The armed tracks live in a
+//     preallocated table of lanes; each lane has its own live stream, held-key counts, pedal and
+//     bend state, so the audio thread filters without allocating or locking. A filter is set from
+//     the control side at any time (armed or not) and applies from the next block. A source that
+//     isn't connected delivers nothing. The channel filter applies to channel-voice messages; the
+//     router never sees system messages (receive and inject refuse them), so they don't reach any
+//     track, omni or not.
 //   - REC-012: while the transport plays and records, notes also go to a preallocated record
 //     buffer (overflow is counted, never blocks). A note lands at the transport sample it was
 //     struck at minus the device output latency, the position the player heard (MIX-023: the
@@ -22,8 +30,11 @@
 //     ends at the loop end) and hands back one take per armed track. Nothing played: no take.
 //
 // Hanging notes. The router tracks which notes each input holds (a note-on repeated on the same
-// input is ignored). A note goes to the players when the first input presses it and comes off
-// when the last releases it. An input that disappears, or whose queue overflowed, gets a
+// input is ignored). A note goes to a track's player when the first input its filter passes
+// presses it and comes off when the last of them releases it. When a track's filter changes, the
+// router recounts what the new filter passes and, in the next block, sends note-offs for the keys
+// (pedal up, bend centred) that track no longer hears and note-ons for held keys it now hears, so
+// a filter change never hangs a note (T-093). An input that disappears, or whose queue overflowed, gets a
 // note-off for everything it held, and CC 120/123 end only that input's notes, so a controller
 // panic doesn't cut the track's clip notes. The player tracks what it actually sent and sends the
 // offs itself when its track is disarmed (MidiClipPlayer.h).
@@ -59,6 +70,16 @@ struct MidiInEvent {
     uint8_t size = 0;
 };
 
+// T-093: a track's input filter. `allSources` or the CoreMIDI source with `source` as its unique
+// ID; `channel` 0 is omni, 1…16 one channel.
+struct MidiInputFilter {
+    bool allSources = true;
+    int32_t source = 0;
+    uint8_t channel = 0;
+
+    bool operator==(const MidiInputFilter&) const = default;
+};
+
 // REC-012: one recorded note, in timeline samples (latency-compensated).
 struct RecordedMidiNote {
     int64_t start = 0;
@@ -86,8 +107,10 @@ struct FinalizedMidiTake {
 class MidiInputRouter final : public LiveMidiInput {
 public:
     static constexpr uint32_t kMaxInputs = 32;     // CoreMIDI sources at once
-    static constexpr uint32_t kInjectedSlot = kMaxInputs;  // the test seam's own input
-    static constexpr uint32_t kNumSlots = kMaxInputs + 1;
+    static constexpr uint32_t kInjectedSlot = kMaxInputs;  // the test seam's own input (no source ID)
+    // T-093: the test seam's inputs posing as a source ID, bound on first use.
+    static constexpr uint32_t kMaxInjectedSources = 4;
+    static constexpr uint32_t kNumSlots = kMaxInputs + 1 + kMaxInjectedSources;
     static constexpr uint32_t kMaxArmed = 64;
     static constexpr std::size_t kQueueSize = 1024;       // per input
     static constexpr uint32_t kMaxLiveEvents = 4096;      // per block, offs included
@@ -103,7 +126,9 @@ public:
 
     // Non-RT: claims a free input slot (-1 if none) / gives it back. A closed input's held notes
     // get their note-offs on the next block; the slot is reusable once the audio thread has seen
-    // it.
+    // it. `source` is the CoreMIDI unique ID a track's filter names it by (T-093); an input opened
+    // without one passes only "all sources" filters.
+    int openInput(int32_t source);
     int openInput();
     void closeInput(int slot);
 
@@ -115,6 +140,9 @@ public:
     // `atSample` (or `atSample` frames from now, with `relativeToNow`, or at once while the
     // transport is stopped). False: invalid message or queue full.
     bool inject(int64_t atSample, bool relativeToNow, const uint8_t* bytes, uint8_t size);
+    // T-093: the same, as if from the source with unique ID `source` (one of kMaxInjectedSources
+    // test inputs, bound to the ID on first use; false once they are all bound to other IDs).
+    bool inject(int32_t source, int64_t atSample, bool relativeToNow, const uint8_t* bytes, uint8_t size);
 
     // REC-010, any thread: the render-clock sample of host time `hostTime`, against the last
     // anchor (0 before the first block).
@@ -125,6 +153,9 @@ public:
     // REC-011: `track` records, and its clip player (`player`, 0 for none) plays through.
     void setArmed(NodeID track, NodeID player, bool armed);
     std::size_t armedCount() const { return armed_.size(); }
+    // T-093: what `track` hears, armed or not (kept while disarmed; the default forgets it).
+    void setInputFilter(NodeID track, const MidiInputFilter& filter);
+    MidiInputFilter inputFilter(NodeID track) const;
     // False while an export renders: nothing is played through and nothing is drained.
     void setLiveEnabled(bool enabled) { liveEnabled_.store(enabled, std::memory_order_release); }
 
@@ -152,13 +183,13 @@ public:
     bool blockActive() const DAW_RT { return blockActive_; }
     // Whether `player` plays through.
     bool isArmed(NodeID player) const DAW_RT;
-    // This block's live events, in frame order.
-    MidiEventSpan events() const DAW_RT { return MidiEventSpan(live_, numLive_); }
-    // Keys and controllers currently held, across all inputs: for a re-created player to sound
-    // them again.
-    bool heldNote(uint8_t channel, uint8_t pitch, uint8_t& velocity) const DAW_RT;
-    uint16_t pedalMask() const DAW_RT;  // channels with the sustain pedal down
-    uint16_t bendMask() const DAW_RT { return bendMask_; }  // channels bent off centre
+    // This block's live events for `player`'s track (its filter applied), in frame order.
+    MidiEventSpan events(NodeID player) const DAW_RT;
+    // Keys and controllers `player`'s track currently hears held: for a re-created player to
+    // sound them again.
+    bool heldNote(NodeID player, uint8_t channel, uint8_t pitch, uint8_t& velocity) const DAW_RT;
+    uint16_t pedalMask(NodeID player) const DAW_RT;  // channels with the sustain pedal down
+    uint16_t bendMask(NodeID player) const DAW_RT;   // channels bent off centre
 
 private:
     enum SlotState : uint8_t { kFree = 0, kOpen = 1, kClosing = 2 };
@@ -166,12 +197,39 @@ private:
     struct Input {
         std::atomic<uint8_t> state{kFree};
         std::atomic<bool> overflowed{false};
+        // T-093: the source a filter names it by (set before the slot opens).
+        std::atomic<bool> hasSource{false};
+        std::atomic<int32_t> source{0};
         SpscQueue<MidiInEvent, kQueueSize> queue;
         // Render thread only.
         MidiInEvent pending;
         bool hasPending = false;
         uint64_t held[16][2] = {};
         uint16_t pedal = 0;
+        uint16_t bend = 0;  // channels this input bent off centre (T-093)
+    };
+
+    // T-093: one armed track. The control side writes the atomics (track 0: free) and bumps
+    // `generation` whenever the track or player changes; `filter` changes alone mean a retarget.
+    struct ArmedSlot {
+        std::atomic<NodeID> track{0};
+        std::atomic<NodeID> player{0};
+        std::atomic<uint64_t> filter{0};  // packFilter
+        std::atomic<uint32_t> generation{0};
+    };
+
+    // T-093: the audio thread's copy of an armed slot and what that track hears.
+    struct Lane {
+        bool active = false;
+        uint32_t generation = 0;
+        NodeID player = 0;
+        uint64_t filter = 0;
+        uint8_t holders[16][128] = {};  // inputs the filter passes holding each key
+        uint16_t pedal = 0;             // channels with the pedal down, as the track hears them
+        uint16_t bend = 0;              // channels bent off centre in what it was sent
+        MidiEvent live[kMaxLiveEvents]{};
+        uint32_t numLive = 0;
+        uint32_t lastFrame = 0;
     };
 
     struct RecEvent {
@@ -179,6 +237,7 @@ private:
         int32_t pass;
         bool on;
         uint8_t pitch, velocity, channel;
+        uint64_t lanes;  // T-093: the armed slots whose filter passed it
     };
 
     // Everything an event needs from its block (on the stack in beginBlock).
@@ -212,6 +271,20 @@ private:
     int64_t sampleTimeOf(uint64_t hostTime, const Anchor& anchor) const;
     bool pushEvent(uint32_t slot, const MidiInEvent& event);
 
+    static uint64_t packFilter(const MidiInputFilter& filter);
+    static MidiInputFilter unpackFilter(uint64_t packed);
+    // T-093: whether a lane with `filter` hears `input` on `channel`.
+    bool passes(uint64_t filter, const Input& input, uint8_t channel) const DAW_RT;
+    // Channels a filter lets through (one bit per channel).
+    static uint16_t channelMask(uint64_t filter) DAW_RT;
+    // Brings the lanes up to the armed table: new tracks are counted quietly, retargeted ones
+    // get the offs and ons of the difference.
+    void syncLanes(const BlockInfo& info) DAW_RT;
+    void countLane(const Lane& lane, uint8_t (&holders)[16][128], uint16_t& pedal, uint16_t& bend) const DAW_RT;
+    int laneOf(NodeID player) const DAW_RT;
+    uint32_t bindInjected(int32_t source);
+
+    void clearLive() DAW_RT;
     void drain(const BlockInfo& info) DAW_RT;
     void handleEvent(Input& input, const MidiInEvent& event, const BlockInfo& info) DAW_RT;
     void noteOn(Input& input, uint8_t channel, uint8_t pitch, uint8_t velocity, int64_t frame,
@@ -220,15 +293,23 @@ private:
     // Note-offs for what `input` holds on `channel`; pedal up with `pedalToo`.
     void releaseChannel(Input& input, uint8_t channel, int64_t frame, const BlockInfo& info, bool pedalToo) DAW_RT;
     void setPedal(Input& input, uint8_t channel, bool down, int64_t frame, const BlockInfo& info) DAW_RT;
-    void emitLive(const uint8_t* data, uint8_t size, int64_t frame, const BlockInfo& info) DAW_RT;
-    void recordNote(bool on, uint8_t channel, uint8_t pitch, uint8_t velocity, int64_t frame,
+    // Into every lane that hears `input` on the message's channel.
+    void emitLive(const Input& input, const uint8_t* data, uint8_t size, int64_t frame, const BlockInfo& info) DAW_RT;
+    void emitLane(Lane& lane, const uint8_t* data, uint8_t size, int64_t frame, const BlockInfo& info) DAW_RT;
+    void recordNote(const Input& input, bool on, uint8_t channel, uint8_t pitch, uint8_t velocity, int64_t frame,
                     const BlockInfo& info) DAW_RT;
+    // A recorded event for the lanes in `heardBy` (one bit per armed slot).
+    void recordEvent(uint64_t heardBy, bool on, uint8_t channel, uint8_t pitch, uint8_t velocity, int64_t frame,
+                     const BlockInfo& info) DAW_RT;
     bool heardPosition(int64_t frame, const BlockInfo& info, int64_t& heard, int32_t& pass) const DAW_RT;
 
     void deactivate();
     std::vector<FinalizedMidiTake> collect();
+    // REC-012: the recorded events the lane with `laneBit` heard, paired into notes.
+    std::vector<RecordedMidiNote> pairNotes(uint32_t count, uint64_t laneBit) const;
 
     std::unique_ptr<Input[]> inputs_;
+    std::unique_ptr<Lane[]> lanes_;  // kMaxArmed, render thread only
     std::unique_ptr<RecEvent[]> recordBuffer_;
     double hostTicksPerSecond_ = 0;
 
@@ -244,20 +325,17 @@ private:
 
     std::atomic<bool> liveEnabled_{true};
     std::atomic<uint64_t> dropped_{0};
-    // REC-011: player IDs, one writer (setArmed); a slot is stable while its player stays armed.
-    std::atomic<NodeID> armedPlayers_[kMaxArmed]{};
+    // REC-011: the armed tracks, one writer (setArmed, setInputFilter); a slot is stable while its
+    // track stays armed (T-093: per track, so a track without a player records too).
+    ArmedSlot armedSlots_[kMaxArmed];
 
     // Render thread only.
     int64_t renderSample_ = 0;
     uint64_t lastCycleHost_ = 0;
     int64_t lastCycleSample_ = 0;
     bool blockActive_ = false;
-    MidiEvent live_[kMaxLiveEvents]{};
-    uint32_t numLive_ = 0;
-    uint32_t lastLiveFrame_ = 0;
-    uint8_t holders_[16][128] = {};   // inputs holding each key
-    uint8_t velocities_[16][128] = {};
-    uint16_t bendMask_ = 0;
+    uint32_t maxLive_ = 0;  // the fullest lane's live events this block
+    uint8_t velocities_[16][128] = {};  // the last velocity each key was struck with
 
     // REC-012 session. The audio thread uses it only while sessionActive_; the control side only
     // after deactivate().
@@ -277,8 +355,12 @@ private:
 
     // Control side.
     std::map<NodeID, NodeID> armed_;     // track → player
-    std::map<NodeID, uint32_t> armedIndex_;  // player → armedPlayers_ index
+    std::map<NodeID, uint32_t> armedIndex_;  // track → armedSlots_ index
+    std::map<NodeID, MidiInputFilter> filters_;  // T-093: tracks with a filter other than all/omni
+    std::map<int32_t, uint32_t> injectedSources_;  // T-093: source ID → injected input slot
+    uint32_t nextGeneration_ = 0;
     std::vector<NodeID> sessionTracks_;
+    std::vector<uint32_t> sessionSlots_;  // T-093: each session track's armedSlots_ index
     double sessionRate_ = 0;
 };
 

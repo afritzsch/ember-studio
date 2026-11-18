@@ -161,7 +161,7 @@ extension DeviceSetParams: JSONSchemaDocumented {
 
 extension MidiInjectParams: JSONSchemaDocumented {
     public static var jsonSchemaDocs: [String: String] {
-        ["events": "In order. Each: {status: 0x80…0xEF, data1?, data2?, sample? (transport sample it is struck at), framesFromNow?}"]
+        ["events": "In order. Each: {status: 0x80…0xEF, data1?, data2?, sample? (transport sample it is struck at), framesFromNow?, source? (T-093: a CoreMIDI unique ID it arrives from, for tracks' MIDI input filters; left out, only tracks hearing all sources get it)}"]
     }
 }
 

@@ -767,6 +767,14 @@ public protocol EngineProtocol: AnyObject, Sendable {
     func midiInputs() -> [MidiInputInfo]
     /// T-053 test seam (default: unsupported).
     func injectMidi(atSample: Int64, relativeToNow: Bool, status: UInt8, data1: UInt8, data2: UInt8) throws(DAWError)
+    /// T-093 (REC-011 per track): what MIDI track `track` hears, armed or not (see the extension at
+    /// the end of this file; default: ignored).
+    func setMidiInput(track: NodeIDValue, _ input: Track.MidiInput)
+    /// T-093 test seam: `injectMidi` as if from the source with `source` as its unique ID (nil: the
+    /// plain seam, which only "all sources" tracks hear). Default: the plain seam without a source,
+    /// unsupported with one.
+    func injectMidi(atSample: Int64, relativeToNow: Bool, status: UInt8, data1: UInt8, data2: UInt8,
+                    source: Int32?) throws(DAWError)
     func instantiatePlugin(slot: NodeIDValue, _ plugin: PluginDescriptor) -> JobID
     func pluginState(slot: NodeIDValue) -> Data
     func setPluginState(slot: NodeIDValue, _ state: Data)
@@ -1060,6 +1068,16 @@ extension EngineProtocol {
 /// T-054 additions to `EngineProtocol`, with defaults so test doubles compile unchanged.
 extension EngineProtocol {
     public func setMonitorInput(_ wanted: Bool) {}
+}
+
+/// T-093 additions to `EngineProtocol`, with defaults so test doubles compile unchanged.
+extension EngineProtocol {
+    public func setMidiInput(track: NodeIDValue, _ input: Track.MidiInput) {}
+    public func injectMidi(atSample: Int64, relativeToNow: Bool, status: UInt8, data1: UInt8, data2: UInt8,
+                           source: Int32?) throws(DAWError) {
+        guard source == nil else { throw .notImplemented("this engine can't inject MIDI from a source") }
+        try injectMidi(atSample: atSample, relativeToNow: relativeToNow, status: status, data1: data1, data2: data2)
+    }
 }
 
 // MARK: T-063 (PLUG-017, DW-204): plugin editors and the plugin's own edits

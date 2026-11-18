@@ -112,6 +112,8 @@ struct CommandRegistryTests {
         ])),
         SetCompSelection(folderID: 6, start: 0, end: 480, takeID: 7),
         RestoreComp(folderID: 6, comp: [CompSegment(start: 0, end: 480, take: 7), CompSegment(start: 480, end: 960, take: 9)]),
+        // T-093 (MODEL-005, REC-011 per-track MIDI input)
+        SetTrackMidiInput(trackID: 2, source: .device(-1_234_567), channel: 10),
     ]
 
     @Test("MODEL-006: built-in type strings are stable and unique")
@@ -135,6 +137,7 @@ struct CommandRegistryTests {
             "InsertDevice", "RemoveDevice", "RestoreDevice", "MoveDevice",
             "RecordAutomation",
             "CreateTakeFolder", "RemoveTakeFolder", "RestoreTakeFolder", "SetCompSelection", "RestoreComp",
+            "SetTrackMidiInput",
         ])
         let all = CommandRegistry.registered.map { $0.type }
         #expect(Set(all).count == all.count)
