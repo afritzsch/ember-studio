@@ -56,14 +56,14 @@ struct ControlToggle: View {
 /// DW-180 (T-095): a text field that edits a value on commit (Return or leaving the field), not per
 /// keystroke, so one commit is one undo entry. `commit` returns false for input it refuses; the field
 /// then shows `value` again, as it does whenever it isn't being edited. Escape reverts.
+/// DW-297 (T-100): it draws a `.textField` control, whose `commitText` `ui.perform setText` runs too.
 struct CommitTextField: View {
-    /// The accessibility identifier (names the view; `ui.perform` can't type, 12).
-    let id: String
-    let label: String
-    /// The model's value as text.
-    let value: String
-    let commit: @MainActor (String) -> Bool
+    let control: UIControl
     var width: CGFloat = 60
+
+    private var label: String { control.label }
+    /// The model's value as text.
+    private var value: String { control.text ?? "" }
 
     @State private var text = ""
     @State private var editing = false
@@ -86,14 +86,15 @@ struct CommitTextField: View {
             .onChange(of: focused) { _, isFocused in
                 if isFocused { editing = true } else if editing { finish() }
             }
-            .accessibilityIdentifier(id)
+            .disabled(!control.isEnabled)
+            .accessibilityIdentifier(control.id)
             .accessibilityLabel(label)
             .help(label)
     }
 
     private func finish() {
         editing = false
-        if text != value { _ = commit(text) }
+        if text != value { _ = control.commitText?(text) }
         text = value  // the committed value as the project now has it, or the old one (refused)
     }
 }

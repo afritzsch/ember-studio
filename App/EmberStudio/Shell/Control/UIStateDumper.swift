@@ -22,7 +22,7 @@ import Foundation
 ///                    "metronome", "dspLoadPercent", "xruns", "tempoAtBar1", "signatureAtBar1" (DW-180)},
 ///        "keyBindings": [{"keys": "⇧⌘T", "control": "track.add.midi"}],
 ///        "toasts": [{"id", "kind", "severity", "title", "message", "action"?, "count"?}],
-///        "controls": [{"id", "kind", "label", "isOn"?, "enabled"}],
+///        "controls": [{"id", "kind" (button|toggle|textField), "label", "isOn"?, "text"? (text fields), "enabled"}],
 ///        "arrange": {"snap", "pixelsPerBeat", "size", "visibleTicks", "visibleRows", "clipCount",
 ///                    "visibleClips": [{"id", "track", "kind", "start", "length", "selected", "rect",
 ///                                      audio: "assetID", "gain", "fadeIn", "fadeOut", "waveformLevel" | null;
@@ -637,6 +637,7 @@ enum UIStateDumper {
             "enabled": .bool(control.isEnabled),
         ]
         if let isOn = control.isOn { json["isOn"] = .bool(isOn) }
+        if let text = control.text { json["text"] = .string(text) }  // DW-297: text fields
         return .object(json)
     }
 

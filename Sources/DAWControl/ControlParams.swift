@@ -472,6 +472,9 @@ public struct UIPerformParams: Codable, Hashable, Sendable {
     /// the range `[start, end)` in ticks that the take plays in the comp (one undo entry).
     public var start: Int64? = nil
     public var end: Int64? = nil
+    /// DW-297 (T-100, additive): action `setText` on a text-field control (the toolbar's
+    /// `transport.tempo`, `transport.signature`): the text to commit, as if typed and Return pressed.
+    public var text: String? = nil
 }
 
 // MARK: test.fixture
