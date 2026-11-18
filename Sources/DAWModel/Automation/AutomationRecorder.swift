@@ -70,6 +70,13 @@ public final class AutomationRecorder {
 
     public init(store: ProjectStore) {
         self.store = store
+        attachToEngine()
+    }
+
+    /// DW-277 (T-095): plugin-side edits reach this recorder through the store's engine sync.
+    /// Called at init and at each transport poll, so a newly attached engine (handover) finds it.
+    private func attachToEngine() {
+        if let sync = store.engineSync, sync.automationRecorder !== self { sync.automationRecorder = self }
     }
 
     private var engine: (any EngineProtocol)? { store.engineSync?.engine }
@@ -144,6 +151,7 @@ public final class AutomationRecorder {
     /// `write` passes at play, commits every pass at stop, splits passes at a loop wrap, and ends
     /// AUTO-007's held stopped values when the playhead changes.
     public func transportChanged(_ transport: TransportState) {
+        attachToEngine()  // DW-277
         let previous = lastTransport
         lastTransport = transport
         // AUTO-007: a held stopped value lasts until the playhead changes or play starts.
@@ -215,6 +223,48 @@ public final class AutomationRecorder {
         edited.points[i].value = normalized(target, value)
         if edited != lane { try store.perform(SetAutomationLane(channel: channel, target: target, lane: edited)) }
         return .editedPoint(tick)
+    }
+
+    // MARK: Plugin editors (DW-277)
+
+    /// DW-277 (T-095, DECISIONS "T-095 app decisions"): an edit from a plugin's own editor (T-063,
+    /// `pluginParamEdited`) of hosted param `index` of `slot`, treated like a UI control's gesture:
+    /// `begin` grabs, `value` moves, `end` releases (touch/latch/write per AUTO-006), and an
+    /// ungestured value (a menu, a preset) is a grab and release at once. Stopped on an automated
+    /// param, a value edits the lane's point under the playhead (AUTO-007).
+    ///
+    /// Returns true when it took the edit; otherwise the caller (`EngineSync`) hands it to
+    /// `PluginEditRecorder`, which performs `SetParam` as before (its gesture is still one undo entry,
+    /// and a stopped point edit inside it joins that entry).
+    @discardableResult
+    public func pluginEdited(slot: NodeIDValue, edit: PluginParamEdit, at tick: Tick? = nil) -> Bool {
+        guard edit.index >= 0, project.allDeviceSlots.contains(where: { $0.id == slot && $0.isPlugin }) else { return false }
+        let target = ParamTarget.device(slot: slot, index: edit.index)
+        let held = passes[target]?.held == true
+        switch edit.phase {
+        case .begin:
+            if held { return true }
+            guard edit.value.isFinite else { return false }
+            return beginGesture(target, value: edit.value, at: tick)
+        case .value:
+            guard edit.value.isFinite else { return false }
+            if held {
+                move(target, value: edit.value, at: tick)
+                return true
+            }
+            if beginGesture(target, value: edit.value, at: tick) {
+                // No gesture of its own: grabbed and released at once.
+                endGesture(target, at: tick)
+                return true
+            }
+            guard !now().playing, isAutomated(target) else { return false }
+            if case .editedPoint = (try? stoppedEdit(target, value: edit.value, at: tick)) ?? .none { return true }
+            return false
+        case .end:
+            guard held else { return false }
+            endGesture(target, at: tick)
+            return true
+        }
     }
 
     // MARK: Internals

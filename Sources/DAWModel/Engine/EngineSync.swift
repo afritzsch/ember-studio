@@ -102,6 +102,11 @@ public final class EngineSync {
         }
     }
 
+    /// DW-277 (T-095): the store's automation recorder (AUTO-006/007), offered every plugin-side edit
+    /// before `pluginEdits`, as a UI control's gesture is. It attaches itself (`AutomationRecorder`
+    /// does, at each transport poll), so a newly attached engine finds it too.
+    public weak var automationRecorder: AutomationRecorder?
+
     /// DW-204 (T-063): a plugin's own edits (`pluginParamEdited`) → undoable `SetParam` gestures.
     /// `ProjectStore.attachEngine` points it at the store.
     public let pluginEdits = PluginEditRecorder()
@@ -280,7 +285,13 @@ public final class EngineSync {
             lastError = event.error
         case .pluginParamEdited:
             // DW-204 (T-063): ungestured ones are grouped per poll (pollEvents ends the batch).
-            if let edit = event.pluginEdit { pluginEdits.handle(slot: event.subject, edit: edit) }
+            // DW-277 (T-095): the automation recorder takes the edit first (AUTO-006/007): it records
+            // while playing on a touch/latch/write lane, or edits the point under the playhead.
+            if let edit = event.pluginEdit {
+                if let recorder = automationRecorder, recorder.store.engineSync === self,
+                   recorder.pluginEdited(slot: event.subject, edit: edit) { break }
+                pluginEdits.handle(slot: event.subject, edit: edit)
+            }
         case .recordingFinalized:
             // REC-004 (T-052): the store turns the take into ImportAsset + AddClip.
             if let take = event.recording { onRecordingFinalized?(take, event.error) }
