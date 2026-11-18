@@ -217,6 +217,7 @@ public:
             if (static_cast<IConnectionPoint*>(c) == other) {
                 c->processor.store(this);
                 controller_ = c;
+                linked_.store(c);
             }
         return r;
     }
@@ -225,6 +226,7 @@ public:
         if (controller_ != nullptr && static_cast<IConnectionPoint*>(controller_) == other) {
             controller_->processor.store(nullptr);
             controller_ = nullptr;
+            linked_.store(nullptr);
         }
         return AudioEffect::disconnect(other);
     }
@@ -275,7 +277,10 @@ protected:
     void common(ProcessData& data) {
         if (gRestartFromProcess.exchange(false))
             if (EmberController* c = gLastController.load(std::memory_order_acquire)) c->restart();
-        if (probe.restartFromProcess.exchange(false)) restartOwn();  // T-097: from the audio thread
+        // T-097: from the audio thread. T-103: through the atomic link, no lock (a host's RT trap
+        // would count gControllersLock).
+        if (probe.restartFromProcess.exchange(false))
+            if (EmberController* c = linked_.load(std::memory_order_acquire)) c->restart();
 
         const int64 block = probe.blocks.fetch_add(1);
         probe.dataMode.store(data.processMode);
@@ -333,6 +338,7 @@ protected:
 
     float gain_ = 1.0f, mix_ = 0.0f;
     EmberController* controller_ = nullptr;  // under gControllersLock
+    std::atomic<EmberController*> linked_{nullptr};  // controller_, for process() (T-103)
 };
 
 class EmberEffect final : public Processor {
