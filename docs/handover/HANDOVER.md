@@ -1,72 +1,77 @@
-You are AUTOBUILD phase lead 11. Read CLAUDE.md, then `.claude/skills/autobuild/SKILL.md`, then follow "Orchestrating with Patchbay" in specs/90-tasks.md. Use the Patchbay MCP tools for workers, never the Agent tool. The run log is `docs/autobuild/RUN.md` and the decisions taken without the user are in `docs/autobuild/DECISIONS.md`.
+You are AUTOBUILD phase lead 12. Read CLAUDE.md, then `.claude/skills/autobuild/SKILL.md`, then follow "Orchestrating with Patchbay" in specs/90-tasks.md. Use the Patchbay MCP tools for workers, never the Agent tool. The run log is `docs/autobuild/RUN.md` and the decisions taken without the user are in `docs/autobuild/DECISIONS.md`.
 
-**This run's WEEK_STOP is 90, not 50.** The user raised it because they had a free usage reset; the conductor relayed the instruction in phase 10. Stop only for week ≥ 90 or the skill's other *Stop the run* conditions.
+**This run's WEEK_STOP is 90, not 50.** The user raised it because they had a free usage reset; the conductor relayed the instruction in phase 10, and phase 11 ran under it. Stop only for week ≥ 90 or the skill's other *Stop the run* conditions.
 
-## State at handoff (2026-11-17, end of autobuild phase 10; main @ the "Autobuild phase 10: handover" commit, pushed; clean; no worker sessions running)
-- Phase 10 merged all four wave tasks. Every trial merge ran `scripts/test.sh` (12/12) plus two timed `swift test` runs. The only failures were known load flakes, which passed when re-run alone.
-  - **T-083** crash recovery dialog (UI-043, DW-224, DW-144, part of DW-226):
-    - After a crash (the running marker of a dead pid), launch shows a dialog strip in every window: Open with Plugins Disabled / Open Normally / Don't Open, and a per-project "Recover autosave". `--crash-marker-dir` injects markers for tests.
-    - **Safe mode now builds AU/VST3 slots as absent:** `"disabled": true` in configJSON, the plugin is never instantiated, and its state blob is saved back byte for byte.
-    - Safe-mode banner with "Enable Plugins"; ui.state `crashRecovery` and per-window `safeMode`; `pluginMisbehaved` has its own toast.
-  - **T-081** take folder / comp UI (UI-016). **M8's UI is complete.**
-    - A collapsed folder shows its comp with a disclosure triangle; expanded, it shows one row per take (`TimelineGeometry.takeBands`, alongside T-075's lane rows).
-    - Swipe comping makes one `SetCompSelection` per swipe; folders can be deleted.
-    - ui.state `takes`; ui.perform `swipe {start, end}`.
-  - **T-065** device chain view + plugin manager (UI-032, UI-041, DW-015, DW-196, DW-250, DW-253, DW-254, DW-264, DW-226, DW-265). **M6 is complete.**
-    - `Shell/DeviceChain/`: generic cards from ParamInfo (steps/labels become menus and toggles); bypass, reorder, remove and add, including the master; sidechain picker.
-    - Editable mixer inserts; plugin params in "+ Lane"; device controls go through the automation recorder.
-    - `Shell/PluginManager/` (scan, blocked list, rescan) on the new **`PluginCatalog` library product**. `PluginScanner` is embedded in the app and signed with the app's entitlements.
-    - `ParamInfo.steps`/`valueLabels` (06 delta).
-  - **T-091** DSP performance (TEST-008):
-    - Stereo NEON biquads, a block-wise compressor with `dsp/FastDb.h`, a vectorized reverb network, and cheaper meters, clip player and DelayLine.
-    - **10.7× realtime** in `scripts/ci.sh perf` (the bound is 10×), measured in Low Power Mode with other workers running (DW-281).
-    - No golden was regenerated; all null at −240 dBFS.
+## State at handoff (2026-11-18, end of autobuild phase 11; main @ the "Autobuild phase 11: handover" commit, pushed; clean; no worker sessions running)
+- Phase 11 merged all four wave tasks. Every trial merge ran `scripts/test.sh` (12/12 for three of them) plus `swift test` twice. The only failures were the known PersistenceTests MODEL-044/DW-148 load flakes in T-096's trial run, which were green alone and in two plain runs.
+  - **T-096** control/export follow-ups (DW-220, DW-219, DW-174, DW-189):
+    - Render-job cancel: facade `cancelJob`, `JobState::cancelled`, and `render.cancel {id?}`, which runs outside the request queue. The cancelled render fails with -32005 and its partial file is deleted.
+    - The export dialog has Cancel (`export.cancel`).
+    - `render.offline {dither?}` defaults on for int16/int24. The `export_normalize` fixture now passes `dither: false`, so its reference is unchanged.
+    - `engine.meters {nodes?}` (strip dB, compressor GR) and `engine.previewNote` (realtime engines; offline answers -32006 `notSupported`).
+    - dawmcp tools `daw_render_cancel`, `daw_engine_meters`, `daw_engine_preview_note`.
+  - **T-093** per-track MIDI input (DW-216, REC-011/012 per track, MODEL-005):
+    - `Track.midiInput {source: "all"|uniqueID, channel 0…16}`; only non-default values are stored, so old files save byte-identical.
+    - Undoable `SetTrackMidiInput`.
+    - `MidiInputRouter` lanes (64 preallocated) filter the live stream and the takes per track. Changing a filter never hangs a note.
+    - `midi.inject {source}` test seam.
+    - Picker in the track header and mixer strip (`track.<id>.midiInput.*`, ui.state `midiInput`).
+    - **Behavior change:** with two armed tracks, a track that heard nothing gets no take.
+  - **T-094** plugin follow-ups (DW-213, DW-275, DW-018, DW-276; DW-268 measured):
+    - `pluginInfoJSON` param rows gain `steps`, `labels` and `display`; there's a new facade `paramDisplay`. VST3 values stay normalized.
+    - Generic plugin cards show the plugin's strings and menus.
+    - Scanner: 30 s first-scan timeout, "Retry (120 s)" per timed-out plugin, 4 parallel scans.
+    - **DW-276 was a real bug:** a V2 AU can swap its parameter tree after prepare, which lost editor gestures. `AUInstance` now follows `parameterTree` by KVO.
+    - DW-268: the engine and model take ~13 ms, so the "Enable Plugins" delay is on the app side (DW-288).
+  - **T-092** DSP/engine follow-ups (DW-232, DW-197, DW-279, DW-280):
+    - AUTO-003 wrap jump for EQ, compressor, delay, reverb, sampler and metronome.
+    - `locate_reset` golden with a real reverb tail. It was regenerated with a TEST-003 summary; no other golden changed.
+    - BypassNode skips the dry copy for unbypassed 0-latency inserts.
+    - AudioFileWriter buffers 64k frames per write (byte-identical files).
+    - TEST-008 best is **11.4×** (was 10.7×), measured in Low Power Mode with other workers running.
 - Lead items this phase:
-  - **CI (DW-261, partial):**
-    - The first CI run (on the phase-9 push) failed to compile. GitHub's macos-15 image tops out at Xcode 26.3, and a probe on macos-26 found Xcode 26.6 at most (no 27, not even a beta). The code needs Xcode 27 / Swift 6.4.
-    - `ci-job.yml` now runs on `${{ vars.CI_RUNNER || 'macos-26' }}` and fails fast in the Xcode step with a clear error.
-    - **CI stays red until the user sets the repo variable `CI_RUNNER` to a self-hosted runner with Xcode 27, or GitHub ships an Xcode 27 image.** Don't spend more time on it.
-  - DW-066: the package is now named "EmberStudio" (the `name:` in Package.swift; nothing else referred to it).
-  - Created follow-up tasks **T-092..T-096** from open DW items (DECISIONS "Phase 10 follow-up tasks").
-- Done & merged (72): T-001..T-026, T-030..T-036, T-040..T-045, T-050..T-056, T-060..T-065, T-070..T-077, T-080..T-091. **M1–M8 are complete.**
+  - Spec housekeeping: DW-244 (02 ENG-041 passes), DW-267 (07/13 cross-references), DW-239 (14 golden rows), DW-291 (12 plugin manager ids), and the spec parts of DW-269 (13 `ui.perform start/end`) and DW-282 (12 `export.cancel`).
+  - Created follow-up tasks **T-097..T-099** from open DW items (DECISIONS "Phase 11 follow-up tasks").
+- Done & merged (76): T-001..T-026, T-030..T-036, T-040..T-045, T-050..T-056, T-060..T-065, T-070..T-077, T-080..T-094, T-096. M1–M8 are complete.
 - No `wip` tasks, no WIP branches.
-- **Ready (5):** T-092 (D+E), T-093 (E+M+U), T-094 (P), T-095 (U+M), T-096 (B+U). See 90-tasks.md → *Follow-ups from autobuild phase 10*.
-- Discovered work runs DW-001..DW-281.
-  - New this phase: DW-266..268 (T-083), DW-269..273 (T-081), DW-274..278 (T-065), DW-279..281 (T-091).
-  - Closed: DW-015, 066, 144, 176, 196, 224, 226, 250, 253, 254, 265. Partial: DW-261, 264.
-- Phase 10 week usage: 24% → 45%. There was one 5-hour pause of ~4.4 h: the phase started with the window at 82%, so the workers started only after its reset.
+- **Ready (4):** T-095 (U+M), T-097 (P), T-098 (B), T-099 (E+M). See 90-tasks.md → *Follow-ups from autobuild phase 10* and *… phase 11*.
+- Discovered work runs DW-001..DW-292.
+  - New this phase: DW-282..284 (T-096), DW-285..287 (T-093), DW-288..291 (T-094), DW-292 (T-092).
+  - Closed: DW-018, 174, 189, 197, 213, 216, 219, 220, 232, 239, 244, 267, 275, 276, 279, 280, 291. Partial: DW-268, 269, 282.
+- Phase 11 week usage: 46% → ~63%. There was one 5-hour pause of ~2.2 h (window 3% → 85% in ~55 min with four workers).
 
 ## Suggested next wave
-- Four of the five ready tasks, one per lane group. My pick: **T-092** (D+E), **T-093** (E+M+U), **T-094** (P), **T-096** (B+U). T-095 (U) waits for the next phase, because T-093 and T-096 already put two workers in App/.
+- All four ready tasks, one per lane: **T-095** (U+M), **T-097** (P), **T-098** (B), **T-099** (E+M).
 - File split to give them:
-  - T-092: the DSP nodes' smoothing/wrap code (users of `automation/WrapJump.h`), `graph/BypassNode.*`, `io/AudioFileWriter.*`, GoldenTests `locate_reset`. It must not touch the ParamInfo tables.
-  - T-093: the `Track` model and a new command, the engine's MIDI input routing (record/ and the MIDI input path, additive facade), and a picker in the track header and mixer strip (add-only in MixerView and the track header views).
-  - T-094: `Sources/DAWEngine/plugins`, `Sources/PluginScanner`, the plugin part of `pluginInfoJSON`, `Shell/PluginManager/` (timeout/retry UI only).
-  - T-096: facade render-job cancel; `Sources/DAWControl`, `dawctl` and `dawmcp` (meters, previewNote, dither); `Shell/Export/` (Cancel button).
+  - T-095: App/ only, plus the per-slot safe-mode override in `EngineSync`/`GraphDescriptionBuilder` (DW-266) and `AutomationRecorder` (DW-277).
+  - T-097: `Sources/DAWEngine/plugins/` only (plus `ParamSlotTable` read access for `afterWrap`). It must not touch the built-in nodes.
+  - T-098: `Sources/DAWControl`, `dawctl`, `dawmcp`, `scripts/dawmcp.sh`, `Tests/GoldenTests/GoldenEngine.swift`, and a shared telemetry conversion. The conversion should go in DAWModel's `EngineClient` (add-only), coordinated with T-099's new telemetry fields: T-099 adds the fields, T-098 maps whatever exists. Merge T-099 first, then have T-098 merge main.
+  - T-099: `core/Telemetry`, `TelemetryPOD`, `MasterNode`, `MidiDelayLine` counters, `io/` latency, and DAWModel (`Project.validate`, `RemoveAsset`, session-rate commands, `Bus`/`MasterChannel` Codable).
 - Pre-decide these in DECISIONS before starting:
-  - T-093's model shape. Suggestion: `Track.midiInput: {source: endpoint uid or "all", channel: 0 = omni or 1…16}`, defaulting to all/omni so old projects behave as today. Pre-accept the 07/09 Interfaces delta.
-  - T-096's control additions. Pre-accept the 13 delta.
-  - T-094's `pluginInfoJSON` additions: `steps`, `labels`, and `display` for VST3 via `getParamStringByValue`. Pre-accept the 08/10 delta.
-- Small lead items: DW-267 (07/13 cross-references), DW-239 (14 golden table rows), DW-244 (02 ENG-041 passes), and DW-269's spec-13 line for `ui.perform` `start`/`end`.
+  - T-099's 08 telemetry delta: `clippedSamples`, `midiEventsDropped`, `inputLatency`, `bufferFrames`, all additive. Pre-accept it.
+  - T-098's 13 additions: `plugins.scan|list|retry`, `engine.paramDisplay`. Pre-accept them.
+  - T-097: the VST3 offline flag (`PrepareInfo.offline`, additive 08) and whether a bypass toggle on an instrument sends the held note-offs or All Notes Off. Recommend the held note-offs plus CC 123.
+  - T-095: the per-slot "enable this plugin" override stays session-only, like safe mode.
+- Small lead items: DW-152 (07 *Persistence* text), DW-034/DW-035 (02/00 wording).
 
-## Decisions taken this phase (see docs/autobuild/DECISIONS.md, phase 10 rows)
-- Wave 10 = T-065, T-081, T-083, T-091 with a strict file split; T-083 merged first.
-- T-065 scope: DW-015 (`PluginCatalog` product) and DW-196 (`ParamInfo` steps/labels) now; DW-153 and DW-213 later.
-- T-083: safe mode builds AU/VST3 slots as absent (DW-224 option a).
-- T-091: goldens are kept if within tolerance, otherwise regenerated with TEST-003 summaries. None needed regenerating.
-- DW-261: CI takes its runner from `vars.CI_RUNNER` and fails fast without Xcode 27.
-- T-065 scanner signing: the embedded scanner is signed with the app's entitlements. JIT entitlements are left to the user (DW-274).
-- Phase 10 follow-up tasks T-092..T-096.
+## Decisions taken this phase (see docs/autobuild/DECISIONS.md, phase 11 rows)
+- Wave 11 = T-092, T-093, T-094, T-096; T-095 held back (third App/ worker).
+- T-093 model shape: `Track.midiInput {source, channel}`, default all/omni, undoable `SetTrackMidiInput`, a source that isn't connected keeps the selection.
+- T-094 plugin info: VST3 stays normalized; `steps`/`labels`/`display` + `paramDisplay`; 30 s timeout, 120 s retry, 4 parallel scans.
+- T-096 control additions: `render.cancel`, `render.offline {dither}` default on for integers, `engine.meters`, `engine.previewNote`.
+- T-092 goldens: keep within tolerance; `locate_reset` regenerated with a TEST-003 summary.
+- Phase 11 follow-up tasks T-097..T-099.
 
 ## Sessions only the user can close
-- In the sidebar: the "macDAW" conductor session (it closes this lead). Phase lead 10 closed all four of its workers.
+- In the sidebar: the "macDAW" conductor session (it closes this lead). Phase lead 11 closed all four of its workers.
 - Worktrees left on disk (removing them needs `--force` because of submodules, which auto mode denies). All are merged or superseded:
   - `~/.patchbay/worktrees/macDAW/t-023-sidechain`, `t-024-metronome`, `t-025-m2-goldens`, `t-025-m2-goldens-r2`, `t-026-project-metronome`, `t-031-persistence`, `t-032-app-shell`, `t-032-app-shell-r2`, `t-033-arrange-canvas`, `t-034-toolbar-transport`, `t-035-crossfades`, `t-036-m3-goldens`, `t-042-note-commands`, `t-043-piano-roll`, `t-044-m4-goldens`, `t-045-midi-routing`, `t-052-audio-recording`, `t-055-audio-prefs`, `t-056-session-rate`, `t-061-au-hosting`, `t-071-compressor`, `t-072-delay`, `t-073-reverb`;
   - phase 6: `t-053-coremidi`, `t-062-vst3-hosting`, `t-070-eq`, `t-076-mixer-view`.
   - phase 7: `t-054-input-monitoring`, `t-064-host-bypass`, `t-074-automation`, `t-082-export-dialog`.
   - phase 8: `t-077-m7-goldens`, `t-088-insert-chain`, `t-089-transport-followups`, `t-090-app-followups`.
   - phase 9: `t-063-plugin-editors`, `t-075-automation-recording`, `t-080-loop-takes`, `t-084-ci`.
-  - new in phase 10: `t-065-device-chain`, `t-081-take-ui`, `t-083-crash-dialog`, `t-091-dsp-perf`.
+  - phase 10: `t-065-device-chain`, `t-081-take-ui`, `t-083-crash-dialog`, `t-091-dsp-perf`.
+  - new in phase 11: `t-092-dsp-followups`, `t-093-midi-input`, `t-094-plugin-followups`, `t-096-control-followups`.
   - Remove them with `git worktree remove --force <path>`, then `git branch -D <branch>`. The old remote WIP branches `origin/t-025-m2-goldens`, `t-031-persistence` and `t-032-app-shell` can be deleted too.
 
 ## Open questions for the user (not yet answered)
@@ -78,12 +83,15 @@ You are AUTOBUILD phase lead 11. Read CLAUDE.md, then `.claude/skills/autobuild/
     - DW-247: the headphone jack on Apple Silicon must read 'hdpn', or the feedback guard warns falsely.
     - T-034's key check: Space, R, L, ⌘E, ⌫, ⌘T.
   - Whether to file Apple Feedback for DW-214 (evidence in the T-070 DW-214 report section).
-  - Review the phase-8, phase-9 and phase-10 rows in DECISIONS.md.
+  - Review the phase-8 to phase-11 rows in DECISIONS.md.
   - `gh` reports `afritzsch/ember-studio` as **PUBLIC** (earlier handovers said private). Pushes and CI publish the code; make it private again if that wasn't intended.
   - **New in phase 10:**
     - CI (DW-261): set the repo variable `CI_RUNNER` to a self-hosted Mac runner with Xcode 27, or wait for a GitHub image with Xcode 27. Until then, every push's CI run fails in the Xcode step.
     - DW-274: should the app (and the embedded scanner) get the `com.apple.security.cs.allow-jit` / `allow-unsigned-executable-memory` entitlements? That would let the 46 plugins killed under hardened runtime (UADx, Neural DSP, soothe2, …) load. It is a security trade-off.
-    - DW-281: the machine runs in **Low Power Mode**, and TEST-008 measured 10.7× there. Re-run `scripts/ci.sh perf` with it off.
+    - DW-281: the machine runs in **Low Power Mode**, and TEST-008 measured 10.7× there (11.4× after T-092). Re-run `scripts/ci.sh perf` with it off.
+  - **New in phase 11:**
+    - T-093 changes MIDI takes: with several armed MIDI tracks, a track whose filter passed no note gets no take (before, every armed track got every note). With default filters nothing changes.
+    - DW-288: the > 1.5 s "Enable Plugins" delay is on the app side; a manual timing in the running app would locate it.
 
 ## Environment note: CoreAudio
 - On 2026-10-28 CoreAudio delivered no IO cycles for a while (environmental). Since then the CoreAudio device tests have passed normally (phases 1 and 2).
@@ -192,11 +200,19 @@ You are AUTOBUILD phase lead 11. Read CLAUDE.md, then `.claude/skills/autobuild/
     3. Delete the branch.
   - Answer a worker's "open points" from a pause REPORT mid-run. T-065's scanner-signing question raised the usable plugins from 29 to 107.
 
+- **Phase 11 additions:**
+  - `new_session` once failed with "<folder> isn't in a git repository" right after another worker's setup started. Retrying after ~40 s worked (likely the same transient lock as the phase-9 config lock).
+  - Budget: four workers took the 5-hour window from 3% to 85% in ~55 min. The pause was ~2.2 h. After the reset, finishing three workers and three trial merges took it 0% → 40%. The week went from 46% to ~63%.
+  - Merging a finished worker during the pause worked again: T-096 was trial-merged and merged while the others were paused.
+  - When two branches that share add-only files (FakeEngine `Call` cases, 08/13 contract deltas) are already merged, ask the remaining worker to `git merge main` **before** its final test runs (T-094). Then its tests cover the merged result, and the lead's trial merge is conflict-free.
+  - The DW follow-up tasks were well sized: each worker took 1–2 h including the pause, and none needed a follow-up round.
+  - A worker measuring perf under load alternated before/after runs and waited for the load average to drop. That gave usable TEST-008 numbers even with other workers running.
+
 ## Your first job
 1. Run `usage.sh` and check the skill's *Stop the run* conditions (WEEK_STOP = 90 for this run).
-2. `list_sessions`: it should show no phase-10 workers.
+2. `list_sessions`: it should show no phase-11 workers.
 3. Pick the wave (see *Suggested next wave*), log the pre-decisions in DECISIONS.md, mark the tasks `wip(...)` and commit.
 4. Start the workers **one at a time**:
    - Use `.git/autobuild/common.txt`, and write each briefing to `.git/autobuild/brief-T-XXX.txt`. Generate them with Python using a template file and `.replace()`, not an f-string (spec text has braces).
-   - Edit `watch5.sh`'s glob for your tasks; it currently watches t-0{65,81,83,91}.
-5. Review, trial merge, run the timed tests, merge and close each worker. Then hand over, push and write `.git/autobuild/phase-11.done`.
+   - Edit `watch5.sh`'s glob for your tasks; it currently watches t-09{2,3,4,6}.
+5. Review, trial merge, run the timed tests, merge and close each worker. Then hand over, push and write `.git/autobuild/phase-12.done`.
