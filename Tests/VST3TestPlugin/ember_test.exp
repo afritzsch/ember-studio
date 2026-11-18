@@ -18,3 +18,4 @@ _ember_test_probe_stats
 _ember_test_probe_set_latency
 _ember_test_processor_live
 _ember_test_probe_find_by_gain
+_ember_test_probe_process_mode

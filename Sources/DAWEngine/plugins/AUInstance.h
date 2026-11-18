@@ -102,6 +102,15 @@ public:
     Result<void> prepare(double sampleRate, uint32_t maxBlock, bool offline);
     bool isPrepared() const { return prepared_.load(std::memory_order_acquire); }
     bool preparedOffline() const;
+    // DW-301 (T-103), non-RT, only while nothing renders the instance (an export from a realtime
+    // engine, device stopped): sets renderingOffline (kAudioUnitProperty_OfflineRender for a V2
+    // unit) to `on` for an export, and back with `false`. The property is set before render
+    // resources are allocated, so this deallocates and reallocates them (same formats, rate and
+    // block size) under the DW-214 lifecycle lock. An instance prepared offline is left alone.
+    // Best effort: a unit that refuses the mode keeps rendering in its old one (logged). Returns
+    // whether the unit now reports `on`. preparedOffline() keeps the prepare mode.
+    bool setExportOffline(bool on);
+    bool renderingOffline() const;  // the unit's current renderingOffline (tests)
     double preparedRate() const { return rate_; }
     uint32_t preparedMaxBlock() const { return maxBlock_; }
     uint32_t inputChannels() const { return inChannels_; }

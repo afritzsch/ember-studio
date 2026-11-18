@@ -14,6 +14,9 @@ extension VST3PluginTests {
     @Test("DW-211/DW-242: offline engines prepare kOffline / renderingOffline; every export resets each hosted plugin once")
     func t097OfflineModeAndExportReset() { expectPasses(daw.testing.pluginOfflineModeAndExportReset(false)) }
 
+    @Test("DW-301: an export from a realtime engine renders VST3 plugins kOffline, then kRealtime again (done, failed, cancelled)")
+    func t103ExportRendersOffline() { expectPasses(daw.testing.pluginExportRendersOffline(false)) }
+
     @Test("DW-233/AUTO-003: a VST3 parameter jumps at a loop wrap (block value, hold, after-wrap point); 0 RT violations")
     func t097WrapJump() { expectPasses(daw.testing.pluginWrapJump(false)) }
 
@@ -30,6 +33,9 @@ extension VST3PluginTests {
 extension AUPluginTests {
     @Test("DW-211: an offline builder prepares an AU with renderingOffline, a realtime one without")
     func t097OfflineMode() { expectPasses(daw.testing.pluginOfflineModeAndExportReset(true)) }
+
+    @Test("DW-301: the export hook sets renderingOffline on a realtime engine's AUs (fake AU, AUDelay) and clears it again")
+    func t103ExportRendersOffline() { expectPasses(daw.testing.pluginExportRendersOffline(true)) }
 
     @Test("DW-242/DW-063: an AU reset clears its tail (fake AU, both paths; AUDelay's pending echo)")
     func t097ResetClearsTail() { expectPasses(daw.testing.auResetClearsTail()) }

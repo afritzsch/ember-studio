@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstring>
 #include <cstdlib>
 #include <filesystem>
 #include <limits>
@@ -67,10 +68,12 @@ std::string emberIdentifier(const char* uid) {
     return (repoRoot() / ".build/test-plugins/EmberTest.vst3").string() + "#" + uid;
 }
 
-// EmberTest's exported knobs (EmberTestPlugin.cpp).
+// EmberTest's exported knobs (EmberTestPlugin.cpp). DW-302 (T-103): latency and restart requests
+// go through the per-instance probes (ember_test_probe_*), never the process-wide knobs, which
+// would reach the instances other suites run at the same time.
 struct EmberAPI {
-    void (*setLatency)(uint32_t) = nullptr;
-    void (*requestRestartFromProcess)(uint32_t) = nullptr;
+    void (*setLatency)(void*, uint32_t, int32_t) = nullptr;  // ember_test_probe_set_latency
+    void* (*findByGain)(float) = nullptr;                    // ember_test_probe_find_by_gain
     void (*lastContext)(double*, double*, double*, int64_t*, int32_t*, int32_t*, int32_t*, uint32_t*) = nullptr;
     void (*noteCounts)(int64_t*, int64_t*) = nullptr;
     void (*controllerStats)(int32_t*, double*, float*) = nullptr;
@@ -87,9 +90,8 @@ const EmberAPI& ember() {
         // The same image the module loads: dyld keeps one copy per path.
         void* image = dlopen(path.c_str(), RTLD_NOW);
         if (!image) return a;
-        a.setLatency = reinterpret_cast<decltype(a.setLatency)>(dlsym(image, "ember_test_set_latency"));
-        a.requestRestartFromProcess =
-            reinterpret_cast<decltype(a.requestRestartFromProcess)>(dlsym(image, "ember_test_request_restart_from_process"));
+        a.setLatency = reinterpret_cast<decltype(a.setLatency)>(dlsym(image, "ember_test_probe_set_latency"));
+        a.findByGain = reinterpret_cast<decltype(a.findByGain)>(dlsym(image, "ember_test_probe_find_by_gain"));
         a.lastContext = reinterpret_cast<decltype(a.lastContext)>(dlsym(image, "ember_test_last_context"));
         a.noteCounts = reinterpret_cast<decltype(a.noteCounts)>(dlsym(image, "ember_test_note_counts"));
         a.controllerStats = reinterpret_cast<decltype(a.controllerStats)>(dlsym(image, "ember_test_controller_stats"));
@@ -103,7 +105,7 @@ const EmberAPI& ember() {
 
 bool emberReady() {
     const EmberAPI& a = ember();
-    return a.setLatency && a.requestRestartFromProcess && a.lastContext && a.noteCounts && a.controllerStats &&
+    return a.setLatency && a.findByGain && a.lastContext && a.noteCounts && a.controllerStats &&
            a.setControllerValue && a.liveProcessors && a.setEmitNaN;
 }
 
@@ -119,6 +121,21 @@ bool eventually(F done, std::chrono::milliseconds timeout = 5000ms) {
 
 std::string config(const std::string& identifier, const std::vector<uint8_t>& state = {}) {
     return VST3PluginConfig::makeJSON(identifier, state);
+}
+
+// An EmberTest state container (VST3Instance's "EVS3" blob) whose component state is gain, mix.
+std::vector<uint8_t> emberState(float gain, float mix) {
+    std::vector<uint8_t> out;
+    auto u32 = [&](uint32_t v) { for (int i = 0; i < 4; ++i) out.push_back(static_cast<uint8_t>(v >> (8 * i))); };
+    auto u64 = [&](uint64_t v) { for (int i = 0; i < 8; ++i) out.push_back(static_cast<uint8_t>(v >> (8 * i))); };
+    auto f32 = [&](float v) { uint32_t b; std::memcpy(&b, &v, 4); u32(b); };
+    u32(0x33535645);  // "EVS3"
+    u32(1);
+    u64(8);
+    f32(gain);
+    f32(mix);
+    u64(0);
+    return out;
 }
 
 std::unique_ptr<Rig> makeRig(const std::shared_ptr<VST3PluginHost>& host) {
@@ -431,7 +448,6 @@ CheckResult vst3LatencyChange() {
     CheckResult checks;
     DAW_CHECK(emberReady());
     if (!emberReady()) return checks;
-    ember().setLatency(0);
     TempDir dir;
     FacadeRef f;
     DAW_CHECK(f.facade != nullptr);
@@ -449,7 +465,10 @@ CheckResult vst3LatencyChange() {
     g.addNode(3, NodeKind::bus, 0, 0, 0, "");
     g.addNode(10, NodeKind::audioClipPlayer, 0, 0, 0, "");
     g.addNode(11, NodeKind::audioClipPlayer, 0, 0, 0, "");
-    g.addNode(20, NodeKind::vst3Plugin, 0, 0, 0, config(emberIdentifier(kEffectUID)));
+    // DW-302 (T-103): a unique gain in its state finds this instance's controller for the probes;
+    // the plugin path's impulse comes out at that gain.
+    constexpr float kTag = 1.0f + 1.0f / 1024.0f;
+    g.addNode(20, NodeKind::vst3Plugin, 0, 0, 0, config(emberIdentifier(kEffectUID), emberState(kTag, 0)));
     g.addEdge(1, 10, 3, EdgeKind::audio, 0);
     g.addEdge(2, 11, 20, EdgeKind::audio, 0);
     g.addEdge(3, 20, 3, EdgeKind::audio, 0);
@@ -460,10 +479,13 @@ CheckResult vst3LatencyChange() {
     g.setTimeSignature(0, 4, 4);
     g.setMaster(1);
     DAW_CHECK(published(*f.facade, f->applyGraph(g.description())));
+    void* controller = ember().findByGain(kTag);
+    DAW_CHECK(controller != nullptr);
+    if (!controller) return checks;
 
     auto check = [&](uint32_t latency, const char* name) {
         const auto out = exportLeft(*f.facade, dir.path() / name, 960);
-        bool ok = out.size() == 24000 && std::fabs(out[0] - 2.0f) < 1e-6f;
+        bool ok = out.size() == 24000 && std::fabs(out[0] - (1.0f + kTag)) < 1e-6f;
         for (size_t i = 1; ok && i < out.size(); ++i) ok = std::fabs(out[i]) < 1e-6f;
         return ok && f->telemetry().graphLatency == latency && nodeLatency(*f.facade, 20) == latency;
     };
@@ -471,19 +493,19 @@ CheckResult vst3LatencyChange() {
     const uint64_t before = f->graphStatus().publishedVersion;
 
     // restartComponent from a plain thread.
-    ember().setLatency(480);
+    ember().setLatency(controller, 480, 0);
     DAW_CHECK(eventually([&] { return f->pluginInfoJSON(20).find("\"latencySamples\":480") != std::string::npos; }));
     DAW_CHECK(eventually([&] { return check(480, "b.wav"); }, 10000ms));
     DAW_CHECK(f->graphStatus().publishedVersion == before);
 
     // restartComponent on the audio thread: the handler only flips an atomic (an export rendering
     // in an RtScope would report a violation otherwise; exportLeft requires 0).
-    ember().requestRestartFromProcess(240);
+    ember().setLatency(controller, 240, 1);
     DAW_CHECK(exportLeft(*f.facade, dir.path() / "c.wav", 96).size() == 2400);  // runs process()
     DAW_CHECK(eventually([&] { return f->pluginInfoJSON(20).find("\"latencySamples\":240") != std::string::npos; }));
     DAW_CHECK(eventually([&] { return check(240, "d.wav"); }, 10000ms));
 
-    ember().setLatency(0);
+    ember().setLatency(controller, 0, 0);
     DAW_CHECK(eventually([&] { return f->pluginInfoJSON(20).find("\"latencySamples\":0") != std::string::npos; }));
     DAW_CHECK(eventually([&] { return check(0, "e.wav"); }, 10000ms));
     return checks;
@@ -671,7 +693,6 @@ CheckResult vst3NanGuard() {
     DAW_CHECK(RtTrap::install());
     DAW_CHECK(emberReady());
     if (!emberReady()) return checks;
-    ember().setLatency(0);
     const std::string identifier = emberIdentifier(kEffectUID);
 
     // The guard in the node: silence, nanBlocks, reported once per node instance.
@@ -751,7 +772,6 @@ CheckResult vst3HostBypass() {
     DAW_CHECK(emberReady());
     if (!emberReady()) return checks;
     // EmberTest really delays its output by the latency it reports; gain 0 silences it.
-    ember().setLatency(480);
     auto host = std::make_shared<VST3PluginHost>();
     auto rig = makeRig(host);
     rig->addAsset(makeAsset(7, 2, 96000, testSignal));
@@ -767,6 +787,11 @@ CheckResult vst3HostBypass() {
     d.edges.push_back(EdgeDesc{1, 10, 20, EdgeKind::audio, 0});
     d.edges.push_back(EdgeDesc{2, 20, 1, EdgeKind::audio, 0});
     d.audioClips.push_back(nodes::clip(10, 1, 0, 3840, 7));
+    // DW-302 (T-103): this instance's latency (its probe, not the process-wide knob): built once,
+    // set to 480, then built again with it.
+    DAW_CHECK(rig->publish(d));
+    ember().setLatency(host->instance(20) ? host->instance(20)->editController() : nullptr, 480, 0);
+    DAW_CHECK(eventually([&] { return host->instance(20) && host->instance(20)->latencySamples() == 480; }));
     auto graph = rig->build(d);
     DAW_CHECK(graph.ok() && graph.value()->latency() == 480);  // PDC keeps the plugin's latency
     if (!graph) return checks;
@@ -801,7 +826,6 @@ CheckResult vst3HostBypass() {
     DAW_CHECK(ember().liveProcessors() == live);
     DAW_CHECK(host->state(20).ok() && state.ok() && host->state(20).value() == state.value());
     DAW_CHECK(rig->violations() == 0);
-    ember().setLatency(0);
     return checks;
 }
 

@@ -191,6 +191,17 @@ void AUPluginHost::resetAll() {
     for (const auto& instance : live) instance->resetNow();
 }
 
+// DW-301 (T-103).
+void AUPluginHost::setOfflineAll(bool offline) {
+    std::vector<std::shared_ptr<AUInstance>> live;
+    {
+        std::lock_guard lock(mutex_);
+        for (auto& [id, slot] : slots_)
+            if (auto instance = slot.live.lock(); instance && instance->isPrepared()) live.push_back(std::move(instance));
+    }
+    for (const auto& instance : live) instance->setExportOffline(offline);
+}
+
 std::shared_ptr<AUInstance> AUPluginHost::instance(NodeID slotID) const {
     std::lock_guard lock(mutex_);
     auto it = slots_.find(slotID);

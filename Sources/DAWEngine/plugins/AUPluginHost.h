@@ -97,6 +97,10 @@ public:
     // render starts without the tails of what played before. Call it only while nothing renders
     // (the facade does, before an export's first block, with the device stopped).
     void resetAll();
+    // DW-301 (T-103), non-RT, same rules as resetAll: every slot's live, prepared AU renders
+    // offline for an export from a realtime engine (true), and online again after it (false).
+    // AUInstance::setExportOffline; instances prepared offline are untouched.
+    void setOfflineAll(bool offline);
 
 private:
     Result<std::unique_ptr<Node>> create(const NodeCreateInfo& info);
