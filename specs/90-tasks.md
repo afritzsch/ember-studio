@@ -160,6 +160,15 @@ DSP effects (T-070..073) depend only on the Node API and can be **pulled forward
 | T-104 | E | Engine test cleanups: RT round-trip inside an `RtScope` (DW-009), keep or replace the BUILD-005 symbol check (DW-002), shared `TestNodes.h` in TelemetryChecks/PdcChecks, drop DAWEngineTestSupport's no-op cxxInterop setting, metronome in `resetsOnLocate` | DW-009, DW-002, DW-138, DW-136, DW-161 | — | done |
 | T-105 | B | Control/tooling follow-ups 4: `ui.perform` method summary mentions `setText`; `dawctl --attach --launch` rebuilds the app after changes anywhere under `App/` | DW-303, DW-304 | T-100 | wip(t-105-control-followups) |
 
+### Follow-ups from autobuild phase 14 (open DW items; see docs/autobuild/DECISIONS.md "Phase 14 follow-up tasks")
+| Task | Lane | Title | Requirements | Depends on | Status |
+|---|---|---|---|---|---|
+| T-106 | E | Engine follow-ups 4: `GraphCompiler::Status` keeps every rejection between polls; a device lost during an export falls back to the default on restart; FakeDeviceDriver moves its nominal rate on `start()`; a rejected description during a rate change doesn't leave the old-rate graph running silently (event + keeps trying); input latency is known with input off; MidiClipPlayer resound scan hoisted | DW-081, DW-120, DW-121, DW-186, DW-229, DW-287 | T-104 | ready |
+| T-107 | M | Model follow-ups 4: never-saved projects autosave to Application Support (crash recovery); `ProjectStore` reports a take it couldn't import (event/callback); a touch pass resumes the lane on `graphApplied`; check gain-kind device slots (DW-178) | DW-145, DW-203, DW-256, DW-178 | — | ready |
+| T-108 | B | Control/tooling follow-ups 5: `command.apply {wait: true}` blocks until asset re-conversion finishes (CTL-031 progress); `device.set` keeps the running config (facade reports its current `DriverConfigPOD`); warning checks see warnings of up-to-date files; the real-device sine test tells "no IO cycles" from "no device" | DW-184, DW-194, DW-307, DW-137 | T-105 | ready |
+| T-109 | U | App follow-ups 4: toolbar/`ui.state` show `playPending`; recorded automation points appear live while recording; the lane editor shows plugin display strings; trimming with snap keeps at least one grid step; `ui.state` export adds `cancelling`/`lastCancelled` (+ 12's `export.cancel` id) | DW-245, DW-255, DW-290, DW-167, DW-282 | T-100 | ready |
+| T-110 | P | Plugin follow-ups 4: VST3 restart flags `kParamValuesChanged`/`kParamTitlesChanged`/`kIoChanged`/`kReloadComponent` handled (or explicitly logged), output-param overflow counted; the DW-214 teardown stress flake investigated | DW-209, DW-308 | T-103 | ready |
+
 ## Critical path
 `T-001 → T-002 → T-004 → T-012 → T-014 → T-016 → T-017 → T-018` unlocks agent self-testing. Prioritize it; everything else fans out from there.
 
