@@ -253,6 +253,62 @@ struct ToolbarTests {
         #expect(model.positionTime == "0:05.125")
     }
 
+    @Test("DW-180: the tempo and signature fields set bar 1's value, one undo entry per commit; invalid or unchanged input changes nothing")
+    func editableTempoAndSignature() throws {
+        let (model, engine) = try makeWindow()
+        #expect(model.tempoFieldText == "120")
+        #expect(model.commitTempo("128.5"))
+        #expect(model.tempoAtBar1 == 128.5 && model.tempo == 128.5 && model.tempoFieldText == "128.5")
+        #expect(model.store.undoLabel == "Set Tempo")
+        #expect(model.project.tempoMap.tempoEvents.count == 1 && model.project.tempoMap.tempoEvents[0].tick == Tick(0))
+        #expect(model.commitTempo(" 90,25 BPM "))
+        #expect(model.tempoAtBar1 == 90.25)
+        model.store.undo()
+        #expect(model.tempoAtBar1 == 128.5, "one commit, one undo entry")
+        let undoLabel = model.store.undoLabel
+        let applied = engine.appliedGraphs.count
+        for bad in ["", "fast", "0", "1001", "-5", "1e3", "nan", "12/8"] {
+            #expect(!model.commitTempo(bad), "\(bad)")
+        }
+        #expect(model.commitTempo("128.5"), "the same value: accepted, nothing to do")
+        #expect(model.tempoAtBar1 == 128.5 && model.store.undoLabel == undoLabel && engine.appliedGraphs.count == applied)
+
+        #expect(model.commitSignature("7/8"))
+        #expect(model.signature == "7/8" && model.store.undoLabel == "Set Time Signature")
+        #expect(model.commitSignature(" 3 / 4 "))
+        #expect(model.signature == "3/4")
+        for bad in ["", "3", "3/5", "0/4", "65/4", "3/128", "a/b", "3/4/4"] {
+            #expect(!model.commitSignature(bad), "\(bad)")
+        }
+        #expect(model.signature == "3/4")
+        model.store.undo()
+        #expect(model.signature == "7/8")
+
+        // With a later tempo event, the field edits bar 1's, which the playhead shows there.
+        try model.store.perform(SetTempoEvent(tick: Tick(3840 * 4), bpm: 90))
+        #expect(model.commitTempo("100"))
+        #expect(model.project.tempoMap.tempoEvents.map(\.bpm) == [100, 90])
+    }
+
+    @Test("DW-180: transport.tempo.up|down and the transport.signature.<n>.<d> menu (UI-052), each one undo entry; ui.state toolbar has bar 1's values")
+    func tempoSignatureControls() throws {
+        let (model, _) = try makeWindow()
+        try model.control("transport.tempo.up").action()
+        #expect(model.tempoAtBar1 == 121 && model.store.undoLabel == "Set Tempo")
+        try model.control("transport.tempo.down").action()
+        try model.control("transport.tempo.down").action()
+        #expect(model.tempoAtBar1 == 119)
+        #expect(try model.control("transport.signature.4.4").isOn == true)
+        try model.control("transport.signature.6.8").action()
+        #expect(model.signature == "6/8" && model.store.undoLabel == "Set Time Signature")
+        #expect(try model.control("transport.signature.6.8").isOn == true && model.control("transport.signature.4.4").isOn == false)
+        let json = UIStateDumper.dump(model, isMain: true)
+        #expect(json["toolbar"]?["tempoAtBar1"]?.doubleValue == 119)
+        #expect(json["toolbar"]?["signatureAtBar1"] == "6/8")
+        try model.store.perform(SetTempoEvent(tick: Tick(0), bpm: TempoMap.maxBPM))
+        #expect(try !model.control("transport.tempo.up").isEnabled)
+    }
+
     @Test("ui.state carries the toolbar readouts, the loop and the key bindings")
     func uiState() throws {
         let (model, _) = try makeWindow()

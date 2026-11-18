@@ -33,9 +33,9 @@ extension ProjectWindowModel {
     /// written to the project, no undo entry, not dirty. The banner's "Enable Plugins" still ends
     /// safe mode for all of them.
     func enablePluginInSafeMode(_ slot: NodeIDValue) {
-        guard store.isSafeMode, project.allDeviceSlots.contains(where: { $0.id == slot && $0.isPlugin }),
-              !store.safeModeEnabledSlots.contains(slot)
-        else { return }
+        var isPlugin = false
+        project.forEachDeviceSlot { device, _ in if device.id == slot, device.isPlugin { isPlugin = true } }
+        guard store.isSafeMode, isPlugin, !store.safeModeEnabledSlots.contains(slot) else { return }
         store.safeModeEnabledSlots.insert(slot)
         let name = deviceSlotName(slot) ?? "Plugin"
         toasts.post(.info, .info, title: "Plugin enabled", message: "\(name) is loading; the other plugins stay disabled.")
