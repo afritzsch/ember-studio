@@ -191,7 +191,7 @@ extension UIPerformParams: JSONSchemaDocumented {
 
 extension PluginsScanParams: JSONSchemaDocumented {
     public static var jsonSchemaDocs: [String: String] {
-        ["timeoutSeconds": "Each plugin's scan time limit in seconds (default 30; a plugin over it is blocked). Headless only"]
+        ["timeoutSeconds": "Each plugin's scan time limit in seconds (default 30; a plugin over it is blocked). Headless and attach mode (DW-299)"]
     }
 }
 

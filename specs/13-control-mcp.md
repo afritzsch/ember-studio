@@ -159,6 +159,15 @@ Additive: new methods and tools. Existing methods, params and results keep their
 
 Affected: T-098 only. Tests: `ToolingFollowupTests` (DAWControlTests), `CallOrderTests` and `LauncherTests` (DawmcpTests), `EngineTelemetryConversionTests` (GoldenTests).
 
+### Contract delta (T-100), accepted (autobuild, see docs/autobuild/DECISIONS.md "T-100 `ui.perform setText`", "T-100 app shapes")
+Additive. Existing methods, params and results keep their meaning.
+- **`ui.perform {accessibilityId, action: "setText", text}`** (DW-297): `UIPerformParams.text` (optional, a string) is used only by `action: "setText"`. It works on controls of kind `textField` (`ui.state` controls carry `kind: "textField"` and their `text`): the toolbar's `transport.tempo` and `transport.signature` (12 "Contract delta (T-100)"). The text is committed exactly as typing it and pressing Return (the field's own commit: `SetTempoEvent` / `SetTimeSignature` at bar 1, one undo entry, none when the value doesn't change). It returns `{accessibilityId, kind: "textField", action: "setText", text}` with the field's text afterwards ("128,5" → "128.5"). Errors: `setText` on a button or toggle, another action on a text field, or no `text` is `invalidParams`; text the field refuses (tempo "abc", signature "4/3") is `invalidArgument` and changes nothing.
+- **Attach-mode `plugins.*`** (DW-299): `plugins.scan {timeoutSeconds}` applies the limit to that scan (the result's `timeoutSeconds` is it; no `note`), through `PluginManagerModel.scan(timeout:)`; `plugins.unblock {id?}` forgets the blocked plugins without scanning (`PluginManagerModel.unblock(_:)`), as headless, instead of -32006 `notSupported`. The other T-098 differences (counts-only summaries) stay.
+- **`project.open` over the app's socket** (DW-155): once it returns, the window that shows the opened project posts File > Open's toasts: offline audio files, repairs, and "Unsaved changes found" with Recover when a newer autosave exists (12 UI-004). The result is unchanged. (The app's socket handler does this, `AppModel.handleControl`; in-process `Dispatcher.call` doesn't toast.)
+- **`ui.state`** (DW-295, DW-227): `windows[].audioPreferences` adds `deviceBufferFrames` (the running device's buffer, telemetry `bufferFrames`; null without a device; `bufferFrames` stays the one asked for) and `latency.inputSamples`/`inputMs` (telemetry `deviceInputLatency`). Mixer track strips add `monitoringLatency` (as `tracks[]`).
+
+Affected: T-100 only. Tests: `KeyBindingTests.setTextOnToolbarFields`, `PluginManagerTests.unblockAndScanLimit`, `AppModelTests.socketOpenToasts`, `AudioPreferencesTests.deviceBufferAndInputLatency`, `RecordingUITests.monitoringLatency` (EmberStudioShellTests); `UIPerformSetTextTests` (DAWControlTests).
+
 ### `dawctl`
 | ID | Requirement |
 |---|---|
