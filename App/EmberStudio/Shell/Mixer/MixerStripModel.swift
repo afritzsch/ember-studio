@@ -63,6 +63,11 @@ struct MixerStripModel: Identifiable, Equatable {
         var instrument: MixerInsert? = nil
         /// DW-250 (T-065): what the strip's "+" device picker offers.
         var insertChoices: [DeviceChoice] = []
+        /// T-093, DW-298: a MIDI track's input picker as shown (title, tooltip, menu entries), so a
+        /// change redraws the strip (the picker's controls are the header's, outside `values`).
+        var midiInputFace: [String] = []
+        /// DW-227: the monitor menu's latency line (audio tracks), for the same reason.
+        var monitoringLatency: String? = nil
     }
 
     let values: Values

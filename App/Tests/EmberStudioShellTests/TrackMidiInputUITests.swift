@@ -78,6 +78,11 @@ struct TrackMidiInputUITests {
         // The mixer strip shows the header's controls (DW-202).
         let strip = try #require(window.mixer.strips.first { $0.id == keys })
         #expect(strip.allControlIDs.contains("track.\(keys).midiInput.channel.3"))
+        // T-100: a new channel is a different strip (`==` decides whether the equatable strip view
+        // redraws; it used to compare equal, so the strip kept the old title).
+        try window.control("track.\(keys).midiInput.channel.5").action()
+        let after = try #require(window.mixer.strips.first { $0.id == keys })
+        #expect(after != strip && after.header?.midiInputMenu?.title == "Keystation · Ch 5")
     }
 
     @Test("DW-216: a source that isn't connected keeps the selection and shows as not connected")
