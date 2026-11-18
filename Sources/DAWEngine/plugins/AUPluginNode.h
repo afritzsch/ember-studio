@@ -32,8 +32,24 @@
 // in Telemetry's nanBlocks and raises the node's PluginHealth, which the host reports once as a
 // pluginMisbehaved event (plugins/PluginNanGuard.h).
 //
-// reset() (a locate) does nothing: effects keep their tails (TIME-008), and the MIDI source sends
-// the note-offs (DSP-003).
+// reset() (DW-242, T-097): only the DW-063 reset before an offline render reaches a plugin node
+// (live locates reset timeline nodes only, TIME-008; the MIDI source sends the note-offs, DSP-003).
+// An export resets its AUs on its own, non-RT thread before the first block (AUPluginHost::
+// resetAll), so reset() finds the reset done and has nothing left to do: the AU keeps its
+// parameters, so no slot is pushed again. Without that (a bare Engine reset) it asks the reset
+// worker and returns at once; the node renders as if absent until the worker is done
+// (PluginReset.h). It never waits on the render thread.
+//
+// Offline (DW-211, T-097): PrepareInfo::offline sets the AU's renderingOffline (best effort).
+//
+// Loop wraps (AUTO-003, DW-233, T-097): in a block where automation registered a value after a
+// wrap (ParamSlotTable::afterWrap), the block's event ramps (where the parameter can) over the
+// frames before the wrap only, and a second render-thread event sets the after-wrap value at the
+// wrap frame, so nothing ramps across the loop's discontinuity.
+//
+// Bypass (DW-225, T-097): in the block where the node's bypass slot (setBypassParam) turns on, its
+// last processed block (BypassNode), the AU gets a note-off for every note it holds and CC 123 (All
+// Notes Off) on each channel that had notes, at the block's last frame.
 
 #include <cstdint>
 #include <memory>
@@ -43,6 +59,7 @@
 #include "core/NodeIO.h"
 #include "core/ParamSlotTable.h"
 #include "core/Realtime.h"
+#include "daw/GraphDescription.h"
 #include "graph/LatencyReporter.h"
 #include "plugins/AUInstance.h"
 #include "plugins/PluginNanGuard.h"
@@ -63,7 +80,10 @@ public:
                  std::shared_ptr<PluginHealth> health = nullptr, Telemetry* telemetry = nullptr);
 
     void prepare(const PrepareInfo& info) override;
+    void reset() DAW_RT override;  // DW-242 (T-097)
     void process(ProcessContext& ctx, NodeIO& io) DAW_RT override;
+    // DW-225 (T-097): the node's host-bypass slot (NodeDesc::bypassParam; kNoBypassParam: none).
+    void setBypassParam(ParamID param) { bypassParam_ = param; }
     uint32_t latencySamples() const override;
 
     // Non-RT diagnostics and tests.
@@ -85,6 +105,7 @@ private:
     std::shared_ptr<PluginHealth> health_;  // PLUG-022
     Telemetry* telemetry_;
     std::atomic<uint64_t> nanBlocks_{0};
+    ParamID bypassParam_ = kNoBypassParam;  // DW-225
 
     bool active_ = false;
     // Audio thread only (sized in prepare).

@@ -46,6 +46,7 @@
 #include "core/Result.h"
 #include "graph/LatencyReporter.h"
 #include "plugins/PluginEditQueue.h"
+#include "plugins/PluginReset.h"
 #include "plugins/VST3PluginConfig.h"
 #include "time/TransportBlock.h"
 
@@ -95,7 +96,11 @@ public:
     // setupProcessing, setActive, setProcessing. A call at the rate and maxBlock it is already
     // prepared for does nothing.
     Result<void> prepare(double sampleRate, uint32_t maxBlock);
+    // DW-211 (T-097): `offline` sets the kOffline process mode (setupProcessing and ProcessData),
+    // else kRealtime. A different mode re-prepares like a different rate.
+    Result<void> prepare(double sampleRate, uint32_t maxBlock, bool offline);
     bool isPrepared() const { return prepared_.load(std::memory_order_acquire); }
+    bool preparedOffline() const;
     double preparedRate() const { return rate_; }
     uint32_t preparedMaxBlock() const { return maxBlock_; }
     uint32_t inputChannels() const { return inChannels_; }
@@ -123,9 +128,32 @@ public:
     // RT. Parameter `index` (params()) to `normalized` for the next render: one point at sample
     // offset 0 (D-13). Call at most once per parameter per block.
     void pushParam(uint32_t index, float normalized) DAW_RT;
-    // RT. A MIDI note on/off becomes a VST3 event at its frame offset (clamped to the block);
-    // other messages are ignored.
+    // RT, AUTO-003 / DW-233 (T-097): a loop wrap at `frame` (1 … numFrames − 1) in the next render:
+    // the parameter holds `before` up to frame − 1 and is `after` from `frame` on (two more points
+    // after pushParam's).
+    void pushParamJump(uint32_t index, float before, float after, uint32_t frame) DAW_RT;
+    // RT. A MIDI note on/off becomes a VST3 event at its frame offset (clamped to the block). DW-210
+    // (T-097): a control change, channel aftertouch or pitch bend becomes a point of the parameter
+    // the plugin maps it to (IMidiMapping, read at prepare) at its frame; one it maps nothing to is
+    // dropped, as are other messages.
     void addMidi(const MidiEvent& event, uint32_t numFrames) DAW_RT;
+    // RT, DW-225 (T-097): the notes the plugin was sent and not released get note-offs at `frame`
+    // of the next render (after its other events), then a mapped CC 123 (All Notes Off) on each
+    // channel that had notes; the host forgets them.
+    void releaseHeldNotes(uint32_t frame) DAW_RT;
+    bool holdsNotes() const DAW_RT;
+
+    // DW-242 (T-097): clears the plugin's processing state (tails, voices) with a
+    // setProcessing(false) / setActive(false) / setActive(true) / setProcessing(true) cycle;
+    // parameters and state stay (PluginReset.h).
+    //   resetNow: non-RT, synchronous, while nothing renders the instance (before an export).
+    //   consumeFreshReset: RT, true once after resetNow (the node's reset() has nothing to do).
+    //   requestReset: RT, never waits: the reset worker does it, resetBusy() until then.
+    void resetNow();
+    bool consumeFreshReset() DAW_RT;
+    void requestReset() DAW_RT;
+    bool resetBusy() const DAW_RT;
+    uint64_t resetsDone() const;  // tests
     // RT. Fills the ProcessContext the plugin sees during the next render.
     void setTransport(const TransportBlock& transport) DAW_RT;
     // RT. Renders `numFrames` (1 … preparedMaxBlock) into io.audioOut from io.audioIn and
@@ -150,6 +178,8 @@ public:
 private:
     VST3Instance(VST3PluginID plugin, std::shared_ptr<Impl> impl);
     void startLatencyTimer();
+    void clearState();  // DW-242: the reset itself (PluginReset's work)
+    bool addMappedController(uint8_t channel, uint32_t controller, double normalized, uint32_t frame) DAW_RT;
 
     VST3PluginID plugin_;
     std::string name_;
@@ -160,6 +190,7 @@ private:
     uint32_t maxBlock_ = 0;
     uint32_t inChannels_ = 0, outChannels_ = 0, sidechainChannels_ = 0;
     std::atomic<uint64_t> renderErrors_{0};
+    std::unique_ptr<PluginReset> reset_;  // DW-242; released first (see ~VST3Instance)
 };
 
 } // namespace daw

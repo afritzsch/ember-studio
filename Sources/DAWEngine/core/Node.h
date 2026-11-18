@@ -18,6 +18,10 @@ struct PrepareInfo {
     double sampleRate;
     uint32_t maxBlock;
     uint32_t numIn, numOut;
+    // DW-211 (T-097, additive, 02/08 "Contract delta (T-097)"): the node renders offline (an
+    // EngineMode::offline engine's graphs), so hosted plugins may use their offline process mode
+    // (VST3 kOffline, AU renderingOffline). Default false: realtime, as before.
+    bool offline = false;
 };
 
 struct ProcessContext;

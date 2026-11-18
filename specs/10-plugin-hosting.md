@@ -113,6 +113,35 @@ Additive; the facade side is in 08 "Contract delta (T-094)". Closes DW-213, DW-2
   - Labels are read once per instance on the first info read, not at instantiation (which runs on `daw.compile`). An AU parameter without a `unitName` gets its unit's symbol (Hz, dB, ms, %, …).
 - **AU edit observer follows the tree (DW-204, DW-276).** A V2 bridge can replace its parameter tree after the step that caused it has returned (seen after prepare under heavy load), and the automation observer stayed on the dropped tree, so an editor's gestures were lost. `AUInstance` now also follows `AUAudioUnit.parameterTree` by KVO. The observer state is shared and has its own lock, and teardown closes it, so a late callback is harmless.
 
+### Contract delta (T-097), accepted (autobuild, see docs/autobuild/DECISIONS.md "T-097 hosted-plugin decisions")
+Additive. Closes DW-242, DW-225, DW-233, DW-210, DW-211, DW-217 and DW-218. The engine and facade sides are in 02 and 08 "Contract delta (T-097)".
+- **Reset (DW-242, DW-063).** A hosted plugin's reset really clears its processing state and keeps its parameters and state. AU: `-reset`, which is `AudioUnitReset(kAudioUnitScope_Global, 0)` for a V2 unit behind the bridge. VST3: `setProcessing(false)`, `setActive(false)`, `setActive(true)`, `setProcessing(true)`. Neither runs on, or is waited for on, the render thread (`plugins/PluginReset`):
+  - **Export path.** The export thread calls `AUPluginHost` / `VST3PluginHost::resetAll()` before the first block (08), synchronously, while nothing renders. The node's `reset()` (the engine's DW-063 reset of that block) sees the reset is fresh and has nothing left to do. Both resets keep the plugin's parameters, so no slot is pushed again (re-pushing all of them in one block made AUSampler allocate inside Apple's V2 bridge, DW item in the T-097 report). The output is deterministic (IO-011).
+  - **Fallback.** A `reset()` with no host reset before it (an `Engine` driven directly) doesn't wait either. It flags the reset (an atomic plus one Mach semaphore signal: no lock, no allocation) for the `daw.pluginreset` worker thread and returns. Until the worker is done the node renders as if absent: an effect passes its input through, an instrument is silent. The plugin is never called while it is reset.
+  - Live locates still don't reach plugin nodes (TIME-008: only timeline nodes reset), so effects keep their tails while playing.
+- **Offline mode (DW-211).** `PrepareInfo::offline`: VST3 `setupProcessing` and every `ProcessData` use `kOffline` (else `kRealtime`). AU sets `renderingOffline` before `allocateRenderResources` (best effort; V2: `kAudioUnitProperty_OfflineRender`). A slot whose mode changes gets a new instance with the old one's state, like a rate change.
+- **Bypass releases held notes (DW-225, PLUG-018).** Each instance tracks the note-ons it was sent and not released (`plugins/HeldNotes.h`: a count per channel and key, fixed size, audio thread only). `BypassNode` stops processing a node while it is bypassed. So in the block where the node's bypass slot (`NodeDesc::bypassParam`) turns on, its last processed block, the plugin gets at the block's last frame, after the block's own events:
+  - one note-off per held note-on;
+  - then CC 123 (All Notes Off) on each channel that had notes: raw MIDI for AU, and for VST3 through the plugin's `IMidiMapping` if it maps CC 123 (VST3 has no raw CC input).
+
+  This applies to any plugin node that holds notes, instruments and MIDI-driven effects alike. Notes that end while it is bypassed never reach it, and enabling it again sends nothing.
+- **Loop wraps (DW-233, AUTO-003).** In a block where automation registered an after-wrap value (`ParamSlotTable::afterWrap`, read through `automation/WrapJump.h`):
+  - **VST3:** the parameter's queue holds the block's value at offset 0, the same value at the frame before the wrap, and the after-wrap value at the wrap frame. Points are interpolated linearly, so nothing ramps across the wrap.
+  - **AU:** the block's event ramps (where the parameter can ramp) over the frames before the wrap only, and a second render-thread event sets the after-wrap value at the wrap frame.
+  - Params without automation get nothing extra.
+- **VST3 MIDI controllers (DW-210).** At prepare the host asks the controller's `IMidiMapping` which parameter each controller drives: 16 channels × (CC 0…127, `kAfterTouch`, `kPitchBend`) on the event bus. In `NodeIO::midiIn`:
+  - a control change, channel aftertouch (two bytes) or pitch bend (14 bits, centre 0.5) becomes a point of that parameter at its frame (normalized value / 127, / 16383);
+  - the controller follows the mapped value (as with slot pushes, so an open editor shows it);
+  - unmapped controllers, program changes, poly pressure and system messages are dropped.
+
+  The input `IParameterChanges` is now one fixed-capacity queue per parameter: 3 points (slot, wrap hold, wrap jump), 131 for a MIDI-mapped one. Points are kept in offset order, and a full queue keeps its last point at the newest value. Slot pushes and mapped controllers on one parameter both reach it.
+- **Lifecycle audit (DW-217, DW-218).**
+  - **DW-217.** `AUInstance::instantiate` stays **outside** the lifecycle lock, for two reasons:
+    - A stress check runs `AudioComponentInstanceNew` of V2 AUs on one thread while another initializes, renders and uninitializes them. It finds no abort, no render error, and every bridge released. The existing `auConcurrentLifecycle` check overlaps them as well. So the CoreAudio abort (Initialize vs Uninitialize, DW-214) has no counterpart for instantiation.
+    - Holding the process-wide lock through a third-party constructor could deadlock. The main thread takes that lock when it drops the last reference to an AU (an editor that kept it), and a constructor may wait for the main thread. An out-of-process AUv3 would also hold the lock for its whole 10 s instantiation wait.
+  - **DW-218.** The VST3 latency timer's handler holds the instance's internals (`weak_ptr::lock`) while it runs. So a handler running during destruction could take the last reference: the plugin would then be terminated and its module unloaded on the timer's utility thread, after `~VST3Instance` had returned. Fixed: `~VST3Instance` cancels the timer and waits (at most 2 s) for its cancel handler, which runs after any running event handler. So the plugin is torn down on the destroying thread.
+  - `restartComponent` only sets an atomic in the ref-counted `ComponentHandler`, which the plugin keeps alive itself, so a late call after teardown is harmless.
+
 ## Status
 | ID | status | test |
 |---|---|---|

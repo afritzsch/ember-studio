@@ -14,7 +14,9 @@
 #include <unordered_map>
 
 #include "core/Realtime.h"
+#include "plugins/HeldNotes.h"
 #include "plugins/PluginEditQueue.h"
+#include "plugins/PluginReset.h"
 #include "time/TempoMap.h"
 
 #include "pluginterfaces/base/funknownimpl.h"
@@ -24,6 +26,7 @@
 #include "pluginterfaces/vst/ivsteditcontroller.h"
 #include "pluginterfaces/vst/ivstevents.h"
 #include "pluginterfaces/vst/ivstmessage.h"
+#include "pluginterfaces/vst/ivstmidicontrollers.h"
 #include "pluginterfaces/vst/ivstparameterchanges.h"
 #include "pluginterfaces/vst/ivstprocesscontext.h"
 #include "pluginterfaces/vst/vsttypes.h"
@@ -46,6 +49,13 @@ constexpr int32 kMaxBusChannels = 2;                // main and aux buses are mo
 constexpr uint32_t kStateMagic = 0x33535645;        // "EVS3" little-endian
 constexpr uint32_t kStateVersion = 1;
 constexpr uint64_t kLatencyPollNanos = 50 * NSEC_PER_MSEC;
+// T-097: points per input parameter queue in one block. A parameter gets its slot point at offset 0
+// and, at a loop wrap, a hold and a jump point (DW-233); one the plugin maps a MIDI controller to
+// (IMidiMapping, DW-210) gets room for that many MIDI changes as well (more in one block keep the
+// last value at the last frame).
+constexpr int32 kSlotPoints = 3;
+constexpr int32 kMidiPoints = 128;
+constexpr int32 kMidiChannels = 16;
 
 // Module loading and bundleEntry/bundleExit bookkeeping aren't thread-safe across modules of one
 // bundle (daw.compile and a caller's instantiatePlugin can race), so loading and unloading are
@@ -193,6 +203,26 @@ public:
         id_ = id;
         count_ = 0;
     }
+    // T-097: a point in offset order (after the points at the same offset). When the queue is full
+    // a point at or after the last one replaces it, so the block still ends at the newest value.
+    void insert(int32 offset, ParamValue value) DAW_RT {
+        if (count_ >= capacity_) {
+            if (count_ > 0 && offset >= offsets_[count_ - 1]) {
+                offsets_[count_ - 1] = offset;
+                points_[count_ - 1] = value;
+            }
+            return;
+        }
+        int32 at = count_;
+        while (at > 0 && offsets_[at - 1] > offset) {  // CONV-RT-04: bounded by the capacity
+            offsets_[at] = offsets_[at - 1];
+            points_[at] = points_[at - 1];
+            --at;
+        }
+        offsets_[at] = offset;
+        points_[at] = value;
+        ++count_;
+    }
 
     ParamID PLUGIN_API getParameterId() DAW_RT override { return id_; }
     int32 PLUGIN_API getPointCount() DAW_RT override { return count_; }
@@ -232,16 +262,6 @@ public:
     }
     void clear() DAW_RT { used_ = 0; }
 
-    // The host's side: a new queue with a single point at offset 0 (D-13).
-    bool pushSingle(ParamID id, ParamValue value) DAW_RT {
-        if (used_ >= capacity_) return false;
-        FixedParamQueue& queue = queues_[static_cast<std::size_t>(used_++)];
-        queue.reset(id);
-        int32 index = 0;
-        queue.addPoint(0, value, index);
-        return true;
-    }
-
     int32 PLUGIN_API getParameterCount() DAW_RT override { return used_; }
     IParamValueQueue* PLUGIN_API getParameterData(int32 index) DAW_RT override {
         if (index < 0 || index >= used_) return nullptr;
@@ -267,6 +287,73 @@ private:
     std::vector<int32> offsets_;
     int32 capacity_ = 0;
     int32 used_ = 0;
+};
+
+// T-097 (DW-210, DW-233): the input IParameterChanges. One queue per parameter index (params()),
+// each with its own capacity, so a block can carry several points per parameter (a wrap jump,
+// MIDI-mapped controller changes) in offset order; the queues used this block are listed in the
+// order they were first touched.
+class IndexedParameterChanges final : public NonRefCounted<IParameterChanges> {
+public:
+    void reserve(const std::vector<ParamID>& ids, const std::vector<int32>& capacities) {
+        const std::size_t n = ids.size();
+        queues_.resize(n);
+        std::size_t total = 0;
+        for (int32 c : capacities) total += static_cast<std::size_t>(std::max<int32>(1, c));
+        points_.assign(total, 0.0);
+        offsets_.assign(total, 0);
+        order_.assign(n, 0);
+        used_.assign(n, 0);
+        std::size_t at = 0;
+        for (std::size_t q = 0; q < n; ++q) {
+            const int32 capacity = std::max<int32>(1, capacities[q]);
+            queues_[q].assign(points_.data() + at, offsets_.data() + at, capacity);
+            queues_[q].reset(ids[q]);
+            at += static_cast<std::size_t>(capacity);
+        }
+        count_ = 0;
+    }
+    void clear() DAW_RT {
+        for (int32 i = 0; i < count_; ++i) used_[order_[static_cast<std::size_t>(i)]] = 0;
+        count_ = 0;
+    }
+    // A point for parameter `index` at `offset`; false for an unknown index.
+    bool add(uint32_t index, int32 offset, ParamValue value) DAW_RT {
+        if (index >= queues_.size()) return false;
+        FixedParamQueue& queue = queues_[index];
+        if (!used_[index]) {
+            used_[index] = 1;
+            order_[static_cast<std::size_t>(count_++)] = index;
+            queue.reset(queue.getParameterId());
+        }
+        queue.insert(offset, value);
+        return true;
+    }
+
+    int32 PLUGIN_API getParameterCount() DAW_RT override { return count_; }
+    IParamValueQueue* PLUGIN_API getParameterData(int32 index) DAW_RT override {
+        if (index < 0 || index >= count_) return nullptr;
+        return &queues_[order_[static_cast<std::size_t>(index)]];
+    }
+    // The host fills this list; a plugin adding to its input gets the queue only if it is in use.
+    IParamValueQueue* PLUGIN_API addParameterData(const ParamID& id, int32& index) DAW_RT override {
+        for (int32 i = 0; i < count_; ++i) {  // bounded by the parameter count
+            FixedParamQueue& queue = queues_[order_[static_cast<std::size_t>(i)]];
+            if (queue.getParameterId() == id) {
+                index = i;
+                return &queue;
+            }
+        }
+        return nullptr;
+    }
+
+private:
+    std::vector<FixedParamQueue> queues_;
+    std::vector<ParamValue> points_;
+    std::vector<int32> offsets_;
+    std::vector<uint32_t> order_;
+    std::vector<uint8_t> used_;
+    int32 count_ = 0;
 };
 
 // The plugin's process() isn't annotated nonblocking (it's foreign code); the RT trap checks it at
@@ -298,6 +385,9 @@ struct VST3Instance::Impl {
     std::mutex reporterMutex;
     LatencyReporter reporter;
     dispatch_source_t latencyTimer = nullptr;
+    // DW-218 (T-097): signalled by the timer's cancel handler, which runs once its event handler
+    // can no longer run (see ~VST3Instance).
+    dispatch_semaphore_t latencyTimerDone = nullptr;
 
     // Bus layout, fixed at instantiation. -1: none.
     int32 mainInput = -1, auxInput = -1, mainOutput = -1, eventInput = -1;
@@ -310,7 +400,16 @@ struct VST3Instance::Impl {
     std::vector<float> channelScratch;
     uint32_t maxBlock = 0;
     FixedEventList inEvents, outEvents;
-    FixedParameterChanges inParams, outParams;
+    IndexedParameterChanges inParams;  // T-097: several points per parameter
+    FixedParameterChanges outParams;
+    // DW-225 (T-097): the notes the plugin holds (audio thread; the reset worker clears them while
+    // the audio thread waits for it).
+    HeldNotes held;
+    // DW-210 (T-097): IMidiMapping, read at prepare: the parameter index each channel's controller
+    // (0…127 CC, 128 channel aftertouch, 129 pitch bend) drives, -1 for none.
+    std::vector<int32> midiMap;  // kMidiChannels × kCountCtrlNumber
+    bool hasMidiMap = false;
+    bool offline = false;  // DW-211 (T-097): prepared with kOffline
     Steinberg::Vst::ProcessContext context{};
     bool hadTransport = false;
     Tick lastEndTick = 0;
@@ -322,6 +421,7 @@ struct VST3Instance::Impl {
     std::vector<float> syncedToController;
 
     std::vector<ParamID> paramIDs;
+    std::unordered_map<ParamID, uint32_t> indexOfID;  // T-097: paramIDs inverted (IMidiMapping)
     // DW-213 (T-094): each stepped parameter's value names, read once on the first params(true)
     // (not at instantiation, which runs on daw.compile), under `mutex`.
     std::vector<std::vector<std::string>> labels;
@@ -332,6 +432,7 @@ struct VST3Instance::Impl {
             dispatch_source_cancel(latencyTimer);
             dispatch_release(latencyTimer);
         }
+        if (latencyTimerDone != nullptr) dispatch_release(latencyTimerDone);
         if (processor) {
             if (processing) {
                 processor->setProcessing(false);
@@ -433,7 +534,20 @@ struct VST3Instance::Impl {
 VST3Instance::VST3Instance(VST3PluginID plugin, std::shared_ptr<Impl> impl)
     : plugin_(std::move(plugin)), impl_(std::move(impl)) {}
 
-VST3Instance::~VST3Instance() = default;
+VST3Instance::~VST3Instance() {
+    reset_.reset();  // DW-242: unregistered (and any reset of it finished) before the plugin goes
+    // DW-218 (T-097): the latency timer's handler holds the Impl (weak_ptr::lock) while it runs, so
+    // a handler running now could drop the last reference after this instance has gone, and the
+    // plugin would be terminated and its module unloaded on the timer's utility thread, racing
+    // whatever this thread does next. Cancel the timer and wait for its cancel handler (it runs
+    // after any running event handler returns), so the plugin is torn down here, by impl_'s release
+    // below. Bounded: a handler only takes Impl::mutex for getLatencySamples.
+    if (impl_ && impl_->latencyTimer != nullptr) {
+        dispatch_source_cancel(impl_->latencyTimer);
+        if (impl_->latencyTimerDone != nullptr)
+            dispatch_semaphore_wait(impl_->latencyTimerDone, dispatch_time(DISPATCH_TIME_NOW, 2 * static_cast<int64_t>(NSEC_PER_SEC)));
+    }
+}
 
 namespace {
 
@@ -554,6 +668,7 @@ Result<std::shared_ptr<VST3Instance>> VST3Instance::instantiate(const VST3Plugin
             info.writable = (pi.flags & ParameterInfo::kIsReadOnly) == 0;
             info.steps = static_cast<uint32_t>(std::max<int32>(0, pi.stepCount));  // DW-213
             instance->params_.push_back(std::move(info));
+            impl->indexOfID.emplace(pi.id, static_cast<uint32_t>(impl->paramIDs.size()));
             impl->paramIDs.push_back(pi.id);
         }
     }
@@ -572,10 +687,40 @@ Result<std::shared_ptr<VST3Instance>> VST3Instance::instantiate(const VST3Plugin
     for (std::size_t i = 0; i < params; ++i)
         impl->pushed[i].store(std::numeric_limits<float>::quiet_NaN(), std::memory_order_relaxed);
 
+    // DW-242 (T-097): resets run on the reset worker; the instance outlives its registration.
+    VST3Instance* self = instance.get();
+    instance->reset_ = std::make_unique<PluginReset>([self] { self->clearState(); });
     return instance;
 }
 
+// DW-242 (T-097), on the thread that resets before an export, or on the reset worker (PluginReset.h): the plugin
+// clears its processing state the way the VST3 docs prescribe, a deactivate/activate cycle
+// (setProcessing(false), setActive(false), setActive(true), setProcessing(true)). Its parameters
+// and state are kept. The host's own per-render state goes too: held notes (the voices are gone)
+// and the transport history.
+void VST3Instance::clearState() {
+    Impl& impl = *impl_;
+    std::lock_guard lock(impl.mutex);
+    if (!impl.processing) return;
+    impl.processor->setProcessing(false);
+    impl.component->setActive(false);
+    impl.component->setActive(true);
+    impl.processor->setProcessing(true);
+    impl.held.clear();
+    impl.inEvents.clear();
+    impl.inParams.clear();
+    impl.hadTransport = false;
+    impl.lastEndTick = 0;
+}
+
+void VST3Instance::resetNow() { reset_->resetNow(); }
+bool VST3Instance::consumeFreshReset() DAW_RT { return reset_->consumeFresh(); }
+void VST3Instance::requestReset() DAW_RT { reset_->request(); }
+bool VST3Instance::resetBusy() const DAW_RT { return reset_->busy(); }
+uint64_t VST3Instance::resetsDone() const { return reset_->completed(); }
+
 bool VST3Instance::hasAudioInput() const { return impl_->mainInput >= 0; }
+bool VST3Instance::preparedOffline() const { return impl_->offline; }
 bool VST3Instance::acceptsMIDI() const { return impl_->eventInput >= 0; }
 bool VST3Instance::hasAuxInput() const { return impl_->auxInput >= 0; }
 uint32_t VST3Instance::latencySamples() const { return impl_->latency.load(std::memory_order_acquire); }
@@ -612,6 +757,16 @@ void VST3Instance::startLatencyTimer() {
     dispatch_source_set_event_handler(timer, ^{
         if (auto impl = weak.lock()) impl->refreshLatency();
     });
+    // DW-218 (T-097): ~VST3Instance waits for this.
+    // The handler keeps its own reference (blocks in C++ don't retain dispatch objects), so a
+    // destructor that stopped waiting leaves it a live semaphore.
+    dispatch_semaphore_t done = dispatch_semaphore_create(0);
+    impl_->latencyTimerDone = done;
+    dispatch_retain(done);
+    dispatch_source_set_cancel_handler(timer, ^{
+        dispatch_semaphore_signal(done);
+        dispatch_release(done);
+    });
     dispatch_resume(timer);
     impl_->latencyTimer = timer;
 }
@@ -635,10 +790,14 @@ bool tryArrangement(IAudioProcessor& processor, IComponent& component, int32 mai
 
 } // namespace
 
-Result<void> VST3Instance::prepare(double sampleRate, uint32_t maxBlock) {
+Result<void> VST3Instance::prepare(double sampleRate, uint32_t maxBlock) { return prepare(sampleRate, maxBlock, false); }
+
+Result<void> VST3Instance::prepare(double sampleRate, uint32_t maxBlock, bool offline) {
     Impl& impl = *impl_;
     std::lock_guard lock(impl.mutex);
-    if (prepared_.load(std::memory_order_acquire) && rate_ == sampleRate && maxBlock_ == maxBlock) return {};
+    if (prepared_.load(std::memory_order_acquire) && rate_ == sampleRate && maxBlock_ == maxBlock &&
+        impl.offline == offline)
+        return {};
     prepared_.store(false, std::memory_order_release);
     if (impl.processing) {
         impl.processor->setProcessing(false);
@@ -709,11 +868,37 @@ Result<void> VST3Instance::prepare(double sampleRate, uint32_t maxBlock) {
     // The block's lists, sized now so the audio thread never grows them.
     impl.inEvents.reserve(kMaxEventsPerBlock);
     impl.outEvents.reserve(kMaxEventsPerBlock);
-    impl.inParams.reserve(std::max<int32>(1, static_cast<int32>(params_.size())), 1);
     impl.outParams.reserve(kMaxOutputParamQueues, kMaxPointsPerOutputQueue);
 
+    // DW-210 (T-097): which parameter each MIDI controller drives, asked once per prepare (a
+    // plugin's mapping is static in practice; IMidiMapping has no change notification).
+    impl.midiMap.assign(static_cast<std::size_t>(kMidiChannels) * kCountCtrlNumber, -1);
+    impl.hasMidiMap = false;
+    std::vector<int32> capacities(params_.size(), kSlotPoints);
+    if (impl.eventInput >= 0 && impl.controller) {
+        FUnknownPtr<IMidiMapping> mapping(impl.controller);
+        if (mapping) {
+            for (int16 channel = 0; channel < kMidiChannels; ++channel) {
+                for (CtrlNumber cc = 0; cc < kCountCtrlNumber; ++cc) {
+                    ParamID id = 0;
+                    if (mapping->getMidiControllerAssignment(impl.eventInput, channel, cc, id) != kResultTrue) continue;
+                    const auto it = impl.indexOfID.find(id);
+                    if (it == impl.indexOfID.end()) continue;
+                    impl.midiMap[static_cast<std::size_t>(channel) * kCountCtrlNumber + static_cast<std::size_t>(cc)] =
+                        static_cast<int32>(it->second);
+                    capacities[it->second] = kSlotPoints + kMidiPoints;
+                    impl.hasMidiMap = true;
+                }
+            }
+        }
+    }
+    impl.inParams.reserve(impl.paramIDs, capacities);
+    impl.held.clear();
+
     ProcessSetup setup{};
-    setup.processMode = kRealtime;
+    // DW-211 (T-097): an offline engine's plugins render in kOffline mode (they may use their
+    // high-quality, non-realtime paths), every other kRealtime.
+    setup.processMode = offline ? kOffline : kRealtime;
     setup.symbolicSampleSize = kSample32;
     setup.maxSamplesPerBlock = static_cast<int32>(maxBlock);
     setup.sampleRate = sampleRate;
@@ -725,8 +910,9 @@ Result<void> VST3Instance::prepare(double sampleRate, uint32_t maxBlock) {
     processor.setProcessing(true);
     impl.processing = true;
 
+    impl.offline = offline;
     impl.data = ProcessData{};
-    impl.data.processMode = kRealtime;
+    impl.data.processMode = setup.processMode;
     impl.data.symbolicSampleSize = kSample32;
     impl.data.numInputs = numIn;
     impl.data.numOutputs = numOut;
@@ -913,20 +1099,63 @@ Result<void> VST3Instance::setState(const std::vector<uint8_t>& state) {
 void VST3Instance::pushParam(uint32_t index, float normalized) DAW_RT {
     Impl& impl = *impl_;
     if (index >= params_.size()) return;
-    impl.inParams.pushSingle(impl.paramIDs[index], normalized);
+    impl.inParams.add(index, 0, normalized);
     impl.pushed[index].store(normalized, std::memory_order_relaxed);
+}
+
+// AUTO-003 / DW-233 (T-097): the value holds until the frame before the wrap and jumps at it (a
+// queue's points are interpolated linearly, so the hold point keeps the ramp out of the wrap).
+void VST3Instance::pushParamJump(uint32_t index, float before, float after, uint32_t frame) DAW_RT {
+    Impl& impl = *impl_;
+    if (index >= params_.size() || frame == 0) return;
+    if (frame > 1) impl.inParams.add(index, static_cast<int32>(frame - 1), before);
+    impl.inParams.add(index, static_cast<int32>(frame), after);
+    impl.pushed[index].store(after, std::memory_order_relaxed);
+}
+
+// DW-210 (T-097): a MIDI controller (CC, channel aftertouch, pitch bend) the plugin maps to a
+// parameter (IMidiMapping) becomes a point of that parameter at the event's frame. False when the
+// plugin maps nothing to it.
+bool VST3Instance::addMappedController(uint8_t channel, uint32_t controller, double normalized, uint32_t frame) DAW_RT {
+    Impl& impl = *impl_;
+    if (!impl.hasMidiMap || channel >= kMidiChannels || controller >= static_cast<uint32_t>(kCountCtrlNumber)) return false;
+    const int32 index = impl.midiMap[std::size_t{channel} * kCountCtrlNumber + controller];
+    if (index < 0) return false;
+    const float value = static_cast<float>(std::clamp(normalized, 0.0, 1.0));
+    impl.inParams.add(static_cast<uint32_t>(index), static_cast<int32>(frame), value);
+    // The controller follows (syncController), as a host keeps it in step with mapped changes.
+    impl.pushed[static_cast<std::size_t>(index)].store(value, std::memory_order_relaxed);
+    return true;
 }
 
 void VST3Instance::addMidi(const MidiEvent& event, uint32_t numFrames) DAW_RT {
     Impl& impl = *impl_;
-    if (impl.eventInput < 0 || event.size < 3 || numFrames == 0) return;
+    if (impl.eventInput < 0 || event.size < 2 || numFrames == 0) return;
     const uint8_t status = event.data[0] & 0xF0;
+    const uint32_t frame = std::min(event.frameOffset, numFrames - 1);
+    // DW-210 (T-097): controllers, channel aftertouch and pitch bend through IMidiMapping.
+    switch (status) {
+    case 0xB0:  // control change
+        if (event.size >= 3) addMappedController(event.data[0] & 0x0F, event.data[1] & 0x7F, (event.data[2] & 0x7F) / 127.0, frame);
+        return;
+    case 0xD0:  // channel pressure (two bytes)
+        addMappedController(event.data[0] & 0x0F, kAfterTouch, (event.data[1] & 0x7F) / 127.0, frame);
+        return;
+    case 0xE0:  // pitch bend: 14 bits, LSB first; 0x2000 is the centre (0.5)
+        if (event.size >= 3)
+            addMappedController(event.data[0] & 0x0F, kPitchBend,
+                                ((event.data[1] & 0x7F) | ((event.data[2] & 0x7F) << 7)) / 16383.0, frame);
+        return;
+    default:
+        break;
+    }
+    if (event.size < 3) return;
     const auto channel = static_cast<int16>(event.data[0] & 0x0F);
     const auto pitch = static_cast<int16>(event.data[1] & 0x7F);
     const float velocity = (event.data[2] & 0x7F) / 127.0f;
     Event e{};
     e.busIndex = impl.eventInput;
-    e.sampleOffset = static_cast<int32>(std::min(event.frameOffset, numFrames - 1));
+    e.sampleOffset = static_cast<int32>(frame);
     e.flags = Event::kIsLive;
     if (status == 0x90 && (event.data[2] & 0x7F) > 0) {
         e.type = Event::kNoteOnEvent;
@@ -941,10 +1170,34 @@ void VST3Instance::addMidi(const MidiEvent& event, uint32_t numFrames) DAW_RT {
         e.noteOff.velocity = status == 0x80 ? velocity : 0.0f;
         e.noteOff.noteId = -1;
     } else {
-        return;  // PLUG-011 asks for notes; CC and pitch bend need IMidiMapping (discovered work)
+        return;  // other messages (program change, poly pressure, system) aren't passed on
     }
-    impl.inEvents.push(e);
+    if (impl.inEvents.push(e)) impl.held.track(event);  // DW-225
 }
+
+// DW-225 (T-097): note-offs for every note the plugin holds, then All Notes Off (CC 123) on each
+// channel that had notes, if the plugin maps CC 123 to a parameter (VST3 has no raw CC input), all
+// at `frame`, after the block's other events.
+void VST3Instance::releaseHeldNotes(uint32_t frame) DAW_RT {
+    Impl& impl = *impl_;
+    if (impl.eventInput < 0 || !impl.held.any()) return;
+    impl.held.release(
+        [&](uint8_t channel, uint8_t key) DAW_RT {
+            Event e{};
+            e.busIndex = impl.eventInput;
+            e.sampleOffset = static_cast<int32>(frame);
+            e.flags = Event::kIsLive;
+            e.type = Event::kNoteOffEvent;
+            e.noteOff.channel = channel;
+            e.noteOff.pitch = key;
+            e.noteOff.velocity = 0.0f;
+            e.noteOff.noteId = -1;
+            impl.inEvents.push(e);
+        },
+        [&](uint8_t channel) DAW_RT { addMappedController(channel, HeldNotes::kAllNotesOff, 0.0, frame); });
+}
+
+bool VST3Instance::holdsNotes() const DAW_RT { return impl_->held.any(); }
 
 void VST3Instance::setTransport(const TransportBlock& transport) DAW_RT {
     Impl& impl = *impl_;

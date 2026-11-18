@@ -23,7 +23,24 @@
 //
 // NaN guard (PLUG-022, T-064): as AUPluginNode's (plugins/PluginNanGuard.h).
 //
-// reset() (a locate) does nothing: effects keep their tails (TIME-008).
+// reset() (DW-242, T-097): only the DW-063 reset before an offline render reaches a plugin node
+// (live locates reset timeline nodes only, TIME-008). An export resets its plugins on its own,
+// non-RT thread before the first block (VST3PluginHost::resetAll), so reset() finds the reset done
+// and has nothing left to do: the plugin keeps its parameters, so no slot is pushed again. Without
+// that (a bare Engine reset) it asks the reset worker and returns at once; the node renders as if
+// absent until the worker is done (PluginReset.h). It never waits on the render thread.
+//
+// Offline (DW-211, T-097): PrepareInfo::offline prepares the plugin in kOffline process mode.
+//
+// Loop wraps (AUTO-003, DW-233, T-097): in a block where automation registered a value after a
+// wrap (ParamSlotTable::afterWrap), the param's queue gets the block's value at offset 0, the same
+// value at the frame before the wrap and the after-wrap value at the wrap frame, so the plugin
+// doesn't ramp across the loop's discontinuity.
+//
+// Bypass (DW-225, T-097): BypassNode stops processing the node while it is bypassed, so in the
+// block where its bypass slot (NodeDesc::bypassParam, setBypassParam) turns on, its last processed
+// block, the plugin gets note-offs for every note it holds and a mapped CC 123 on each channel
+// that had notes (VST3Instance::releaseHeldNotes) at the block's last frame. No note hangs.
 
 #include <cstdint>
 #include <memory>
@@ -33,6 +50,7 @@
 #include "core/NodeIO.h"
 #include "core/ParamSlotTable.h"
 #include "core/Realtime.h"
+#include "daw/GraphDescription.h"
 #include "graph/LatencyReporter.h"
 #include "plugins/PluginNanGuard.h"
 #include "plugins/VST3Instance.h"
@@ -51,7 +69,10 @@ public:
                    std::shared_ptr<PluginHealth> health = nullptr, Telemetry* telemetry = nullptr);
 
     void prepare(const PrepareInfo& info) override;
+    void reset() DAW_RT override;  // DW-242 (T-097)
     void process(ProcessContext& ctx, NodeIO& io) DAW_RT override;
+    // DW-225 (T-097): the node's host-bypass slot (NodeDesc::bypassParam; kNoBypassParam: none).
+    void setBypassParam(ParamID param) { bypassParam_ = param; }
     uint32_t latencySamples() const override;
 
     // Non-RT diagnostics and tests.
@@ -72,6 +93,7 @@ private:
     std::shared_ptr<PluginHealth> health_;  // PLUG-022
     Telemetry* telemetry_;
     std::atomic<uint64_t> nanBlocks_{0};
+    ParamID bypassParam_ = kNoBypassParam;  // DW-225
 
     bool active_ = false;
     // Audio thread only (sized in prepare).

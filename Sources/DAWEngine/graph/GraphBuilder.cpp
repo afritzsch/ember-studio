@@ -191,7 +191,7 @@ Result<std::unique_ptr<RenderGraph>> GraphBuilder::build(const GraphDescription&
             NodeCreateInfo{d, clips[i], notes[i], meter, LatencyReporter(relay_, d.id)});
         if (!created) return created.error();
         if (!created.value()) return makeError(ErrorCode::internal, nodeName(d.id) + ": factory returned null");
-        const PrepareInfo info{sampleRate_, maxBlock_, 2, kinds[i]->audioOutput ? 2u : 0u};
+        const PrepareInfo info{sampleRate_, maxBlock_, 2, kinds[i]->audioOutput ? 2u : 0u, offline_};  // DW-211
         auto put = pool.put(d.id, std::move(created).value(), info);
         if (!put) return put.error();
         nodes[i] = std::move(put).value();

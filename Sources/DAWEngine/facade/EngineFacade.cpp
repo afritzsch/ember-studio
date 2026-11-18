@@ -504,7 +504,8 @@ EngineFacade::Impl::Impl(EngineMode m, const DriverConfigPOD& cfg, FacadeOptions
         pushEvent(std::move(event));
     }
     compiler = std::make_shared<GraphCompiler>(
-        engine, registry ? std::move(registry).value() : NodeRegistry::withBuiltins(), sampleRate);
+        engine, registry ? std::move(registry).value() : NodeRegistry::withBuiltins(), sampleRate, kMaxBlock,
+        mode == EngineMode::offline);  // DW-211 (T-097): an offline engine's plugins render in offline mode
     exportThread = std::thread([this] { exportLoop(); });
     if (options.coreMidi) coreMidi = std::make_unique<CoreMidiInput>(midi);  // REC-010 (T-053)
     if (driver) {
@@ -731,7 +732,8 @@ Result<void> EngineFacade::Impl::replaceCompiler(double rate) {
     }
     sampleRate = rate;
     compiler = std::make_shared<GraphCompiler>(
-        engine, registry ? std::move(registry).value() : NodeRegistry::withBuiltins(), sampleRate);
+        engine, registry ? std::move(registry).value() : NodeRegistry::withBuiltins(), sampleRate, kMaxBlock,
+        mode == EngineMode::offline);  // DW-211 (T-097): an offline engine's plugins render in offline mode
     ticketBase = submitted;
 
     // IO-021 (5): every node re-prepared at the new rate — the new compiler creates them all.
@@ -1133,6 +1135,10 @@ void EngineFacade::Impl::runExport(JobID jobID, Tick from, Tick to, const Export
     if (render) {
         // DW-064: the driver doesn't touch the recording flag, and an export never records.
         (void)engine.transport().setRecording(false);
+        // DW-242 (T-097): hosted plugins are reset here, on daw.export before the first block with
+        // the device stopped, so the DW-063 reset of the render's first block finds them clean.
+        plugins->resetAll();
+        vst3Plugins->resetAll();
         OfflineDriver offline;
         auto progress = [this, jobID](const OfflineProgress& p) {
             std::lock_guard lock(mutex);

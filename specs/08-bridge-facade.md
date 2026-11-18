@@ -439,6 +439,13 @@ Additive and defaulted (zero); no existing field changes meaning. Closes DW-083,
 
 Swift (`EngineProtocol.swift`): `EngineTelemetry.clippedSamples/midiEventsDropped/bufferFrames`, filled by `EngineClient.telemetry()` (add-only; T-098 maps them in the shared conversion). Affected: T-099; T-098 (shared telemetry conversion); app audio panels may show `bufferFrames` (T-095 lane). Tests: `EngineCounterTests` (DAWEngineTests), `TelemetryFieldsTests` (DAWModelTests).
 
+### Contract delta (T-097), accepted (autobuild, see docs/autobuild/DECISIONS.md "T-097 hosted-plugin decisions")
+No API change; behavior only. The hosting side is in 10 "Contract delta (T-097)".
+- **Offline engines prepare in offline mode (DW-211).** An `EngineMode::offline` facade builds its graphs with `PrepareInfo::offline` set (02 "Contract delta (T-097)"). Its VST3 plugins run in `kOffline` and its AUs with `renderingOffline`. A realtime facade keeps `kRealtime`, its exports included (they render the live graph; see the T-097 report).
+- **Exports reset hosted plugins first (DW-242, DW-063).** Before an export's first block, the export thread (`daw.export`, non-RT, with the device stopped) resets every loaded AU and VST3 plugin: `AUPluginHost` / `VST3PluginHost::resetAll`. So an export doesn't start with the tail of what played before. The engine's own reset-all of the first block then finds them clean.
+
+Affected: T-097 only.
+
 ## Status
 | ID | status | test |
 |---|---|---|

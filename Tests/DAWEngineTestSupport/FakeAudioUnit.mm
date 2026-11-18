@@ -33,6 +33,7 @@ constexpr uint32_t kMaxFrames = 4096;
 // T-064 (PLUG-022): while set, every fake writes a NaN into the first frame of each block.
 std::atomic<bool> gEmitNaN{false};
 
+
 struct FakeDSP {
     std::vector<float> in[2], aux[2];
     std::vector<float> delay[2];
@@ -44,6 +45,12 @@ struct FakeDSP {
     std::atomic<float> sidechainMix{0.0f};
     std::atomic<uint64_t> noteOns{0};
     std::atomic<int64_t> lastNoteFrame{-1};
+    // T-097, per unit (other suites run fakes at the same time): note-offs (0x80, or 0x90 velocity
+    // 0) and CC 123 received (DW-225), -reset calls (DW-242; a reset clears the delay line, as a
+    // real effect's tail), renderingOffline when render resources were last allocated (DW-211; -1
+    // never).
+    std::atomic<uint64_t> noteOffs{0}, allNotesOff{0}, resets{0};
+    std::atomic<int> renderingOffline{-1};
 };
 
 } // namespace
@@ -51,6 +58,7 @@ struct FakeDSP {
 @interface DAWTestFakeAudioUnit : AUAudioUnit
 - (void)setTestLatency:(NSTimeInterval)seconds;
 - (uint64_t)testNoteOns;
+- (FakeDSP*)testDSP;  // T-097
 @end
 
 // Every live fake, so tests can reach the instance the engine made.
@@ -128,9 +136,18 @@ static NSHashTable<DAWTestFakeAudioUnit*>* liveFakes() {
 }
 
 - (uint64_t)testNoteOns { return _dsp->noteOns.load(); }
+- (FakeDSP*)testDSP { return _dsp; }
+
+// T-097 (DW-242): what AudioUnitReset does to a real effect: the tail goes.
+- (void)reset {
+    [super reset];
+    for (int c = 0; c < 2; ++c) std::fill(_dsp->delay[c].begin(), _dsp->delay[c].end(), 0.0f);
+    _dsp->resets.fetch_add(1);
+}
 
 - (BOOL)allocateRenderResourcesAndReturnError:(NSError**)outError {
     if (![super allocateRenderResourcesAndReturnError:outError]) return NO;
+    _dsp->renderingOffline.store(self.renderingOffline ? 1 : 0);  // T-097
     for (int c = 0; c < 2; ++c) {
         _dsp->in[c].assign(kMaxFrames, 0);
         _dsp->aux[c].assign(kMaxFrames, 0);
@@ -185,6 +202,13 @@ static NSHashTable<DAWTestFakeAudioUnit*>* liveFakes() {
                         dsp->gain.store(event->parameter.value, std::memory_order_relaxed);
                     if (event->parameter.parameterAddress == 1)
                         dsp->sidechainMix.store(event->parameter.value, std::memory_order_relaxed);
+                } else if (event->head.eventType == AURenderEventMIDI && event->MIDI.length == 3 &&
+                           ((event->MIDI.data[0] & 0xF0) == 0x80 ||
+                            ((event->MIDI.data[0] & 0xF0) == 0x90 && event->MIDI.data[2] == 0))) {
+                    dsp->noteOffs.fetch_add(1, std::memory_order_relaxed);  // T-097
+                } else if (event->head.eventType == AURenderEventMIDI && event->MIDI.length == 3 &&
+                           (event->MIDI.data[0] & 0xF0) == 0xB0 && event->MIDI.data[1] == 123) {
+                    dsp->allNotesOff.fetch_add(1, std::memory_order_relaxed);  // T-097
                 } else if (event->head.eventType == AURenderEventMIDI && event->MIDI.length == 3 &&
                            (event->MIDI.data[0] & 0xF0) == 0x90 && event->MIDI.data[2] > 0) {
                     impulse += event->MIDI.data[2] / 127.0f;
@@ -246,6 +270,34 @@ void setFakeAudioUnitLatency(double seconds) {
 }
 
 void setFakeAudioUnitEmitsNaN(bool on) { gEmitNaN.store(on); }
+
+// T-097: per unit (AUInstance::audioUnit()); zeros / -1 for anything that isn't a fake.
+namespace {
+FakeDSP* dspOf(void* unit) {
+    id object = (__bridge id)unit;
+    return [object isKindOfClass:[DAWTestFakeAudioUnit class]] ? [(DAWTestFakeAudioUnit*)object testDSP] : nullptr;
+}
+} // namespace
+
+FakeProbe fakeAudioUnitProbe(void* unit) {
+    FakeProbe p;
+    @autoreleasepool {
+        if (FakeDSP* dsp = dspOf(unit)) {
+            p.noteOffs = dsp->noteOffs.load();
+            p.allNotesOff = dsp->allNotesOff.load();
+            p.resets = dsp->resets.load();
+            p.renderingOffline = dsp->renderingOffline.load();
+        }
+    }
+    return p;
+}
+
+void setFakeAudioUnitLatency(void* unit, double seconds) {
+    @autoreleasepool {
+        id object = (__bridge id)unit;
+        if ([object isKindOfClass:[DAWTestFakeAudioUnit class]]) [(DAWTestFakeAudioUnit*)object setTestLatency:seconds];
+    }
+}
 
 uint64_t fakeAudioUnitNoteOns() {
     @autoreleasepool {

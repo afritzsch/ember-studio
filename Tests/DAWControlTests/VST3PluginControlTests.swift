@@ -83,7 +83,7 @@ struct VST3PluginControlTests {
         #expect(info["loaded"] == true)
         #expect(info["error"] == nil)
         #expect(info["instrument"] == true)
-        #expect(info["params"]?.arrayValue?.count == 3)
+        #expect(info["params"]?.arrayValue?.count == 5)  // T-097: Mod, All Notes Off
 
         _ = try await dispatcher.ok(.projectSave, ["path": "vst3.dawproject"])
         let bytes = try Data(contentsOf: dir.file("vst3.dawproject/Plugins/\(slot).state"))

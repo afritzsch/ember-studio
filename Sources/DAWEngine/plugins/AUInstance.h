@@ -48,6 +48,7 @@
 #include "graph/LatencyReporter.h"
 #include "plugins/AUIdentifier.h"
 #include "plugins/PluginEditQueue.h"
+#include "plugins/PluginReset.h"
 #include "time/TransportBlock.h"
 
 namespace daw {
@@ -95,7 +96,12 @@ public:
     // maximumFramesToRender and the host transport blocks, then allocates render resources. A
     // call at the rate and maxBlock it is already prepared for does nothing.
     Result<void> prepare(double sampleRate, uint32_t maxBlock);
+    // DW-211 (T-097): `offline` sets the unit's renderingOffline (kAudioUnitProperty_OfflineRender
+    // for a V2 unit) before render resources are allocated; best effort. A different mode
+    // re-prepares like a different rate.
+    Result<void> prepare(double sampleRate, uint32_t maxBlock, bool offline);
     bool isPrepared() const { return prepared_.load(std::memory_order_acquire); }
+    bool preparedOffline() const;
     double preparedRate() const { return rate_; }
     uint32_t preparedMaxBlock() const { return maxBlock_; }
     uint32_t inputChannels() const { return inChannels_; }
@@ -123,8 +129,26 @@ public:
     // RT. Parameter `index` (params()) to `value`, ramping over `rampFrames` from the start of the
     // next render; value must be in range (the node clamps).
     void scheduleParam(uint32_t index, float value, uint32_t rampFrames) DAW_RT;
+    // RT, AUTO-003 / DW-233 (T-097): the same, as an event at `frameOffset` of the next render (a
+    // loop wrap's jump).
+    void scheduleParam(uint32_t index, float value, uint32_t rampFrames, uint32_t frameOffset) DAW_RT;
     // RT. A MIDI event at its frame offset into the next render (clamped to the block).
     void scheduleMIDI(const MidiEvent& event, uint32_t numFrames) DAW_RT;
+    // RT, DW-225 (T-097): note-offs at `frame` of the next render for every note scheduled and not
+    // released, then CC 123 (All Notes Off) on each channel that had notes; the host forgets them.
+    void releaseHeldNotes(uint32_t frame) DAW_RT;
+    bool holdsNotes() const DAW_RT;
+
+    // DW-242 (T-097): clears the AU's rendering state (-reset, i.e. AudioUnitReset(global, 0));
+    // parameters and state stay (PluginReset.h). Same calls as VST3Instance's:
+    //   resetNow: non-RT, synchronous, while nothing renders the instance (before an export).
+    //   consumeFreshReset: RT, true once after resetNow (the node's reset() has nothing to do).
+    //   requestReset: RT, never waits: the reset worker does it, resetBusy() until then.
+    void resetNow();
+    bool consumeFreshReset() DAW_RT;
+    void requestReset() DAW_RT;
+    bool resetBusy() const DAW_RT;
+    uint64_t resetsDone() const;  // tests
     // RT. What the AU's musicalContextBlock / transportStateBlock report during the next render.
     void setTransport(const TransportBlock& transport) DAW_RT;
     // RT. Renders `numFrames` (1 … preparedMaxBlock) into io.audioOut from io.audioIn and
@@ -156,6 +180,7 @@ public:
 
 private:
     explicit AUInstance(const AUComponentID& component);
+    void clearState();  // DW-242: the reset itself (PluginReset's work)
 
     AUComponentID component_;
     Impl* impl_ = nullptr;
@@ -167,6 +192,7 @@ private:
     uint32_t maxBlock_ = 0;
     uint32_t inChannels_ = 0, outChannels_ = 0, sidechainChannels_ = 0;
     std::atomic<uint64_t> renderErrors_{0};
+    std::unique_ptr<PluginReset> reset_;  // DW-242
 };
 
 } // namespace daw

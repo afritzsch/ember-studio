@@ -126,9 +126,10 @@ Result<std::unique_ptr<Node>> AUPluginHost::create(const NodeCreateInfo& info) {
         slot.disabled = false;
         if (pending) slot.pending.reset();
     }
-    return std::unique_ptr<Node>(std::make_unique<AUPluginNode>(desc.id, instance, !instance->hasAudioInput(),
-                                                                desc.firstParam, desc.numParams, info.latency,
-                                                                weak_from_this(), health, telemetry));
+    auto node = std::make_unique<AUPluginNode>(desc.id, instance, !instance->hasAudioInput(), desc.firstParam,
+                                               desc.numParams, info.latency, weak_from_this(), health, telemetry);
+    node->setBypassParam(desc.bypassParam);  // DW-225 (T-097)
+    return std::unique_ptr<Node>(std::move(node));
 }
 
 Result<void> AUPluginHost::instantiate(NodeID slotID, std::string_view identifier) {
@@ -177,6 +178,17 @@ Result<void> AUPluginHost::setState(NodeID slotID, const std::vector<uint8_t>& s
         }
     }
     return instance->setFullState(state);
+}
+
+// DW-242 (T-097).
+void AUPluginHost::resetAll() {
+    std::vector<std::shared_ptr<AUInstance>> live;
+    {
+        std::lock_guard lock(mutex_);
+        for (auto& [id, slot] : slots_)
+            if (auto instance = slot.live.lock(); instance && instance->isPrepared()) live.push_back(std::move(instance));
+    }
+    for (const auto& instance : live) instance->resetNow();
 }
 
 std::shared_ptr<AUInstance> AUPluginHost::instance(NodeID slotID) const {

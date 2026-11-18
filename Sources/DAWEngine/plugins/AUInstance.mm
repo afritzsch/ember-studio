@@ -21,7 +21,9 @@
 #include <mutex>
 #include <unordered_map>
 
+#include "plugins/HeldNotes.h"
 #include "plugins/PluginEditQueue.h"
+#include "plugins/PluginReset.h"
 #include "time/TempoMap.h"
 
 // The host blocks below are nonblocking (the SDK's block types say so, and their bodies only copy
@@ -378,6 +380,8 @@ struct AUInstance::Impl {
     HostTransport host;
     bool hadTransport = false;
     Tick lastEndTick = 0;
+    HeldNotes held;                                // DW-225 (T-097)
+    bool offline = false;                          // DW-211 (T-097): prepared with renderingOffline
     std::vector<uint64_t> addresses;               // params_[i].address
     // DW-213 (T-094): each stepped parameter's value names, read once on the first params(true)
     // (not at instantiation, which runs on daw.compile), under `mutex`.
@@ -536,6 +540,7 @@ AUInstance::AUInstance(const AUComponentID& component)
       edits_(std::make_shared<EditState>()) {}
 
 AUInstance::~AUInstance() {
+    reset_.reset();  // DW-242: unregistered (and any reset of it finished) before the unit goes
     @autoreleasepool {
         delete impl_;
     }
@@ -616,6 +621,9 @@ Result<std::shared_ptr<AUInstance>> AUInstance::instantiate(const AUComponentID&
         impl.observer = [[DAWAULatencyObserver alloc] init];
         impl.observer->state = new std::shared_ptr<LatencyState>(instance->latency_);
         [unit addObserver:impl.observer forKeyPath:@"latency" options:NSKeyValueObservingOptionNew context:nullptr];
+        // DW-242 (T-097): resets run on the reset worker; unregistered before the unit goes.
+        AUInstance* self = instance.get();
+        instance->reset_ = std::make_unique<PluginReset>([self] { self->clearState(); });
         return instance;
     }
 }
@@ -683,11 +691,17 @@ uint32_t setBusFormat(AUAudioUnitBus* bus, double rate) {
 
 } // namespace
 
-Result<void> AUInstance::prepare(double sampleRate, uint32_t maxBlock) {
+Result<void> AUInstance::prepare(double sampleRate, uint32_t maxBlock) { return prepare(sampleRate, maxBlock, false); }
+
+bool AUInstance::preparedOffline() const { return impl_->offline; }
+
+Result<void> AUInstance::prepare(double sampleRate, uint32_t maxBlock, bool offline) {
     @autoreleasepool {
         Impl& impl = *impl_;
         std::lock_guard lock(impl.mutex);
-        if (prepared_.load(std::memory_order_acquire) && rate_ == sampleRate && maxBlock_ == maxBlock) return {};
+        if (prepared_.load(std::memory_order_acquire) && rate_ == sampleRate && maxBlock_ == maxBlock &&
+            impl.offline == offline)
+            return {};
         std::lock_guard lifecycle(gLifecycleMutex);  // DW-214: (de)initialize one AU at a time
         AUAudioUnit* unit = impl.unit;
         prepared_.store(false, std::memory_order_release);
@@ -712,6 +726,9 @@ Result<void> AUInstance::prepare(double sampleRate, uint32_t maxBlock) {
         }
         for (NSUInteger b = 1; b < unit.outputBusses.count; ++b) unit.outputBusses[b].enabled = NO;
         unit.maximumFramesToRender = maxBlock;
+        // DW-211 (T-097): best effort. A V2 unit gets kAudioUnitProperty_OfflineRender through the
+        // bridge; a unit that ignores it renders as in realtime.
+        unit.renderingOffline = offline;
 
         // Host transport (read by tempo-synced plugins during render; same thread as setTransport).
         Impl* self = &impl;
@@ -766,6 +783,8 @@ Result<void> AUInstance::prepare(double sampleRate, uint32_t maxBlock) {
 
         rate_ = sampleRate;
         maxBlock_ = maxBlock;
+        impl.offline = offline;
+        impl.held.clear();
         inChannels_ = in;
         outChannels_ = out;
         sidechainChannels_ = side;
@@ -853,10 +872,14 @@ Result<void> AUInstance::setFullState(const std::vector<uint8_t>& state) {
 // MARK: RT
 
 void AUInstance::scheduleParam(uint32_t index, float value, uint32_t rampFrames) DAW_RT {
+    scheduleParam(index, value, rampFrames, 0);
+}
+
+void AUInstance::scheduleParam(uint32_t index, float value, uint32_t rampFrames, uint32_t frameOffset) DAW_RT {
     Impl& impl = *impl_;
     if (impl.paramBlock == nil || index >= impl.addresses.size()) return;
     edits_->pushed(index, value);  // DW-204: its echo isn't a plugin edit
-    impl.paramBlock(AUEventSampleTimeImmediate, rampFrames, impl.addresses[index], value);
+    impl.paramBlock(AUEventSampleTimeImmediate + frameOffset, rampFrames, impl.addresses[index], value);
 }
 
 AUInstance::PushDecision AUInstance::pushDecision(uint32_t index, float value) DAW_RT {
@@ -869,7 +892,47 @@ void AUInstance::scheduleMIDI(const MidiEvent& event, uint32_t numFrames) DAW_RT
     // PLUG-010: frame offsets relative to the next render.
     const uint32_t offset = std::min(event.frameOffset, numFrames - 1);
     impl.midiBlock(AUEventSampleTimeImmediate + offset, 0, event.size, event.data);
+    impl.held.track(event);  // DW-225 (T-097)
 }
+
+// DW-225 (T-097): a note-off (0x80, velocity 0) per held note-on, then CC 123 All Notes Off on each
+// channel that had notes, all at `frame` of the next render, after the block's other events.
+void AUInstance::releaseHeldNotes(uint32_t frame) DAW_RT {
+    Impl& impl = *impl_;
+    if (impl.midiBlock == nil || !impl.held.any()) return;
+    const AUEventSampleTime at = AUEventSampleTimeImmediate + frame;
+    impl.held.release(
+        [&](uint8_t channel, uint8_t key) DAW_RT {
+            const uint8_t off[3] = {static_cast<uint8_t>(0x80 | channel), key, 0};
+            impl.midiBlock(at, 0, 3, off);
+        },
+        [&](uint8_t channel) DAW_RT {
+            const uint8_t cc[3] = {static_cast<uint8_t>(0xB0 | channel), HeldNotes::kAllNotesOff, 0};
+            impl.midiBlock(at, 0, 3, cc);
+        });
+}
+
+bool AUInstance::holdsNotes() const DAW_RT { return impl_->held.any(); }
+
+// DW-242 (T-097), on the thread that resets before an export, or on the reset worker (PluginReset.h). AUAudioUnit's
+// -reset is AudioUnitReset(unit, kAudioUnitScope_Global, 0) for a V2 unit behind the bridge: it
+// clears DSP state (delay lines, voices), keeping parameters and state.
+void AUInstance::clearState() {
+    @autoreleasepool {
+        std::lock_guard lock(impl_->mutex);
+        if (!prepared_.load(std::memory_order_acquire)) return;
+        [impl_->unit reset];
+        impl_->held.clear();
+        impl_->hadTransport = false;
+        impl_->lastEndTick = 0;
+    }
+}
+
+void AUInstance::resetNow() { reset_->resetNow(); }
+bool AUInstance::consumeFreshReset() DAW_RT { return reset_->consumeFresh(); }
+void AUInstance::requestReset() DAW_RT { reset_->request(); }
+bool AUInstance::resetBusy() const DAW_RT { return reset_->busy(); }
+uint64_t AUInstance::resetsDone() const { return reset_->completed(); }
 
 void AUInstance::setTransport(const TransportBlock& transport) DAW_RT {
     HostTransport& h = impl_->host;
