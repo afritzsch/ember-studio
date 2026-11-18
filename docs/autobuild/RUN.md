@@ -143,6 +143,8 @@ Unattended phases started by `/autobuild` (see `.claude/skills/autobuild/SKILL.m
 ### Phase 12 (2026-11-18)
 - Wave: T-095 app follow-ups 2 (U+M), T-097 hosted-plugin follow-ups (P), T-098 control/tooling follow-ups (B), T-099 engine/model correctness follow-ups (E+M). Pre-decisions in DECISIONS.md (phase 12 rows).
 - Start: week 62%, five-hour window 42% (reset ~4 h away). WEEK_STOP 90 for this run.
+- 5-hour window hit 88% at 1794972134, ~16 min after the last worker started (week 69%). All four workers paused until the reset at 1794985800 + 120 s. Lead spec housekeeping committed meanwhile (DW-034, DW-035, DW-152).
+- Resumed all four at 1794985964 (pause ~3.8 h; five 0%, week 69%). T-095 may add its per-slot safe-mode set to ProjectStore (add-only); T-097 told not to block the render thread in the reset path.
 
 ## Summary for the user
 

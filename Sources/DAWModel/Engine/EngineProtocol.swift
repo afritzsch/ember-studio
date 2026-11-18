@@ -358,6 +358,15 @@ public struct EngineTelemetry: Hashable, Sendable, Codable {
     public var monitoringLatency: UInt32 = 0
     /// T-054: `setMonitorInput`'s flag (device input runs for `on` monitoring without an arm).
     public var monitorInput: Bool = false
+    /// DW-083 (T-099): samples the master's MIX-009 safety limiter clipped, all masters since the
+    /// engine was created (offline renders included).
+    public var clippedSamples: UInt64 = 0
+    /// DW-170 (T-099): MIDI events the graph's PDC delay lines dropped (MIX-021 overflow policy).
+    /// Live MIDI input drops are `midiInputDrops`.
+    public var midiEventsDropped: UInt64 = 0
+    /// DW-192 (T-099): frames per IO cycle the running device uses; 0 while no device runs.
+    /// IO-005's input latency is `deviceInputLatency`.
+    public var bufferFrames: UInt32 = 0
 
     public init() {}
 }

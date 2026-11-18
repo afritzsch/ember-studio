@@ -321,6 +321,9 @@ public final class EngineClient: EngineProtocol {
         out.armedMidiTracks = t.armedMidiTracks
         out.monitoringLatency = t.monitoringLatency  // T-054
         out.monitorInput = t.monitorInput
+        out.clippedSamples = t.clippedSamples  // T-099 (DW-083)
+        out.midiEventsDropped = t.midiEventsDropped  // DW-170
+        out.bufferFrames = t.bufferFrames  // DW-192
         return out
     }
 

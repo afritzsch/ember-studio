@@ -142,6 +142,15 @@ public:
 
     // Events the overflow policy dropped so far (any thread).
     uint64_t dropped() const { return dropped_.load(std::memory_order_relaxed); }
+    // DW-170 (T-099), RT, the render thread only: the drops since the last call (all of them on
+    // the first), for Engine::render to sum into telemetry. A line carried over to the next graph
+    // keeps its count, so each drop is reported once whichever graph renders the line.
+    uint64_t takeNewDrops() DAW_RT {
+        const uint64_t total = dropped_.load(std::memory_order_relaxed);
+        const uint64_t fresh = total - reported_;
+        reported_ = total;
+        return fresh;
+    }
     // Diagnostics and tests, not while a block renders: events queued, and notes/pedals the
     // queue keeps room for.
     uint32_t queued() const { return count_; }
@@ -168,6 +177,7 @@ private:
     std::unique_ptr<uint16_t[]> held_;  // [channel × 128 + key]
     bool pedal_[16] = {};
     std::atomic<uint64_t> dropped_{0};
+    uint64_t reported_ = 0;  // DW-170: audio thread only (takeNewDrops)
 };
 
 // One MIDI input of a step: the events step `fromStep` (earlier in the order) wrote this block,
@@ -301,6 +311,10 @@ public:
     // monitored step `i` (in step order) had monitoring active in the block just processed.
     uint32_t numMonitors() const DAW_RT { return static_cast<uint32_t>(monitors_.size()); }
     bool monitorActive(uint32_t i) const DAW_RT { return i < monitors_.size() && monitorState_[i].active; }
+
+    // DW-170 (T-099): the events this graph's MIDI delay lines dropped since they were last
+    // asked (MidiDelayLine::takeNewDrops). For Engine::render, after the block (audio thread).
+    uint64_t takeMidiDrops() const DAW_RT;
 
     // The master bus for the block just processed; empty when the graph has none.
     AudioBufferView master(uint32_t numFrames) const DAW_RT;

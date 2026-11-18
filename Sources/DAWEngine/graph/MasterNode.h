@@ -8,6 +8,10 @@
 // rebuild; a master with numParams 0 never clips. When on, samples beyond ±1 are clipped to ±1,
 // NaNs become 0, and each one counts as an over in clippedSamples(), so a test can render with
 // the limiter on and assert that nothing clipped.
+//
+// DW-083 (T-099): the overs also count into the engine's telemetry (`clippedSamples`) when the
+// node is given one, so the count survives the node being replaced and covers every master since
+// the engine was created. registerBuiltinNodes gives it the facade's.
 
 #include <atomic>
 #include <cstdint>
@@ -16,13 +20,14 @@
 #include "core/NodeIO.h"
 #include "core/ParamSlotTable.h"
 #include "core/Realtime.h"
+#include "core/Telemetry.h"
 
 namespace daw {
 
 class MasterNode final : public Node {
 public:
     // `firstParam`/`numParams` as in the NodeDesc; param 0 of the range is the limiter switch.
-    MasterNode(ParamID firstParam, uint32_t numParams);
+    MasterNode(ParamID firstParam, uint32_t numParams, Telemetry* telemetry = nullptr);
 
     void prepare(const PrepareInfo&) override {}
     void process(ProcessContext& ctx, NodeIO& io) DAW_RT override;
@@ -33,6 +38,7 @@ public:
 private:
     ParamID limiterParam_;
     bool hasLimiter_;
+    Telemetry* telemetry_;  // DW-083; may be null
     std::atomic<uint64_t> clipped_{0};
 };
 

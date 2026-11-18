@@ -50,6 +50,7 @@ extension Project {
         let at = index ?? count
         guard (0...count).contains(at) else { throw .invalidArgument("insert index \(at) is outside 0…\(count)") }
         try slot.validate()
+        try slot.checkInsertInvariant()  // DW-251 (T-099): what validate() requires of an insert
         try checkZoneAssets(slot.zones)
         if let source = slot.sidechainSource?.source {
             guard isTrackOrBus(source) else { throw .notFound(kind: "track or bus", id: source) }
