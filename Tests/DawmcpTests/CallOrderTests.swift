@@ -112,9 +112,16 @@ struct CallOrderTests {
         #expect(!isError(fixture), "\(texts(fixture))")
         // pan_law makes 5 tracks; the 30 edits came after it, in order.
         #expect(texts(session.response(40)).first == "\"T29\"")
-        // Answers come in the order the calls were sent.
-        let order = session.responses.compactMap { $0["id"]?.int64Value }.filter { $0 > 0 }
-        #expect(order == [1] + (2..<32).map(Int64.init) + [40, 41])
+        // The edits ran in the order they were sent. (Responses may be written slightly out of order:
+        // a call's turn passes on when its handler returns, before the SDK writes the response.
+        // JSON-RPC matches them by id.)
+        session.send([RawSession.call(42, "daw_project_get", ["path": "/tracks"])])
+        let tracks = try JSONValue(parsing: Data(try #require(texts(session.response(42)).first).utf8))
+        let names = tracks.arrayValue?.compactMap { $0["name"]?.stringValue } ?? []
+        #expect(Array(names.suffix(30)) == (0..<30).map { "T\($0)" })
+        let answered: Set<Int64> = Set(session.responses.compactMap { $0["id"]?.int64Value })
+        let sent: Set<Int64> = Set(Array(1...31) + [40, 41])
+        #expect(answered.isSuperset(of: sent))
     }
 
     @Test("DW-163: the tagger numbers tools/call requests (also in batches and with _meta), never daw_render_cancel, and leaves other lines alone")
