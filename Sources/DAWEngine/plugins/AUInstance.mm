@@ -68,7 +68,10 @@ std::atomic<uint32_t> gPendingV2Releases{0};
 // daw.reclaim (an instance's destruction) can do at the same time. Every lifecycle step
 // (allocate/deallocate render resources, the final release) runs under this one process-wide
 // lock. Non-RT only; lock order: Impl::mutex, then this.
-std::mutex gLifecycleMutex;
+// Never destroyed (DW-261): a deferred V2 release (kReleaseQueue, up to kV2ReleaseGraceSeconds
+// later) may still run while the process exits; locking a destroyed static mutex aborts
+// ("mutex lock failed: Invalid argument", seen at the end of a TSan CI run).
+std::mutex& gLifecycleMutex = *new std::mutex;
 
 dispatch_queue_t releaseQueue() {
     static dispatch_queue_t queue =
