@@ -35,9 +35,10 @@
 // reset() (DW-242, T-097): only the DW-063 reset before an offline render reaches a plugin node
 // (live locates reset timeline nodes only, TIME-008; the MIDI source sends the note-offs, DSP-003).
 // An export resets its AUs on its own, non-RT thread before the first block (AUPluginHost::
-// resetAll), so reset() finds the reset done and only re-pushes every set param slot in the next
-// block. Without that (a bare Engine reset) it asks the reset worker and returns at once; the node
-// renders as if absent until the worker is done (PluginReset.h). It never waits on the render thread.
+// resetAll), so reset() finds the reset done and has nothing left to do: the AU keeps its
+// parameters, so no slot is pushed again. Without that (a bare Engine reset) it asks the reset
+// worker and returns at once; the node renders as if absent until the worker is done
+// (PluginReset.h). It never waits on the render thread.
 //
 // Offline (DW-211, T-097): PrepareInfo::offline sets the AU's renderingOffline (best effort).
 //

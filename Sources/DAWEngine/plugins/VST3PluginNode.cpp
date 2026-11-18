@@ -84,15 +84,15 @@ void VST3PluginNode::pushParams(const ProcessContext& ctx) DAW_RT {
     primed_ = true;
 }
 
-// DW-242 (T-097): see the header. The slots are pushed again afterwards (as on the first block),
-// so the plugin's parameters are the model's from the reset on.
+// DW-242 (T-097): see the header. A reset keeps the plugin's parameters, so nothing is pushed
+// again: re-pushing every set slot would put them all into the export's first block, and a V2 AU
+// behind Apple's bridge allocates when one render carries that many parameter events (AUSampler's
+// 11; see the T-097 report).
 void VST3PluginNode::reset() DAW_RT {
     if (!active_) return;
     // The export's own thread normally reset the plugin just before (VST3PluginHost::resetAll);
     // otherwise the worker does it and the node renders as if absent until it is done.
     if (!instance_->consumeFreshReset()) instance_->requestReset();
-    std::fill(lastPushed_.begin(), lastPushed_.end(), std::numeric_limits<float>::quiet_NaN());
-    primed_ = false;
 }
 
 void VST3PluginNode::process(ProcessContext& ctx, NodeIO& io) DAW_RT {

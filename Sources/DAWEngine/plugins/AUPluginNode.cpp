@@ -109,12 +109,13 @@ void AUPluginNode::pushParams(const ProcessContext& ctx) DAW_RT {
     primed_ = true;
 }
 
-// DW-242 (T-097): see the header. The slots are pushed again afterwards (as on the first block).
+// DW-242 (T-097): see the header. A reset keeps the plugin's parameters, so nothing is pushed
+// again: re-pushing every set slot would put them all into the export's first block, and a V2 AU
+// behind Apple's bridge allocates when one render carries that many parameter events (AUSampler's
+// 11; see the T-097 report).
 void AUPluginNode::reset() DAW_RT {
     if (!active_) return;
     if (!instance_->consumeFreshReset()) instance_->requestReset();
-    std::fill(lastPushed_.begin(), lastPushed_.end(), std::numeric_limits<float>::quiet_NaN());
-    primed_ = false;
 }
 
 void AUPluginNode::process(ProcessContext& ctx, NodeIO& io) DAW_RT {

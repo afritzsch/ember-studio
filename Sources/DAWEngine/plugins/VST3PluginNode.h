@@ -26,9 +26,9 @@
 // reset() (DW-242, T-097): only the DW-063 reset before an offline render reaches a plugin node
 // (live locates reset timeline nodes only, TIME-008). An export resets its plugins on its own,
 // non-RT thread before the first block (VST3PluginHost::resetAll), so reset() finds the reset done
-// and only re-pushes every set param slot in the next block. Without that (a bare Engine reset) it
-// asks the reset worker and returns at once; the node renders as if absent until the worker is done
-// (PluginReset.h). It never waits on the render thread.
+// and has nothing left to do: the plugin keeps its parameters, so no slot is pushed again. Without
+// that (a bare Engine reset) it asks the reset worker and returns at once; the node renders as if
+// absent until the worker is done (PluginReset.h). It never waits on the render thread.
 //
 // Offline (DW-211, T-097): PrepareInfo::offline prepares the plugin in kOffline process mode.
 //
