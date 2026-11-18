@@ -124,3 +124,19 @@ extension AutomationLane.Mode: JSONSchemaDescribing {
                               description: "read plays the lane; off ignores it; touch/latch/write record (T-075) and play like read")
     }
 }
+
+// T-093 (DW-216): a MIDI track's input source, "all" or a CoreMIDI unique ID in decimal (a string
+// the probe can't invent, so it is stated here).
+extension Track.MidiInput.Source: JSONSchemaDescribing {
+    public static var jsonSchema: JSONValue {
+        [
+            "anyOf": [
+                ["const": "all"],
+                ["type": "string", "pattern": "^-?[0-9]+$", "description": "a CoreMIDI unique ID in decimal, as midi.inputs reports it"],
+            ],
+            "description": "\"all\" (every source) or one source by its unique ID",
+        ]
+    }
+
+    public static var jsonSchemaExample: JSONValue? { "all" }
+}
