@@ -50,7 +50,7 @@ The engine is a set of **node instances** connected by an immutable **RenderGrap
 | ID | Requirement | Acceptance |
 |---|---|---|
 | ENG-040 | `Engine::render(RenderTarget&, uint32_t numFrames)` is the single RT entry point, called by the device driver or the offline driver (see 04). | — |
-| ENG-041 | Render order: load graph → advance transport (03) → for each node in topo order: gather inputs (sum + PDC delay), process → write master to target → publish telemetry → bump epoch. | Golden tests |
+| ENG-041 | Render order: load graph → advance transport (03) → for each node in topo order: gather inputs (sum + PDC delay), process → write master to target → publish telemetry → bump epoch. A block the transport splits into passes (a loop wrap, 03) runs the graph once per pass, with the automation of that pass (11). | Golden tests |
 | ENG-042 | Denormals are flushed to zero (FPCR FZ bit on arm64) at the start of every render. | Test with a decaying IIR |
 
 ### Telemetry
