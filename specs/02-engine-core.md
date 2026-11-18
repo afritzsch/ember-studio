@@ -59,6 +59,8 @@ The engine is a set of **node instances** connected by an immutable **RenderGrap
 | ENG-050 | `TelemetrySnapshot` (atomics, read without locks): DSP load % (render time / block duration, EMA), xrun count, rtViolations, current graph epoch, per-node latency, total output latency, per-meter peak/RMS. | Read via facade |
 | ENG-051 | Render time is measured with `mach_absolute_time` at block start and end. | — |
 
+*Telemetry counters (clarified in T-099; 08 "Contract delta (T-099)").* `TelemetrySnapshot` also counts `clippedSamples` (DW-083: the master limiter's overs, via `Telemetry::countClippedSamples` from `MasterNode::process`) and `midiEventsDropped` (DW-170: `MidiDelayLine` overflow drops, which `Engine::render` collects after every block that renders a graph via `RenderGraph::takeMidiDrops`). Both are relaxed atomics in the block fields, all time since the engine was created.
+
 ### Utilities
 | ID | Requirement |
 |---|---|
