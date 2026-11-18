@@ -628,8 +628,10 @@ public struct EngineJobStatus: Hashable, Sendable, Codable {
         /// No such job.
         case unknown
         case queued, running, succeeded, failed
+        /// DW-220 (T-096): `cancelJob` stopped it (a render's partial file is deleted).
+        case cancelled
 
-        public var isFinished: Bool { self == .succeeded || self == .failed }
+        public var isFinished: Bool { self == .succeeded || self == .failed || self == .cancelled }
     }
 
     public var job: JobID
@@ -777,6 +779,10 @@ public protocol EngineProtocol: AnyObject, Sendable {
 
     // Offline (IO-010..013)
     func renderOffline(from: Tick, to: Tick, spec: ExportSpec) -> JobID
+    /// DW-220 (T-096): cancels a queued or running `renderOffline` job; it ends as `.cancelled`
+    /// (poll for it) and its partial file is deleted. False for other jobs, unknown or finished
+    /// ones. See the extension at the end of this file (default: false).
+    func cancelJob(_ job: JobID) -> Bool
 
     // Device (04)
     func devices() -> [AudioDeviceInfo]
@@ -797,6 +803,13 @@ public protocol EngineProtocol: AnyObject, Sendable {
     /// Drains up to `max` queued events, oldest first.
     func pollEvents(max: Int) -> [EngineEvent]
     func paramInfoJSON(_ kind: NodeKind) -> String
+}
+
+// MARK: T-096 (DW-220)
+
+extension EngineProtocol {
+    /// Engines that can't cancel (test doubles) never do.
+    public func cancelJob(_ job: JobID) -> Bool { false }
 }
 
 // MARK: T-043 (UI-021)

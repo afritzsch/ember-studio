@@ -196,4 +196,41 @@ struct DawMetronomeToolTests {
         let bad = try await tools.failure("daw_transport_set_metronome", ["level": 5])
         #expect(bad["code"] == -32000 && bad["data"]?["dawError"] == "invalidArgument")
     }
+
+    @Test("CTL-021, T-096: daw_render_cancel, daw_engine_meters and daw_engine_preview_note are listed; daw_render_offline takes dither")
+    func t096Tools() throws {
+        let names = Set(DawTools.tools.map(\.name))
+        #expect(names.isSuperset(of: ["daw_render_cancel", "daw_engine_meters", "daw_engine_preview_note"]))
+        #expect(DawTools.methodsByTool["daw_render_cancel"] == .renderCancel)
+        #expect(DawTools.methodsByTool["daw_engine_meters"] == .engineMeters)
+        #expect(DawTools.methodsByTool["daw_engine_preview_note"] == .enginePreviewNote)
+        let render = try #require(DawTools.tools.first { $0.name == "daw_render_offline" })
+        #expect(JSONValue(mcp: render.inputSchema)["properties"]?["dither"]?["type"] == "boolean")
+        let cancel = try #require(DawTools.tools.first { $0.name == "daw_render_cancel" })
+        #expect(JSONValue(mcp: cancel.inputSchema)["properties"]?["id"] != nil)
+        let preview = try #require(DawTools.tools.first { $0.name == "daw_engine_preview_note" })
+        #expect(JSONValue(mcp: preview.inputSchema)["required"] == ["track", "pitch"])
+        #expect(DawTools.tools.first { $0.name == "daw_engine_meters" }?.annotations.readOnlyHint == true)
+    }
+
+    @Test("DW-220: daw_render_cancel, called while daw_render_offline runs (MCP tool calls run concurrently), stops it: isError cancelled, no file")
+    func renderCancelTool() async throws {
+        let dir = try TempDir()
+        let tools = DawTools(dispatcher: Dispatcher(configuration: .init(workingDirectory: dir.url)))
+        _ = try await tools.ok("daw_project_new", ["name": "t", "sampleRate": 48_000])
+        _ = try await tools.ok("daw_command_apply", ["command": ["type": "AddTrack", "name": "A", "kind": "audio"]])
+        let path = dir.file("long.wav")
+        let render = Task { @MainActor in
+            await tools.call("daw_render_offline", arguments: [
+                "from": 0, "to": .int(600 * 2 * 960), "path": .string(path.path), "tail": false, "sampleFormat": "int16",
+            ])
+        }
+        for _ in 0..<1000 where !FileManager.default.fileExists(atPath: path.path) { try await Task.sleep(for: .milliseconds(2)) }
+        #expect(try await tools.ok("daw_render_cancel")["cancelled"] == true)
+        let result = await render.value
+        #expect(result.isError == true)
+        let error = try result.json
+        #expect(error["code"] == -32005 && error["data"]?["dawError"] == "cancelled")
+        #expect(!FileManager.default.fileExists(atPath: path.path))
+    }
 }

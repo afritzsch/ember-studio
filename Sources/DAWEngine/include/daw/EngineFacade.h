@@ -116,6 +116,7 @@ enum class JobState : uint8_t {
     running,
     succeeded,
     failed,
+    cancelled,  // DW-220 (T-096): cancelJob() stopped it (renders: the partial file is deleted)
 };
 
 // loadAsset's result (IO-031): the asset in RAM, at the session rate.
@@ -702,6 +703,13 @@ public:
     // Renders [from, to) plus the tail of the latest applied graph on a job thread. The device
     // driver (if any) is stopped for the duration and recording is disarmed (DW-064).
     JobID renderOffline(Tick from, Tick to, const ExportSpecPOD& spec);
+    // DW-220 (T-096, Contract delta (T-096)): cancels a queued or running renderOffline job. A
+    // queued one ends as JobState::cancelled at once. A running one stops before its next block
+    // (OfflineDriver checks a flag between blocks): the transport and device come back as after any
+    // export, the partial file is closed and deleted, and the job ends as cancelled with the stats
+    // so far; poll for it (a render that finishes first stays succeeded). The jobFinished event
+    // carries no error. False (nothing changes) for other job kinds and unknown or finished jobs.
+    bool cancelJob(JobID job);
 
     // MARK: Device (04)
 

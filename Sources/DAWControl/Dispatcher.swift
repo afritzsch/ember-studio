@@ -99,6 +99,17 @@ public final class Dispatcher {
     private var progressHandler: ControlProgressHandler?
     /// DW-146: the folder of the `test.fixture` script running now; its input paths resolve there.
     private var fixtureDirectory: URL?
+    /// The JSON-RPC id of the request running now (nil for in-process calls and notifications).
+    private var currentRequestID: RPCID?
+    /// DW-220 (T-096): the `render.offline` waiting for its job now, for `render.cancel`.
+    private var runningRender: RunningRender?
+
+    private struct RunningRender {
+        let job: JobID
+        let engine: any EngineProtocol
+        let requestID: RPCID?
+        var cancelRequested = false
+    }
 
     /// With `store`, controls that project and the engine attached to it (attach mode).
     public init(configuration: Configuration = Configuration(), store: ProjectStore? = nil) {
@@ -133,9 +144,21 @@ public final class Dispatcher {
     /// Runs `request`; nil if it is a notification (no `id`). `progress` hears how a long job is
     /// going (CTL-031).
     public func handle(_ request: RPCRequest, progress: ControlProgressHandler? = nil) async -> RPCResponse? {
+        // DW-220 (T-096): render.cancel doesn't queue behind the render it cancels.
+        if request.method == ControlMethod.renderCancel.rawValue {
+            let response: RPCResponse
+            do {
+                response = RPCResponse(id: request.id, result: try renderCancel(decode(request.params)))
+            } catch {
+                response = RPCResponse(id: request.id, error: ControlError(error).rpcError)
+            }
+            return request.id == nil ? nil : response
+        }
         await acquire()
         defer { release() }
         progressHandler = progress
+        currentRequestID = request.id
+        defer { currentRequestID = nil }
         let response: RPCResponse
         do {
             response = RPCResponse(id: request.id, result: try await perform(request.method, request.params))
@@ -149,6 +172,14 @@ public final class Dispatcher {
     public func call(
         _ method: String, _ params: JSONValue? = nil, progress: ControlProgressHandler? = nil
     ) async throws(ControlError) -> JSONValue {
+        // DW-220 (T-096): render.cancel doesn't queue behind the render it cancels.
+        if method == ControlMethod.renderCancel.rawValue {
+            do {
+                return try renderCancel(decode(params))
+            } catch {
+                throw ControlError(error)
+            }
+        }
         await acquire()
         defer { release() }
         progressHandler = progress
@@ -243,6 +274,7 @@ public final class Dispatcher {
         case .transportSetMetronome: return try encode(transportSetMetronome(decode(params)))
         case .assetImport: return try encode(await assetImport(decode(params)))
         case .renderOffline: return try encode(await renderOffline(decode(params)))
+        case .renderCancel: return try renderCancel(decode(params))  // a fixture line, say
         case .audioAnalyze: return try encode(await audioAnalyze(decode(params)))
         case .audioCompare: return try encode(await audioCompare(decode(params)))
         case .engineTelemetry:
@@ -262,6 +294,8 @@ public final class Dispatcher {
             let json = try requireEngine().pluginInfoJSON(slot: p.slot)
             return json.isEmpty ? .object(["slot": .int(Int64(p.slot)), "loaded": .bool(false)])
                 : try JSONValue(parsing: Data(json.utf8))
+        case .engineMeters: return try encode(engineMeters(decode(params)))  // T-096 (DW-174)
+        case .enginePreviewNote: return try encode(enginePreviewNote(decode(params)))  // T-096 (DW-189)
         case .deviceList:
             let _: NoParams = try decode(params)
             return try encode(deviceList())
@@ -563,19 +597,44 @@ public final class Dispatcher {
                               blockSize: p.blockSize ?? 512, tailEnabled: p.tail ?? true)
         spec.followLoop = p.loop ?? false  // T-036
         spec.normalize = p.normalize ?? false  // T-082
+        // DW-219 (T-096): TPDF dither for integer formats unless turned off; float is never dithered.
+        spec.dither = spec.sampleFormat != .float32 && (p.dither ?? true)
         // T-026 (DECISIONS.md Q1): the click stays out of an export unless asked for. The `on`
         // slot is held at 0 for the render (a slot write, no rebuild) and follows the project again
         // afterwards, whatever happens to the job.
         let sync = store?.engineSync
         sync?.isMetronomeSuppressed = !(p.includeMetronome ?? false)
         defer { sync?.isMetronomeSuppressed = false }
-        let status = try await finish(engine.renderOffline(from: p.from, to: p.to, spec: spec), "render.offline")
+        let job = engine.renderOffline(from: p.from, to: p.to, spec: spec)
+        // DW-220 (T-096): render.cancel finds the job here while this waits.
+        runningRender = RunningRender(job: job, engine: engine, requestID: currentRequestID)
+        defer { runningRender = nil }
+        let status: EngineJobStatus
+        do {
+            status = try await finish(job, "render.offline")
+        } catch let error as ControlError {
+            if case .cancelled = error, let partial = engine.pollJob(job).render { renderRtViolations += partial.rtViolations }
+            throw error
+        }
         let render = status.render ?? OfflineRenderResult()
         renderRtViolations += render.rtViolations
         return RenderOfflineResult(path: url.path, durationSec: render.durationSeconds, renderTimeSec: render.renderSeconds,
                                    sampleRate: render.sampleRate, frames: render.framesWritten,
                                    rtViolations: render.rtViolations, clippedSamples: render.clippedSamples,
                                    normalizeGain: spec.normalize ? render.normalizeGain : nil)
+    }
+
+    /// DW-220 (T-096): asks the engine to stop the running `render.offline` (the one with request id
+    /// `p.id`, if given). It runs at once, outside the request queue; the render then fails with
+    /// `cancelled` once the engine has stopped it.
+    private func renderCancel(_ p: RenderCancelParams) throws -> JSONValue {
+        guard var running = runningRender, p.id == nil || p.id == running.requestID else {
+            return try encode(RenderCancelResult(cancelled: false))
+        }
+        let cancelled = running.cancelRequested || running.engine.cancelJob(running.job)
+        running.cancelRequested = cancelled
+        runningRender = running
+        return try encode(RenderCancelResult(cancelled: cancelled, id: running.requestID))
     }
 
     /// DW-095: applies any pending structural change and waits until the engine has built it, so a
@@ -616,6 +675,7 @@ public final class Dispatcher {
         switch status.state {
         case .succeeded: return status
         case .failed: throw Self.modelError(status.error ?? .engine(code: .internal, detail: "\(what) failed"))
+        case .cancelled: throw ControlError.cancelled("\(what) was cancelled (render.cancel); its partial file was deleted")
         case .unknown: throw DAWError.engine(code: .notFound, detail: "\(what): the engine lost job \(job)")
         case .queued, .running: throw ControlError.timeout("\(what) didn't finish within \(configuration.jobTimeout)")
         }
@@ -689,6 +749,73 @@ public final class Dispatcher {
         })
         result["graph"] = try JSONValue(encoding: engine.graphStatus())
         return .object(result)
+    }
+
+    /// DW-174 (T-096): post-fader strip meters (MIX-005) and compressor gain reduction (DSP-031),
+    /// read from the engine now.
+    private func engineMeters(_ p: EngineMetersParams) throws -> EngineMetersResult {
+        let project = try requireStore().project
+        let engine = try requireEngine()
+        var kinds: [(NodeIDValue, String)] = project.tracks.map { ($0.id, "track") } + project.buses.map { ($0.id, "bus") }
+        kinds.append((project.master.id, "master"))
+        let slots = project.tracks.flatMap { $0.inserts + ($0.instrument.map { [$0] } ?? []) }
+            + project.buses.flatMap(\.inserts) + project.master.inserts
+        for slot in slots where slot.kind == .builtin(.compressor) { kinds.append((slot.id, "compressor")) }
+        let kindOf = Dictionary(kinds, uniquingKeysWith: { first, _ in first })
+        let nodes = p.nodes ?? kinds.map(\.0)
+        var meters: [EngineMetersResult.Meter] = []
+        for node in nodes {
+            guard let kind = kindOf[node] else {
+                if Self.entityIDs(project).contains(node) {
+                    throw DAWError.invalidArgument("\(node) has no meter (tracks, buses, the master and compressor slots do)")
+                }
+                throw DAWError.notFound(kind: "meter", id: node)
+            }
+            let reading = engine.meter(node)
+            if kind == "compressor" {
+                // DSP-031: peak is the deepest reduction of the last block as a gain factor (1 = none);
+                // 0 means the compressor hasn't processed audio yet.
+                let factor = Double(reading?.peak ?? 0)
+                meters.append(.init(node: node, kind: kind, peakDb: [], rmsDb: [],
+                                    gainReductionDb: factor > 0 ? min(0, Self.db(factor)) : 0))
+            } else {
+                meters.append(.init(node: node, kind: kind, peakDb: [Self.db(Double(reading?.peak ?? 0))],
+                                    rmsDb: [Self.db(Double(reading?.rms ?? 0))], gainReductionDb: nil))
+            }
+        }
+        return EngineMetersResult(meters: meters)
+    }
+
+    /// dBFS of a linear level; silence (and anything below -240 dB) reads -240, as `audio.analyze`.
+    static func db(_ level: Double) -> Double {
+        level > 1e-12 && level.isFinite ? max(-240, 20 * log10(level)) : -240
+    }
+
+    /// DW-189 (T-096): UI-021's audition through the facade's `previewNote`: the note on now, its
+    /// note-off `durationMs` later (the call returns at once). Realtime engines only: an offline
+    /// engine renders nothing between calls, so nothing would hear it.
+    private func enginePreviewNote(_ p: EnginePreviewNoteParams) throws -> EnginePreviewNoteResult {
+        let project = try requireStore().project
+        let engine = try requireEngine()
+        guard case .realtime = engine.mode else {
+            throw ControlError.notSupported(
+                "engine.previewNote needs a realtime engine (project.new {engine: {mode: \"realtime\"}}); offline engines render only through render.offline")
+        }
+        guard let track = project.tracks.first(where: { $0.id == p.track }) else { throw DAWError.notFound(kind: "track", id: p.track) }
+        guard track.kind == .midi else { throw DAWError.invalidArgument("track \(p.track) is not a MIDI track") }
+        guard track.instrument != nil else { throw DAWError.invalidArgument("track \(p.track) has no instrument to play the note") }
+        let velocity = p.velocity ?? 100
+        let duration = p.durationMs ?? 500
+        guard (0...127).contains(p.pitch) else { throw ControlError.invalidParams("pitch must be 0…127") }
+        guard (1...127).contains(velocity) else { throw ControlError.invalidParams("velocity must be 1…127") }
+        guard (1...60_000).contains(duration) else { throw ControlError.invalidParams("durationMs must be 1…60000") }
+        let pitch = UInt8(p.pitch), trackID = p.track
+        engine.previewNote(track: trackID, pitch: pitch, velocity: UInt8(velocity), on: true)
+        Task { @MainActor [weak engine] in
+            try? await Task.sleep(for: .milliseconds(duration))
+            engine?.previewNote(track: trackID, pitch: pitch, velocity: 0, on: false)
+        }
+        return EnginePreviewNoteResult(track: trackID, pitch: p.pitch, velocity: velocity, durationMs: duration)
     }
 
     /// BRIDGE-004 / DW-095: the single drain of engine events. `EngineSync` reacts to them

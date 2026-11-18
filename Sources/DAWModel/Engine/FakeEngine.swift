@@ -40,6 +40,8 @@ public final class FakeEngine: EngineProtocol {
         case setMonitorInput(Bool)
         /// T-080 (REC-034).
         case setRecordOptions(midiLoopTakes: Bool)
+        /// T-096 (DW-220).
+        case cancelJob(JobID)
     }
 
     private struct State {
@@ -65,6 +67,8 @@ public final class FakeEngine: EngineProtocol {
         var midiInputs: [MidiInputInfo] = []
         var exportSpecs: [ExportSpec] = []  // T-082
         var failNextRender: DAWError?  // T-082
+        var holdRenders = false  // T-096
+        var meters: [NodeIDValue: MeterReading] = [:]  // T-096
         var suspendedLanes: Set<ModelID> = []  // T-075 (AUTO-006)
         var suspensionLog: [(lane: ModelID, suspended: Bool)] = []  // T-075
     }
@@ -347,6 +351,10 @@ public final class FakeEngine: EngineProtocol {
             var render = OfflineRenderResult()
             render.sampleRate = s.telemetry.sampleRate
             s.jobs[job] = EngineJobStatus(job: job, kind: .renderOffline, state: .succeeded, progress: 1, render: render)
+            if s.holdRenders {  // T-096: running until cancelJob or finishHeldRenders
+                s.jobs[job] = EngineJobStatus(job: job, kind: .renderOffline, state: .running, progress: 0.5)
+                return job
+            }
             if let error = s.failNextRender {  // T-082
                 s.failNextRender = nil
                 s.jobs[job] = EngineJobStatus(job: job, kind: .renderOffline, state: .failed, progress: 0, error: error,
@@ -354,6 +362,37 @@ public final class FakeEngine: EngineProtocol {
             }
             s.events.append(EngineEvent(kind: .jobFinished, subject: 2, job: job))
             return job
+        }
+    }
+
+    /// T-096 (DW-220): a held render ends as cancelled; finished or unknown jobs stay as they are.
+    public func cancelJob(_ job: JobID) -> Bool {
+        state.withLock { s in
+            s.calls.append(.cancelJob(job))
+            guard var status = s.jobs[job], status.kind == .renderOffline, !status.state.isFinished else { return false }
+            status.state = .cancelled
+            s.jobs[job] = status
+            s.events.append(EngineEvent(kind: .jobFinished, subject: 2, job: job))
+            return true
+        }
+    }
+
+    /// T-096 test hook: while true, `renderOffline` jobs stay running (progress 0.5) until
+    /// `cancelJob` or `finishHeldRenders()`.
+    public var holdRenders: Bool {
+        get { state.withLock { $0.holdRenders } }
+        set { state.withLock { $0.holdRenders = newValue } }
+    }
+
+    /// T-096 test hook: every held render succeeds now.
+    public func finishHeldRenders() {
+        state.withLock { s in
+            for (job, status) in s.jobs where status.kind == .renderOffline && !status.state.isFinished {
+                var render = OfflineRenderResult()
+                render.sampleRate = s.telemetry.sampleRate
+                s.jobs[job] = EngineJobStatus(job: job, kind: .renderOffline, state: .succeeded, progress: 1, render: render)
+                s.events.append(EngineEvent(kind: .jobFinished, subject: 2, job: job))
+            }
         }
     }
 
@@ -389,7 +428,9 @@ public final class FakeEngine: EngineProtocol {
 
     public func telemetry() -> EngineTelemetry { state.withLock { $0.telemetry } }
     public func nodeLatencies() -> [NodeLatency] { [] }
-    public func meter(_ node: NodeIDValue) -> MeterReading? { nil }
+    public func meter(_ node: NodeIDValue) -> MeterReading? { state.withLock { $0.meters[node] } }
+    /// T-096 test hook: what `meter(node)` reads (nil: no meter, the default).
+    public func setMeter(_ node: NodeIDValue, _ reading: MeterReading?) { state.withLock { $0.meters[node] = reading } }
 
     public func pollEvents(max: Int) -> [EngineEvent] {
         state.withLock { s in

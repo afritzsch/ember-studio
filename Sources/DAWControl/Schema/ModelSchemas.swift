@@ -12,6 +12,15 @@ extension JSONValue: JSONSchemaDescribing {
     public static var jsonSchema: JSONValue { [:] }
 }
 
+extension RPCID: JSONSchemaDescribing {
+    /// T-096 (`render.cancel {id}`): a JSON-RPC request id, a number or a string.
+    public static var jsonSchema: JSONValue {
+        ["type": ["integer", "string"], "description": "A JSON-RPC request id"]
+    }
+
+    public static var jsonSchemaExample: JSONValue? { .int(1) }
+}
+
 extension AnyCommand: JSONSchemaDescribing {
     public static var jsonSchema: JSONValue {
         [
