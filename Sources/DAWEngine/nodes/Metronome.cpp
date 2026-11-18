@@ -6,6 +6,7 @@
 #include <limits>
 #include <numbers>
 
+#include "automation/WrapJump.h"
 #include "core/ProcessContext.h"
 
 namespace daw {
@@ -87,10 +88,10 @@ void Metronome::reset() DAW_RT {
     continuity_.forget();
 }
 
-float Metronome::param(const ProcessContext& ctx, uint32_t index) const DAW_RT {
+float Metronome::param(const ProcessContext& ctx, uint32_t index, bool afterWrap) const DAW_RT {
     const ParamInfo& info = kParamInfo[index];
     if (index >= numParams_) return info.def;
-    const float v = ctx.params.get(firstParam_ + index);
+    const float v = afterWrap ? afterWrapOr(ctx, firstParam_ + index) : ctx.params.get(firstParam_ + index);
     // NaN fails both comparisons: off for the switch, silence for the levels.
     return v >= info.min ? (v <= info.max ? v : info.max) : info.min;
 }
@@ -141,6 +142,13 @@ void Metronome::render(float* left, float* right, uint32_t from, uint32_t to) DA
     }
 }
 
+void Metronome::readParams(const ProcessContext& ctx, bool afterWrap) DAW_RT {
+    on_ = param(ctx, kOn, afterWrap) >= 0.5f;
+    const float level = param(ctx, kLevel, afterWrap);
+    beatAmp_ = level;
+    accentAmp_ = level * param(ctx, kAccent, afterWrap);
+}
+
 void Metronome::process(ProcessContext& ctx, NodeIO& io) DAW_RT {
     const AudioBufferView& out = io.audioOut;
     for (uint32_t c = 0; c < out.numChannels; ++c)
@@ -151,10 +159,7 @@ void Metronome::process(ProcessContext& ctx, NodeIO& io) DAW_RT {
     float* right = out.numChannels > 1 ? out.channels[1] : nullptr;
 
     // ENG-021: params once per block, latched into the clicks that start in it.
-    on_ = param(ctx, kOn) >= 0.5f;
-    const float level = param(ctx, kLevel);
-    beatAmp_ = level;
-    accentAmp_ = level * param(ctx, kAccent);
+    readParams(ctx, false);
 
     const TransportBlock& block = ctx.transport;
     if (block.numSegments == 0 || block.tempo == nullptr) {
@@ -164,11 +169,14 @@ void Metronome::process(ProcessContext& ctx, NodeIO& io) DAW_RT {
         return;
     }
     const TempoMap& tempo = *block.tempo;
+    const uint32_t wrap = wrapFrame(ctx, firstParam_, numParams_ < kNumParams ? numParams_ : kNumParams, n);
 
     uint32_t cursor = 0;
     forEachSegment(block, [&](const TransportSegment& seg) DAW_RT {
         render(left, right, cursor, seg.frameOffset);
         cursor = seg.frameOffset;
+        // AUTO-003 (T-092): the new pass's clicks latch the after-wrap values.
+        if (seg.frameOffset > 0 && wrap == seg.frameOffset) readParams(ctx, true);
         // DW-085: a locate (or a tempo edit that moved the playhead's samples) cuts the clicks in
         // progress cleanly; a loop wrap lets them ring out (see Metronome.h).
         if (continuity_.jumped(seg) && !seg.afterWrap) fadeAll();

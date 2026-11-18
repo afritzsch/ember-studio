@@ -7,6 +7,7 @@
 #include <memory>
 #include <numbers>
 
+#include "automation/WrapJump.h"
 #include "core/ProcessContext.h"
 #include "time/TransportSegments.h"
 
@@ -98,10 +99,10 @@ void Delay::clear() DAW_RT {
     lp_.fill(0.0f);
 }
 
-float Delay::param(const ProcessContext& ctx, uint32_t index) const DAW_RT {
+float Delay::param(const ProcessContext& ctx, uint32_t index, bool afterWrap) const DAW_RT {
     const ParamInfo& info = kParamInfo[index];
     if (index >= numParams_) return info.def;
-    const float v = ctx.params.get(firstParam_ + index);
+    const float v = afterWrap ? afterWrapOr(ctx, firstParam_ + index) : ctx.params.get(firstParam_ + index);
     if (std::isnan(v)) return info.def;
     return v < info.min ? info.min : v > info.max ? info.max : v;
 }
@@ -118,7 +119,7 @@ void Delay::process(ProcessContext& ctx, NodeIO& io) DAW_RT {
     const float note = param(ctx, kNote);
     const float feedback = param(ctx, kFeedback);
     const float lowpass = param(ctx, kLowpass);
-    const bool pingPong = param(ctx, kPingPong) >= 0.5f;
+    const bool pingPongNow = param(ctx, kPingPong) >= 0.5f;
     const float mix = param(ctx, kMix);
 
     const bool hasInput = covers(in, n);
@@ -138,10 +139,28 @@ void Delay::process(ProcessContext& ctx, NodeIO& io) DAW_RT {
     const double bpm = ctx.transport.tempo ? tempoAtStart(ctx.transport) : kFallbackBpm;
     target_ = delayFrames(time, sync, note, bpm, sampleRate_);
 
-    const bool filterOn = double{lowpass} < kLowpassOff;
-    const double cutoff = std::min(double{lowpass}, 0.45 * sampleRate_);
-    const auto a = static_cast<float>(std::exp(-2.0 * std::numbers::pi * cutoff / sampleRate_));
-    const float b = 1.0f - a;
+    // The loop's lowpass for a `lowpass` value: on, a, b.
+    struct Lowpass {
+        bool on;
+        float a, b;
+    };
+    auto lowpassFor = [&](float hz) DAW_RT {
+        const double cutoff = std::min(double{hz}, 0.45 * sampleRate_);
+        const auto a = static_cast<float>(std::exp(-2.0 * std::numbers::pi * cutoff / sampleRate_));
+        return Lowpass{double{hz} < kLowpassOff, a, 1.0f - a};
+    };
+    Lowpass lp = lowpassFor(lowpass);
+    bool pingPong = pingPongNow;
+
+    // AUTO-003 (T-092): a loop wrap that automation jumps at. From its frame on, every param
+    // holds its after-wrap value: feedback and mix through the smoothers' jump, the latched ones
+    // and T below.
+    const uint32_t wrap = wrapFrame(ctx, firstParam_, numParams_ < kNumParams ? numParams_ : kNumParams, n);
+    WrapJump fbJump, mixJump;
+    if (wrap > 0) {
+        fbJump = WrapJump{wrap, param(ctx, kFeedback, true)};
+        mixJump = WrapJump{wrap, param(ctx, kMix, true)};
+    }
 
     if (!primed_) {
         delay_ = xfadeTo_ = target_;
@@ -151,8 +170,8 @@ void Delay::process(ProcessContext& ctx, NodeIO& io) DAW_RT {
         primed_ = true;
     }
     // ENG-022: feedback and mix ramp from where the previous block ended.
-    const ParamRamp fbRamp = feedback_.next(feedback, n);
-    const ParamRamp mixRamp = mix_.next(mix, n);
+    const ParamRamp fbRamp = feedback_.next(feedback, n, fbJump);
+    const ParamRamp mixRamp = mix_.next(mix, n, mixJump);
     const auto xfadeLen = static_cast<float>(xfadeLen_);
 
     const float* inL = hasInput ? in.channels[0] : nullptr;
@@ -163,6 +182,12 @@ void Delay::process(ProcessContext& ctx, NodeIO& io) DAW_RT {
     float* lineR = line_.data() + cap_;
 
     for (uint32_t s = 0; s < n; ++s) {
+        if (s == wrap && wrap > 0) {  // AUTO-003: the latched params and T after the wrap
+            lp = lowpassFor(param(ctx, kLowpass, true));
+            pingPong = param(ctx, kPingPong, true) >= 0.5f;
+            target_ = delayFrames(param(ctx, kTime, true), param(ctx, kSync, true) >= 0.5f, param(ctx, kNote, true),
+                                  bpm, sampleRate_);
+        }
         const float dryL = inL ? inL[s] : 0.0f;
         const float dryR = inR ? inR[s] : 0.0f;
 
@@ -188,9 +213,9 @@ void Delay::process(ProcessContext& ctx, NodeIO& io) DAW_RT {
         }
 
         // Lowpass in the loop.
-        if (filterOn) {
-            lp_[0] = snap(b * xL + a * lp_[0]);
-            lp_[1] = snap(b * xR + a * lp_[1]);
+        if (lp.on) {
+            lp_[0] = snap(lp.b * xL + lp.a * lp_[0]);
+            lp_[1] = snap(lp.b * xR + lp.a * lp_[1]);
         } else {
             lp_[0] = snap(xL);
             lp_[1] = snap(xR);

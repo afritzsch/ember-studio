@@ -24,6 +24,9 @@ struct AudioFileWriterTests {
 
     @Test("IO-035: bad formats, paths, closed writers and channel mismatches fail")
     func errors() { expectPasses(daw.testing.writerErrors()) }
+
+    @Test("DW-279, IO-035: buffered writes give the unbuffered writer's bytes for every format and block split; drop flushes")
+    func bufferedBitIdentical() { expectPasses(daw.testing.writerBufferedBitIdentical()) }
 }
 
 @Suite("IO-035, IO-011: TPDF dither")

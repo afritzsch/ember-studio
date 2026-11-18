@@ -11,6 +11,12 @@
 // Threads: non-RT only (CONV-RT-03: no file I/O on the audio thread). The recorder calls it from
 // daw.diskwrite, the offline driver from its render thread between Engine::render calls. One
 // writer is used by one thread at a time.
+//
+// Buffering (DW-279, T-092): write() interleaves into a buffer of kBufferFrames frames and hands
+// it to ExtAudioFileWrite only when it is full, and close() (or the destructor) writes the rest
+// before finalizing the header. So a file is complete only after close(); the bytes are the same
+// as with one ExtAudioFileWrite per block. A failed file write is reported by the write() or
+// close() that triggered it.
 
 #include <cstddef>
 #include <cstdint>
@@ -67,27 +73,37 @@ public:
     AudioFileWriter& operator=(const AudioFileWriter&) = delete;
 
     // Appends `numFrames` frames; channels[c] holds channel c (format().numChannels of them).
+    // They reach the file when the buffer fills or at close() (DW-279).
     Result<void> write(const float* const* channels, uint32_t numFrames);
     // The view must have exactly format().numChannels channels.
     Result<void> write(const AudioBufferView& view);
 
-    // Finalizes the header and closes the file. Later writes fail; a second close succeeds.
+    // Writes the buffered frames, finalizes the header and closes the file. Later writes fail; a
+    // second close succeeds.
     Result<void> close();
 
     const AudioFileFormat& format() const { return format_; }
     const std::filesystem::path& path() const { return path_; }
+    // Frames given to write() so far (the file holds them all once close() has succeeded).
     int64_t framesWritten() const { return framesWritten_; }
     // Integer formats: samples clamped to full scale so far (after dither).
     uint64_t clippedSamples() const { return clipped_; }
 
+    // DW-279: frames buffered per ExtAudioFileWrite (one `pwrite` each, so 128-frame blocks
+    // spent 3–7 % of an export in it).
+    static constexpr uint32_t kBufferFrames = 65536;
+
 private:
     AudioFileWriter(std::filesystem::path path, const AudioFileFormat& format, OpaqueExtAudioFile* file);
+    // Hands the buffered frames to ExtAudioFileWrite; they are dropped from the buffer either way.
+    Result<void> flush();
 
     std::filesystem::path path_;
     AudioFileFormat format_;
     OpaqueExtAudioFile* file_;  // null once closed
     TpdfDither dither_;
-    std::vector<std::byte> interleaved_;  // grows to the largest block written
+    std::vector<std::byte> interleaved_;  // kBufferFrames interleaved frames, from the first write
+    uint32_t pending_ = 0;                // frames in interleaved_ not yet in the file
     int64_t framesWritten_ = 0;
     uint64_t clipped_ = 0;
 };

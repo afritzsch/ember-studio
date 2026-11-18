@@ -11,7 +11,8 @@
 // the sidechain only reach the wrapped node while it runs.
 //
 // The input always goes through the delay line, bypassed or not, so a toggle has the right
-// history at once. A toggle crossfades linearly over one block (D-13: per-block ramps, no clicks)
+// history at once (DW-280: except a 0-latency node's line, which has no history, while neither
+// this block nor the previous one is bypassed). A toggle crossfades linearly over one block (D-13: per-block ramps, no clicks)
 // between the wrapped node's output and the delayed input. The wrapped node's state (tails,
 // voices, a plugin's own state) is just paused while bypassed.
 //

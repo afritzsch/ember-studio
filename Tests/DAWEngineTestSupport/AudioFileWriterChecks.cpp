@@ -321,3 +321,113 @@ CheckResult tpdfDitherStatistics() {
 }
 
 } // namespace daw::testing
+
+namespace daw::testing {
+
+namespace {
+
+// The DW-279 reference signal: a sine and a cosine with noise, the right channel peaking above
+// full scale so integer formats clip.
+Channels bufferedSignal() {
+    constexpr int64_t kFrames = 150'000;
+    Channels signal(2, std::vector<float>(kFrames));
+    uint32_t s = 12345;
+    for (int64_t i = 0; i < kFrames; ++i) {
+        s = s * 1664525u + 1013904223u;
+        const float noise = static_cast<float>(s >> 8) / static_cast<float>(1u << 24) - 0.5f;
+        signal[0][static_cast<size_t>(i)] = 0.7f * static_cast<float>(std::sin(0.01 * static_cast<double>(i))) + 0.3f * noise;
+        signal[1][static_cast<size_t>(i)] = 1.2f * static_cast<float>(std::cos(0.003 * static_cast<double>(i))) - 0.1f * noise;
+    }
+    return signal;
+}
+
+uint64_t fnv1a(const std::vector<char>& bytes) {
+    uint64_t h = 1469598103934665603ull;
+    for (char c : bytes) {
+        h ^= static_cast<uint8_t>(c);
+        h *= 1099511628211ull;
+    }
+    return h;
+}
+
+} // namespace
+
+CheckResult writerBufferedBitIdentical() {
+    CheckResult checks;
+    // DW-279 (T-092): FNV-1a 64 and size of each file as the writer before the buffering wrote
+    // it (one ExtAudioFileWrite per block; recorded at T-092 from the pre-change AudioFileWriter
+    // with the same signal and calls). The buffered writer must give the same bytes, for any
+    // block split: blocks up to 300 frames with a 70 000-frame write every fifth call (straddling
+    // the 65 536-frame buffer), 128-frame blocks, and the whole signal in one write.
+    struct Expected {
+        const char* name;
+        AudioFileType type;
+        AudioSampleFormat sample;
+        bool dither;
+        uint64_t hash;
+        size_t size;
+    };
+    using T = AudioFileType;
+    using S = AudioSampleFormat;
+    const Expected expected[] = {
+        {"caf-f32", T::caf, S::float32, false, 0xd14755f64f078080ull, 1204096},
+        {"caf-i16", T::caf, S::int16, false, 0x68f294d9059b9cbeull, 604096},
+        {"caf-i24", T::caf, S::int24, false, 0x83e6a327b4ffa02cull, 904096},
+        {"wav-i16", T::wav, S::int16, false, 0x787538553c0ec342ull, 604096},
+        {"wav-i24", T::wav, S::int24, false, 0xcc647dae23d9787full, 904096},
+        {"wav-f32", T::wav, S::float32, false, 0x8e71aa533963c14dull, 1204096},
+        {"aiff-i16", T::aiff, S::int16, false, 0xbe9b57473f055f31ull, 604096},
+        {"aiff-i24", T::aiff, S::int24, false, 0x1007c4f4b7525227ull, 904096},
+        {"aiff-f32", T::aiff, S::float32, false, 0xf39362c5b682ff42ull, 1204096},
+        {"caf-f32", T::caf, S::float32, true, 0xd14755f64f078080ull, 1204096},
+        {"caf-i16", T::caf, S::int16, true, 0xc6cba97381d14597ull, 604096},
+        {"caf-i24", T::caf, S::int24, true, 0x444d783f632aa78cull, 904096},
+        {"wav-i16", T::wav, S::int16, true, 0x7fd454f9a8020413ull, 604096},
+        {"wav-i24", T::wav, S::int24, true, 0x2f62df1c8a4de357ull, 904096},
+        {"wav-f32", T::wav, S::float32, true, 0x8e71aa533963c14dull, 1204096},
+        {"aiff-i16", T::aiff, S::int16, true, 0xc72a98a081a14fdeull, 604096},
+        {"aiff-i24", T::aiff, S::int24, true, 0x643b2c37508168d7ull, 904096},
+        {"aiff-f32", T::aiff, S::float32, true, 0xf39362c5b682ff42ull, 1204096},
+    };
+    TempDir dir;
+    const Channels signal = bufferedSignal();
+    const size_t frames = signal[0].size();
+    // The reference's calls: n = 70 000 every fifth call, else (k · 37 mod 300) + 1.
+    std::vector<uint32_t> pattern;
+    for (uint32_t k = 0, total = 0; total < frames; ++k) {
+        const uint32_t n = k % 5 == 4 ? 70'000u : (k * 37u % 300u) + 1u;
+        pattern.push_back(n);
+        total += n;
+    }
+    const std::vector<std::vector<uint32_t>> splits{pattern, {128}, {static_cast<uint32_t>(frames)}};
+    int files = 0;
+    for (const Expected& e : expected) {
+        for (size_t split = 0; split < splits.size(); ++split) {
+            const auto file = dir.path() / (std::string(e.name) + (e.dither ? "-d" : "") + "-" + std::to_string(split));
+            auto writer = makeWriter(file, {e.type, e.sample, kRate, 2, e.dither, kDefaultDitherSeed});
+            DAW_CHECK(writer);
+            if (!writer) continue;
+            DAW_CHECK(writeInBlocks(*writer, signal, splits[split]));
+            DAW_CHECK(writer->framesWritten() == static_cast<int64_t>(frames));
+            DAW_CHECK(writer->close());
+            const std::vector<char> bytes = fileBytes(file);
+            DAW_CHECK(bytes.size() == e.size);
+            DAW_CHECK(fnv1a(bytes) == e.hash);
+            ++files;
+        }
+    }
+    DAW_CHECK(files == 54);
+
+    // The destructor flushes too: a writer dropped without close() leaves the same file.
+    {
+        const auto file = dir.path() / "dropped.wav";
+        {
+            auto writer = makeWriter(file, {T::wav, S::int16, kRate, 2, false, kDefaultDitherSeed});
+            DAW_CHECK(writer && writeInBlocks(*writer, signal, {128}));
+        }
+        DAW_CHECK(fnv1a(fileBytes(file)) == 0x787538553c0ec342ull);
+    }
+    return checks;
+}
+
+} // namespace daw::testing

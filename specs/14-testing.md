@@ -36,7 +36,7 @@
 | `clips_fades_tempo_change` | M3 | TIME-001, DSP-001 |
 | `loop_wrap_midblock` | M3 | TIME-005 |
 | `loop_short_multiwrap` | M3 | TIME-005, DW-125 (loop shorter than a block, several wraps per block) |
-| `locate_reset` | M3 | TIME-008 (clip player reset at a render start), DW-063 (the render resets the effect too). Live locate keeping effect state: `TransportTests` "locateFlagsReset", `OfflineResetTests` "resetsEveryNode" |
+| `locate_reset` | M3 | TIME-008 (clip player reset at a render start), DW-063 (the render resets the effect too: since T-092, DW-197, a real reverb whose tail rings at the end of the first render and is gone in the second). Live locate keeping effect state: `TransportTests` "locateFlagsReset", `OfflineResetTests` "resetsEveryNode" |
 | `metronome_click` | M2 | TIME-010, DSP-011 |
 | `sampler_pitch` | M4 | DSP-021 |
 | `midi_locate_no_stuck_notes` | M4 | DSP-003, DW-103 (chase at a render start), DW-063 (no held note survives a render start). Live locate note-off and release: `MidiClipPlayerTests` "locateAndStop", "noStuckNotesFuzz" |
@@ -47,7 +47,7 @@
 | `automation_ramp` | M7 | AUTO-002 |
 | `sidechain_compressor` | M7 | DSP-031, MIX-008 |
 | `reverb_determinism` | M7 | DSP-033, IO-011 |
-| `automation_loop_wrap` | M7 | AUTO-003 (strip/send jump at the wrap frame; the other built-ins are DW-232) |
+| `automation_loop_wrap` | M7 | AUTO-003 (strip/send jump at the wrap frame; the other built-ins since T-092 at unit level, `WrapJumpTests`) |
 | `delay_tempo_sync` | M7 | DSP-032 |
 | `eq_response` | M7 | DSP-030 (impulse response vs analytic RBJ ≤ 0.01 dB: bell boost/cut, shelves, HP/LP slopes), DSP-040 (exact 0 tail) |
 | `effects_silence_nan_guard` | M7 | DSP-040 (EQ, comp, delay, reverb: tails end in exact 0; NaN in → silence, `nanBlocks` counted, DW-142) |
@@ -114,5 +114,5 @@ Engine tests are Swift Testing suites in `Tests/DAWEngineTests` that call engine
 | TEST-003 | done (T-019) | `scripts/update-goldens.sh` (prints the audio.analyze before/after summary; refuses fixtures that fail or miss their `@expect`s); `GoldenHarnessTests` "missingReferenceFails" |
 | TEST-004 | done (T-019) | `TestNodeTests` (SineNode, ImpulseNode, FakeLatencyNode, NaNNode, registration); `AllocatingNodeTests`; registered only through `FacadeOptions::registerNodes` in test builds |
 | TEST-007 | done (T-084) | `scripts/ci.sh asan` (DAWEngineTests with ASan + UBSan, 335 tests) and `ci.sh tsan` (DAWEngineTests + stress passes over snapshot publish/reclaim suites, 0 reports); jobs on dispatch + weekly. DW-054/065 skips via `DAW_SANITIZER`. Fixture fixes: `CompressorChecks.cpp` overflow, `FakeAudioUnit.mm` race |
-| TEST-008 | done (T-084, T-091) | `PerfSmokeTests` "TEST-008: 64 tracks × (EQ + compressor) + 8 reverb buses…" (strict with `DAW_PERF_TESTS=1` in `ci.sh perf`, report JSON with telemetry, cycles/instructions per frame). T-091: **10.7× wall / 10.6× per CPU second** in `ci.sh perf` (≥ 10× bound met; measured in Low Power Mode with other workers running; 20× target not yet reached, warning printed) |
+| TEST-008 | done (T-084, T-091) | `PerfSmokeTests` "TEST-008: 64 tracks × (EQ + compressor) + 8 reverb buses…" (strict with `DAW_PERF_TESTS=1` in `ci.sh perf`, report JSON with telemetry, cycles/instructions per frame). T-091: **10.7× wall / 10.6× per CPU second** in `ci.sh perf` (≥ 10× bound met; measured in Low Power Mode with other workers running; 20× target not yet reached, warning printed) T-092 (DW-279/280): **11.4× wall** best of alternating runs (−2.7 % instructions per frame), Low Power Mode with other workers. |
 | TEST-* (rest) | todo | |

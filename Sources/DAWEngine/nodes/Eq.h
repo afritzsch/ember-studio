@@ -21,6 +21,9 @@
 // coefficient by coefficient, ending exactly on the new ones at the last frame (the ENG-022 ramp
 // shape); between stable biquads every interpolated filter is stable (dsp/Biquad.h). TDF-II
 // state carries across. The first block after prepare() jumps (like the other effects).
+// AUTO-003 (T-092): at a loop wrap inside the block with automation on any EQ param, the bands
+// ramp to this block's values over the frames before the wrap and jump to the after-wrap values
+// at the wrap frame (automation/WrapJump.h), instead of ramping across the loop's discontinuity.
 //
 // Silence and NaN (DSP-040). Filter state below BiquadState::kSnap is stored as exactly 0, so
 // after the input stops the output reaches exact 0 in finite time. A block whose input holds a
@@ -119,8 +122,9 @@ private:
         friend bool operator==(const BandParams&, const BandParams&) = default;
     };
 
-    float param(const ProcessContext& ctx, uint32_t index) const DAW_RT;
-    BandParams readBand(const ProcessContext& ctx, uint32_t band) const DAW_RT;
+    // `afterWrap`: the value after this block's loop wrap (AUTO-003, automation/WrapJump.h).
+    float param(const ProcessContext& ctx, uint32_t index, bool afterWrap = false) const DAW_RT;
+    BandParams readBand(const ProcessContext& ctx, uint32_t band, bool afterWrap = false) const DAW_RT;
     BiquadCoeffs design(uint32_t band, const BandParams& params) const DAW_RT;
     void clearState() DAW_RT;
     void silence(const NodeIO& io, uint32_t n) DAW_RT;  // the NaN guard's output and bookkeeping

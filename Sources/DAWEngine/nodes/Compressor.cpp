@@ -8,6 +8,7 @@
 #include <memory>
 #include <numbers>
 
+#include "automation/WrapJump.h"
 #include "core/ProcessContext.h"
 #include "dsp/Finite.h"
 #include "dsp/FastDb.h"
@@ -65,12 +66,18 @@ void Compressor::prepare(const PrepareInfo& info) {
     primed_ = false;
 }
 
-float Compressor::param(const ProcessContext& ctx, uint32_t index) const DAW_RT {
+float Compressor::param(const ProcessContext& ctx, uint32_t index, bool afterWrap) const DAW_RT {
     const ParamInfo& info = kParamInfo[index];
     if (index >= numParams_) return info.def;
-    const float v = ctx.params.get(firstParam_ + index);
+    const float v = afterWrap ? afterWrapOr(ctx, firstParam_ + index) : ctx.params.get(firstParam_ + index);
     if (std::isnan(v)) return info.def;
     return v < info.min ? info.min : v > info.max ? info.max : v;
+}
+
+Compressor::Settings Compressor::settings(const ProcessContext& ctx, bool afterWrap) const DAW_RT {
+    return Settings{param(ctx, kThreshold, afterWrap), param(ctx, kRatio, afterWrap),    param(ctx, kKnee, afterWrap),
+                    param(ctx, kMakeup, afterWrap),    param(ctx, kAttack, afterWrap),   param(ctx, kRelease, afterWrap),
+                    param(ctx, kDetector, afterWrap) >= 0.5f};
 }
 
 void Compressor::process(ProcessContext& ctx, NodeIO& io) DAW_RT {
@@ -79,35 +86,11 @@ void Compressor::process(ProcessContext& ctx, NodeIO& io) DAW_RT {
     const uint32_t n = out.numFrames;
     if (n == 0) return;  // ENG-004: a 0-frame block leaves every state as it was
 
-    // ENG-021: one read per slot per block.
-    const float threshold = param(ctx, kThreshold);
-    const float ratio = param(ctx, kRatio);
-    const float knee = param(ctx, kKnee);
-    const float makeup = param(ctx, kMakeup);
-    const float attackMs = param(ctx, kAttack), releaseMs = param(ctx, kRelease);
-    if (attackMs != attackMs_) {
-        attackMs_ = attackMs;
-        attackCoeff_ = onePole(attackMs, sampleRate_);
-    }
-    if (releaseMs != releaseMs_) {
-        releaseMs_ = releaseMs;
-        releaseCoeff_ = onePole(releaseMs, sampleRate_);
-    }
-    const double attack = attackCoeff_;
-    const double release = releaseCoeff_;
-    const bool rms = param(ctx, kDetector) >= 0.5f;
-    if (!primed_) {
-        threshold_.reset(threshold);
-        ratio_.reset(ratio);
-        knee_.reset(knee);
-        makeup_.reset(makeup);
-        primed_ = true;
-    }
-    // ENG-022: ramp from where the previous block ended.
-    const Ramp t(threshold_.next(threshold, n));
-    const Ramp r(ratio_.next(ratio, n));
-    const Ramp w(knee_.next(knee, n));
-    const Ramp g(makeup_.next(makeup, n));
+    // ENG-021: one read per slot per block. AUTO-003 (T-092): with a loop wrap that automation
+    // jumps at, the block runs in two spans, the second with the after-wrap values.
+    const Settings before = settings(ctx, false);
+    const uint32_t wrap = wrapFrame(ctx, firstParam_, numParams_ < kNumParams ? numParams_ : kNumParams, n);
+    const Settings after = wrap > 0 ? settings(ctx, true) : before;
 
     // MIX-008: the routed sidechain keys the detector; without one the input does.
     const bool hasInput = covers(in, n);
@@ -115,6 +98,20 @@ void Compressor::process(ProcessContext& ctx, NodeIO& io) DAW_RT {
 
     // DSP-040: NaN guard.
     if ((hasInput && !allFinite(in, n)) || (key != nullptr && key != &in && !allFinite(*key, n))) {
+        // ENG-022: the smoothers end where this block's ramps would have.
+        const Settings& last = wrap > 0 ? after : before;
+        if (!primed_ || wrap > 0) {
+            threshold_.reset(last.threshold);
+            ratio_.reset(last.ratio);
+            knee_.reset(last.knee);
+            makeup_.reset(last.makeup);
+            primed_ = true;
+        } else {
+            threshold_.next(last.threshold, n);
+            ratio_.next(last.ratio, n);
+            knee_.next(last.knee, n);
+            makeup_.next(last.makeup, n);
+        }
         for (uint32_t c = 0; c < out.numChannels; ++c) std::memset(out.channels[c], 0, std::size_t{n} * sizeof(float));
         env_ = 0.0;
         ms_ = 0.0;
@@ -124,6 +121,51 @@ void Compressor::process(ProcessContext& ctx, NodeIO& io) DAW_RT {
         return;
     }
 
+    double deepest = run(io, key, 0, wrap > 0 ? wrap : n, before, !primed_);
+    primed_ = true;
+    if (wrap > 0) {
+        const double second = run(io, key, wrap, n - wrap, after, true);
+        deepest = second < deepest ? second : deepest;
+    }
+
+    // Channels the input lacks are silent.
+    const uint32_t gainChannels = hasInput ? (in.numChannels < out.numChannels ? in.numChannels : out.numChannels) : 0;
+    for (uint32_t c = gainChannels; c < out.numChannels; ++c)
+        std::memset(out.channels[c], 0, std::size_t{n} * sizeof(float));
+
+    if (meter_.telemetry != nullptr)
+        meter_.telemetry->writeMeter(meter_.id, static_cast<float>(std::exp(deepest * kDbToNat)),
+                                     static_cast<float>(std::exp(env_ * kDbToNat)));
+}
+
+double Compressor::run(const NodeIO& io, const AudioBufferView* key, uint32_t offset, uint32_t len, const Settings& s,
+                       bool jump) DAW_RT {
+    const AudioBufferView& in = io.audioIn;
+    const AudioBufferView& out = io.audioOut;
+    const bool hasInput = covers(in, out.numFrames);  // as process() decided
+    if (s.attackMs != attackMs_) {
+        attackMs_ = s.attackMs;
+        attackCoeff_ = onePole(s.attackMs, sampleRate_);
+    }
+    if (s.releaseMs != releaseMs_) {
+        releaseMs_ = s.releaseMs;
+        releaseCoeff_ = onePole(s.releaseMs, sampleRate_);
+    }
+    const double attack = attackCoeff_;
+    const double release = releaseCoeff_;
+    const bool rms = s.rms;
+    if (jump) {
+        threshold_.reset(s.threshold);
+        ratio_.reset(s.ratio);
+        knee_.reset(s.knee);
+        makeup_.reset(s.makeup);
+    }
+    // ENG-022: ramp from where the previous block (or span) ended. Ramp::at takes the frame
+    // within the span.
+    const Ramp t(threshold_.next(s.threshold, len));
+    const Ramp r(ratio_.next(s.ratio, len));
+    const Ramp w(knee_.next(s.knee, len));
+    const Ramp g(makeup_.next(s.makeup, len));
     const uint32_t keyChannels = key != nullptr ? key->numChannels : 0;
     const uint32_t gainChannels = hasInput ? (in.numChannels < out.numChannels ? in.numChannels : out.numChannels) : 0;
     const double invKeyChannels = keyChannels > 0 ? 1.0 / keyChannels : 0.0;
@@ -154,8 +196,9 @@ void Compressor::process(ProcessContext& ctx, NodeIO& io) DAW_RT {
     double level[kChunk];  // detector level (amplitude or power), then x in dB
     double gains[kChunk];  // e + makeup in dB, then the linear gain
     double deepest = 0.0;  // the block's deepest e, for the meter
-    for (uint32_t base = 0; base < n; base += kChunk) {
-        const uint32_t m = n - base < kChunk ? n - base : kChunk;
+    const uint32_t end = offset + len;
+    for (uint32_t base = offset; base < end; base += kChunk) {
+        const uint32_t m = end - base < kChunk ? end - base : kChunk;
 
         // Detector.
         double loudest = 0.0;
@@ -226,7 +269,7 @@ void Compressor::process(ProcessContext& ctx, NodeIO& io) DAW_RT {
                 level[i] = v > 0.0 && x > kFloorDb ? x : kFloorDb;
             }
             for (uint32_t i = 0; i < m; ++i) {
-                const uint32_t f = base + i;
+                const uint32_t f = base + i - offset;
                 level[i] = compressorGainDb(level[i], t.at(f), r.at(f), w.at(f));
             }
         }
@@ -246,7 +289,7 @@ void Compressor::process(ProcessContext& ctx, NodeIO& io) DAW_RT {
                 env_ = 0.0;
             }
             deepest = env_ < deepest ? env_ : deepest;
-            gains[i] = env_ + g.at(base + i);
+            gains[i] = env_ + g.at(base + i - offset);
         }
 
         // Gains, then the multiply.
@@ -261,13 +304,7 @@ void Compressor::process(ProcessContext& ctx, NodeIO& io) DAW_RT {
             for (uint32_t i = 0; i < m; ++i) dst[i] = src[i] * static_cast<float>(gains[i]);
         }
     }
-    // Channels the input lacks are silent.
-    for (uint32_t c = gainChannels; c < out.numChannels; ++c)
-        std::memset(out.channels[c], 0, std::size_t{n} * sizeof(float));
-
-    if (meter_.telemetry != nullptr)
-        meter_.telemetry->writeMeter(meter_.id, static_cast<float>(std::exp(deepest * kDbToNat)),
-                                     static_cast<float>(std::exp(env_ * kDbToNat)));
+    return deepest;
 }
 
 } // namespace daw

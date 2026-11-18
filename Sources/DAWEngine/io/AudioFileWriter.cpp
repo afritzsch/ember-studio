@@ -117,55 +117,74 @@ Result<void> AudioFileWriter::write(const float* const* channels, uint32_t numFr
     const uint32_t numChannels = format_.numChannels;
     const uint32_t bytes = bytesPerSample(format_.sample);
     const std::size_t frameBytes = std::size_t{bytes} * numChannels;
-    if (interleaved_.size() < frameBytes * numFrames) interleaved_.resize(frameBytes * numFrames);
-    std::byte* out = interleaved_.data();
+    if (interleaved_.empty()) interleaved_.resize(frameBytes * kBufferFrames);
 
     // IO-035: interleave, quantizing integer formats. The dither sequence runs frame by frame,
     // channel by channel, so it depends only on the seed and the number of samples written,
     // not on how the caller splits them into blocks (IO-011).
     const bool dither = format_.dither && format_.sample != AudioSampleFormat::float32;
-    for (uint32_t f = 0; f < numFrames; ++f) {
-        for (uint32_t c = 0; c < numChannels; ++c, out += bytes) {
-            const float x = channels[c][f];
-            switch (format_.sample) {
-            case AudioSampleFormat::float32:
-                std::memcpy(out, &x, 4);
-                break;
-            case AudioSampleFormat::int16: {
-                const auto q = static_cast<int16_t>(
-                    quantize(x, 32768.0, dither ? dither_.next() : 0.0, -32768, 32767, clipped_));
-                std::memcpy(out, &q, 2);
-                break;
-            }
-            case AudioSampleFormat::int24: {
-                const int32_t q =
-                    quantize(x, 8388608.0, dither ? dither_.next() : 0.0, -8388608, 8388607, clipped_);
-                // Packed little-endian (arm64 is little-endian, D-23), two's complement.
-                const auto u = static_cast<uint32_t>(q);
-                out[0] = static_cast<std::byte>(u);
-                out[1] = static_cast<std::byte>(u >> 8);
-                out[2] = static_cast<std::byte>(u >> 16);
-                break;
-            }
+    for (uint32_t done = 0; done < numFrames;) {
+        // DW-279: into the buffer, written out whenever it is full.
+        const uint32_t room = kBufferFrames - pending_;
+        const uint32_t chunk = numFrames - done < room ? numFrames - done : room;
+        std::byte* out = interleaved_.data() + frameBytes * pending_;
+        for (uint32_t f = done; f < done + chunk; ++f) {
+            for (uint32_t c = 0; c < numChannels; ++c, out += bytes) {
+                const float x = channels[c][f];
+                switch (format_.sample) {
+                case AudioSampleFormat::float32:
+                    std::memcpy(out, &x, 4);
+                    break;
+                case AudioSampleFormat::int16: {
+                    const auto q = static_cast<int16_t>(
+                        quantize(x, 32768.0, dither ? dither_.next() : 0.0, -32768, 32767, clipped_));
+                    std::memcpy(out, &q, 2);
+                    break;
+                }
+                case AudioSampleFormat::int24: {
+                    const int32_t q =
+                        quantize(x, 8388608.0, dither ? dither_.next() : 0.0, -8388608, 8388607, clipped_);
+                    // Packed little-endian (arm64 is little-endian, D-23), two's complement.
+                    const auto u = static_cast<uint32_t>(q);
+                    out[0] = static_cast<std::byte>(u);
+                    out[1] = static_cast<std::byte>(u >> 8);
+                    out[2] = static_cast<std::byte>(u >> 16);
+                    break;
+                }
+                }
             }
         }
+        pending_ += chunk;
+        framesWritten_ += chunk;
+        done += chunk;
+        if (pending_ == kBufferFrames)
+            if (auto flushed = flush(); !flushed) return flushed;
     }
+    return {};
+}
 
+Result<void> AudioFileWriter::flush() {
+    if (pending_ == 0) return {};
+    const uint32_t frames = pending_;
+    pending_ = 0;
     AudioBufferList list{};
     list.mNumberBuffers = 1;
-    list.mBuffers[0].mNumberChannels = numChannels;
-    list.mBuffers[0].mDataByteSize = static_cast<UInt32>(frameBytes * numFrames);
+    list.mBuffers[0].mNumberChannels = format_.numChannels;
+    list.mBuffers[0].mDataByteSize =
+        static_cast<UInt32>(std::size_t{bytesPerSample(format_.sample)} * format_.numChannels * frames);
     list.mBuffers[0].mData = interleaved_.data();
-    const OSStatus s = ExtAudioFileWrite(file_, numFrames, &list);
+    const OSStatus s = ExtAudioFileWrite(file_, frames, &list);
     if (s != noErr) return coreAudioError(s, ErrorCode::io, path_.string() + ": write failed");
-    framesWritten_ += numFrames;
     return {};
 }
 
 Result<void> AudioFileWriter::close() {
     if (file_ == nullptr) return {};
+    // DW-279: the buffered frames first. The file is closed even if that fails.
+    Result<void> flushed = flush();
     const OSStatus s = ExtAudioFileDispose(file_);
     file_ = nullptr;
+    if (!flushed) return flushed;
     if (s != noErr) return coreAudioError(s, ErrorCode::io, path_.string() + ": close failed");
     return {};
 }

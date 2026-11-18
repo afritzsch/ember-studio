@@ -65,6 +65,9 @@ The Interfaces above are implemented as written. The additions below are additiv
   - `SetAutomationMode {target, mode}` creates an empty lane if needed.
   - Every inverse is `SetAutomationLane {channel, target, lane?}`, which sets the lane to exactly that lane with its ID, or removes it. It is registered like any command.
 
+### Clarification (T-092): the other built-ins jump too (DW-232)
+This updates the T-074 delta's sentence that only the strip and gain node honor the jump; the Interfaces don't change. The EQ, compressor, delay, reverb, sampler and metronome honor it as well (06 "T-092 notes"): from the wrap frame on, each of their params holds its after-wrap value, so nothing ramps across the loop's discontinuity. Hosted plugins still ramp across a wrap (DW-233).
+
 ### Clarification (T-088): lanes leave with their target (DW-234, user decision; docs/autobuild/DECISIONS.md "T-088 cascade")
 This replaces the sentence of the T-074 delta that says a lane outlives its removed send or device. The Interfaces don't change.
 - Removing a send or device slot removes the lanes driving it in the same undo step: `RemoveSend`, `RemoveDevice`, `RemoveInstrument`, `SetInstrument` replacing an instrument, `RestoreInstrument` replacing a slot with another ID, and `RemoveBus` for the sends into the bus. Undo restores the target and then its lanes, with their IDs, points and mode (`SetAutomationLane` steps of one `CompositeCommand`), and redo removes both again. 07 "Contract delta (T-088)" has the full rule.
@@ -97,7 +100,7 @@ The Interfaces above don't change. Additive: an engine suspend flag (08 "Contrac
 |---|---|---|
 | AUTO-001 | done (T-074) | `AutomationTests` `automationCompile` (lanes validated and compiled into players); `AutomationModelTests` (lanes go into the graph on their slots, cross the C++ builder, an automation edit applies a graph) |
 | AUTO-002 | done (T-074) | golden `automation_ramp` (+ `AutomationGoldenTests`: within one block of the analytic ramp); `automationDrivesSlots` (written before nodes run) |
-| AUTO-003 | done (T-074) for strip and gain nodes | golden `automation_loop_wrap` (jumps at each wrap frame); `automationLoopWrapJump`. Other built-ins and plugins still ramp across a wrap (DW-232, DW-233) |
+| AUTO-003 | done (T-074 strip and gain nodes; T-092 EQ, compressor, delay, reverb, sampler, metronome) | golden `automation_loop_wrap` (jumps at each wrap frame); `automationLoopWrapJump`; `WrapJumpTests` (per built-in, exact oracle, RT trap 0). Hosted plugins still ramp across a wrap (DW-233) |
 | AUTO-004 | done (T-074) | `AutomationTests` `automationCurves` (linear, hold, exponential; cursor; mapping) |
 | AUTO-005 | done (T-074) | `automationDrivesSlots` (read overrides a slot write, off ignored, stopped behaviour); `AutomationModelTests` SetAutomationMode |
 | AUTO-006, AUTO-007 | done (T-075) | `AutomationRecordingTests` (`thinning` RDP ε 0.5 %, `recordMerges`/`recordChecks` RecordAutomation merge + exact inverse, `touchMode`/`latchMode`/`writeMode`/`loopWrapSplits` with suspend/resume and one undo entry, `touchPlaysBack` real offline render, `stoppedEdits`), C++ `AutomationTests.suspend`/`.stoppedEdit` (DW-237 confirmed), `AutomationLaneTests.mixerTouchRecords`/`.mixerStopped`; 0 RT violations |

@@ -131,13 +131,21 @@ struct M3GoldenReferenceTests {
     /// blocks (IO-010: the last block is rendered in full and cut).
     static let firstRenderBlocks = (12000 + 511) / 512
     static let effectFramesBefore = firstRenderBlocks * 512
+    /// DW-197 (T-092): the Effect track's reverb at its defaults. Clip A covers samples
+    /// 0..10000, clip B 27500..29000 (frames 2500..4000 of the golden render). The first wet
+    /// sample of an input at frame s is at s + pre-delay (10 ms) + the shortest line at size 0.5
+    /// (Reverb.h), and mix 0.3 passes 0.7 of the dry signal.
+    static let reverbFirstWet = 480 + 1386
+    static let clipAEnd = 10000, clipBStart = 2500, clipBEnd = 4000
+    static let dryGain = 1.0 - 0.3
 
     /// TIME-008: L is the clip from tick 1000 (sample 25000) at full level from frame 0: the
     /// locate reset the clip player, so no 64-frame wrap crossfade from where the first render
-    /// stopped. DW-063 (T-089): R is the effect's sine from phase 0, since a render resets every
-    /// node; a live locate keeping effect state is checked in C++ (TransportTests
-    /// "locateFlagsReset", OfflineResetTests "resetsEveryNode").
-    @Test("TIME-008, DW-063: locate_reset restarts the clip player cleanly, and the render resets the effect too")
+    /// stopped. DW-063 (T-089), DW-197 (T-092): R is exactly silent until clip B, since a render
+    /// resets every node and the first render's reverb tail is gone; then clip B's dry part and
+    /// the reverb's own tail of it. A live locate keeping effect state is checked in C++
+    /// (TransportTests "locateFlagsReset", OfflineResetTests "resetsEveryNode").
+    @Test("TIME-008, DW-063, DW-197: locate_reset restarts the clip player cleanly, and the render resets the reverb's tail too")
     func locateResetSamples() throws {
         let audio = try AudioData(contentsOf: GoldenHarness.reference("locate_reset"))
         let tone = try Self.asset("tone_441_48k.wav")
@@ -146,34 +154,45 @@ struct M3GoldenReferenceTests {
         guard audio.channels.count == 2, audio.frameCount == 6000 else { return }
         let start = Int(TempoMap().tickToSample(Tick(1000)))
         #expect(start == 25000)
+        #expect(Int(TempoMap().tickToSample(Tick(1100))) - start == Self.clipBStart)
         #expect(Self.effectFramesBefore == 12288)
 
         let half = 0.5.squareRoot()  // hard pan × the master's centre pan
-        var worst = (left: 0.0, right: 0.0)
-        for f in 0..<6000 {
-            let left = half * Double(tone[start + f])
-            let right = half * 0.5 * sin(2 * Double.pi * 1100 * Double(f) / 48000)
-            worst.left = max(worst.left, abs(Double(audio.channels[0][f]) - left))
-            worst.right = max(worst.right, abs(Double(audio.channels[1][f]) - right))
+        var worstLeft = 0.0
+        for f in 0..<6000 { worstLeft = max(worstLeft, abs(Double(audio.channels[0][f]) - half * Double(tone[start + f]))) }
+        #expect(worstLeft < Self.tolerance)
+
+        let r = audio.channels[1]
+        // Before clip B: nothing, not the first render's tail (the reset cleared the reverb).
+        #expect(r[0..<Self.clipBStart].allSatisfy { $0 == 0 })
+        // Clip B before its first wet sample: the dry part alone.
+        let firstWet = Self.clipBStart + Self.reverbFirstWet
+        var worstDry = 0.0
+        for f in Self.clipBStart..<Self.clipBEnd {
+            worstDry = max(worstDry, abs(Double(r[f]) - half * Self.dryGain * Double(tone[f - Self.clipBStart])))
         }
-        #expect(worst.left < Self.tolerance)
-        #expect(worst.right < Self.tolerance)
+        #expect(worstDry < Self.tolerance)
+        #expect(r[Self.clipBEnd..<firstWet].allSatisfy { $0 == 0 })
+        // Then the reverb's tail of clip B, to the end of the render.
+        // The first wet sample echoes tone[0], which is 0 (the sine starts at 0); the next ones don't.
+        #expect(tone[0] == 0 && r[firstWet + 1] != 0)
+        let tailPeak = r[(firstWet + 100)...].map { abs(Double($0)) }.max() ?? 0
+        #expect(tailPeak > 0.01)
 
         // What a missing reset would look like: frame 0 of a crossfade plays the new pass at 1/64
-        // plus 63/64 of the old pass at sample 12288; an effect left running would be at its
-        // frame 12288, about 0.21, instead of sin(0) = 0.
-        let l0 = Double(audio.channels[0][0]), r0 = Double(audio.channels[1][0])
+        // plus 63/64 of the old pass at sample 12288; the first render's reverb tail would still
+        // be ringing (locateResetFirstRender: its last 2000 frames are that tail, well above 0).
+        let l0 = Double(audio.channels[0][0])
         #expect(abs(l0 - half * Double(tone[start])) < Self.tolerance)
         let crossfaded = half * (Double(tone[start]) / 64 + 63.0 / 64 * Double(tone[Self.effectFramesBefore]))
         #expect(abs(l0 - crossfaded) > 0.1)
-        #expect(abs(r0) < Self.tolerance)
-        let running = half * 0.5 * sin(2 * Double.pi * 1100 * Double(Self.effectFramesBefore) / 48000)
-        #expect(abs(running) > 0.2)
     }
 
     /// The fixture really renders twice, and the first render is what the second one's numbers
-    /// assume: 12000 frames, the effect's sine from frame 0, the clip from tick 0.
-    @Test("TIME-008: locate_reset's first render plays ticks 0..480 from a fresh effect")
+    /// assume: 12000 frames, the clip from tick 0 on L; on R clip A's dry part until its first wet
+    /// sample, and after clip A ends (sample 10000) the reverb's tail alone, still ringing when the
+    /// render stops (the tail the second render's reset must clear).
+    @Test("TIME-008, DW-197: locate_reset's first render plays ticks 0..480 and ends inside a reverb tail")
     @MainActor func locateResetFirstRender() async throws {
         let fixture = try GoldenFixture(name: "locate_reset", contentsOf:
             GoldenHarness.fixturesDirectory.appending(path: "locate_reset.jsonl"))
@@ -185,12 +204,13 @@ struct M3GoldenReferenceTests {
         let tone = try Self.asset("tone_441_48k.wav")
         let half = 0.5.squareRoot()
         var worst = 0.0
-        for f in 0..<first.frameCount {
-            let left = half * Double(tone[f])
-            let right = half * 0.5 * sin(2 * Double.pi * 1100 * Double(f) / 48000)
-            worst = max(worst, abs(Double(first.channels[0][f]) - left), abs(Double(first.channels[1][f]) - right))
+        for f in 0..<first.frameCount { worst = max(worst, abs(Double(first.channels[0][f]) - half * Double(tone[f]))) }
+        for f in 0..<Self.reverbFirstWet {
+            worst = max(worst, abs(Double(first.channels[1][f]) - half * Self.dryGain * Double(tone[f])))
         }
         #expect(worst < Self.tolerance)
+        let tail = first.channels[1][(first.frameCount - 500)...].map { abs(Double($0)) }.max() ?? 0
+        #expect(tail > 0.01)
         if run.failures.isEmpty { try? FileManager.default.removeItem(at: run.workDirectory) }
     }
 
