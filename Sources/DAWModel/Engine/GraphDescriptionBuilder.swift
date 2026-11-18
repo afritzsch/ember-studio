@@ -38,9 +38,14 @@ import Foundation
 /// builds the slot as absent without instantiating its plugin. The slot, its params and its stored
 /// state are emitted as always; only the config string differs, so turning safe mode on or off
 /// re-creates those nodes (their `configVersion` is bumped like any config change, DW-140).
+///
+/// DW-266 (T-095, DECISIONS "T-095 app decisions"): `enabledInSafeMode` lists the plugin slots the
+/// user enabled one by one while in safe mode (a session-only override, like safe mode itself).
+/// Those slots are built with their plugin and their own bypass; it means nothing outside safe mode.
 public enum GraphDescriptionBuilder {
-    public static func build(_ project: Project, runtime: RuntimeIDs, pluginsDisabled: Bool = false) -> EngineGraph {
-        var b = Emitter(runtime: runtime, pluginsDisabled: pluginsDisabled)
+    public static func build(_ project: Project, runtime: RuntimeIDs, pluginsDisabled: Bool = false,
+                             enabledInSafeMode: Set<NodeIDValue> = []) -> EngineGraph {
+        var b = Emitter(runtime: runtime, pluginsDisabled: pluginsDisabled, enabledInSafeMode: enabledInSafeMode)
         b.graph.tempoEvents = project.tempoMap.tempoEvents
         b.graph.timeSignatures = project.tempoMap.timeSignatures
 
@@ -235,10 +240,11 @@ public enum GraphDescriptionBuilder {
     /// `metronomeSuppressed` (an export that leaves the click out) forces it off.
     ///
     /// PLUG-018/021 (T-064): a device's bypass slot holds 1 while the slot is bypassed, or while
-    /// `pluginsBypassed` (safe mode, a session-only override) and the slot hosts an AU or VST3.
+    /// `pluginsBypassed` (safe mode, a session-only override) and the slot hosts an AU or VST3,
+    /// unless the slot is in `enabledInSafeMode` (DW-266, T-095).
     public static func paramValues(
         _ project: Project, runtime: RuntimeIDs, catalog: ParamCatalog, metronomeSuppressed: Bool = false,
-        pluginsBypassed: Bool = false
+        pluginsBypassed: Bool = false, enabledInSafeMode: Set<NodeIDValue> = []
     ) -> [ParamID: Float] {
         let muted = SoloResolver.mutedChannels(in: project)
         var out: [ParamID: Float] = [:]
@@ -283,7 +289,8 @@ public enum GraphDescriptionBuilder {
             for (i, value) in values.enumerated() { out[range.first + UInt32(i)] = value }
         }
         for slot in project.allDeviceSlots {
-            let bypassed = slot.bypass || pluginsBypassed && slot.isPlugin
+            // DW-266 (T-095): a slot enabled one by one in safe mode has its own bypass back.
+            let bypassed = slot.bypass || pluginsBypassed && slot.isPlugin && !enabledInSafeMode.contains(slot.id)
             set(GraphNodeID.bypass(of: slot.id), 0, bypassed ? 1 : 0)
         }
         return out
@@ -313,13 +320,16 @@ private struct Emitter {
     let runtime: RuntimeIDs
     /// DW-224 (T-083): safe mode, plugin slots are built without their plugin.
     let pluginsDisabled: Bool
+    /// DW-266 (T-095): slots enabled one by one in safe mode keep their plugin.
+    let enabledInSafeMode: Set<NodeIDValue>
     var graph = EngineGraph()
     /// Device slots that made it into the graph (sidechain targets).
     var emitted = Set<NodeIDValue>()
 
-    init(runtime: RuntimeIDs, pluginsDisabled: Bool = false) {
+    init(runtime: RuntimeIDs, pluginsDisabled: Bool = false, enabledInSafeMode: Set<NodeIDValue> = []) {
         self.runtime = runtime
         self.pluginsDisabled = pluginsDisabled
+        self.enabledInSafeMode = enabledInSafeMode
     }
 
     mutating func node(_ id: NodeIDValue, _ kind: NodeKind, config: String = "", bypassParam: ParamID? = nil) {
@@ -332,7 +342,7 @@ private struct Emitter {
 
     /// A device slot's node, with its bypass slot (PLUG-018), bypassed or not.
     mutating func device(_ slot: DeviceSlot) {
-        node(slot.id, slot.nodeKind, config: slot.configJSON(disabled: pluginsDisabled),
+        node(slot.id, slot.nodeKind, config: slot.configJSON(disabled: pluginsDisabled && !enabledInSafeMode.contains(slot.id)),
              bypassParam: runtime.paramID(GraphNodeID.bypass(of: slot.id), 0))
     }
 

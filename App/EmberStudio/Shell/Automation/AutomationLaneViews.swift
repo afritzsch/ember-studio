@@ -1,8 +1,10 @@
 import DAWModel
 import SwiftUI
 
-/// UI-015 (T-075): the "A" toggle and "+ Lane" menu on a track header (bottom right), from the
-/// automation model's controls (UI-052: `track.<id>.automation`, `track.<id>.automation.add.<key>`).
+/// UI-015 (T-075): the "A" toggle and "+ Lane" menu on a track header, from the automation model's
+/// controls (UI-052: `track.<id>.automation`, `track.<id>.automation.add.<key>`). DW-271 (T-095): in
+/// the header's first line, before M and S; the menu's face is "+" (its label "Add Automation Lane")
+/// so the line fits the default header width (220 pt) beside the name.
 struct AutomationTrackAccessory: View {
     let model: AutomationLanesModel
     let trackID: NodeIDValue
@@ -15,16 +17,19 @@ struct AutomationTrackAccessory: View {
             }
             let adds = controls.filter { $0.id.hasPrefix("track.\(trackID).automation.add.") }
             if !adds.isEmpty {
-                Menu("+ Lane") {
+                Menu {
                     ForEach(adds) { control in ControlButton(control: control) }
+                } label: {
+                    Text("+")
                 }
                 .menuStyle(.borderlessButton)
                 .fixedSize()
+                .help("Add Automation Lane")
+                .accessibilityLabel("Add Automation Lane")
                 .accessibilityIdentifier("track.\(trackID).automation.add.menu")
             }
         }
         .controlSize(.small)
-        .padding(4)
     }
 }
 

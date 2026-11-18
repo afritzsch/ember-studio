@@ -42,6 +42,34 @@ private func comp(_ window: ProjectWindowModel, _ folder: ModelID) -> [[Int64]] 
 @MainActor
 @Suite("Take folders UI (UI-016, REC-033, T-081)")
 struct TakeFolderUITests {
+    @Test("DW-270: ui.state visibleTracks/visibleRowCount count the rows shown: track rows, expanded automation lanes and take rows")
+    func visibleTracksCountLaneAndTakeRows() throws {
+        let (window, _) = try makeWindow(tracks: ["A", "B", "C"])
+        window.arrange.viewSize = CGSize(width: 1000, height: 22 + 3 * 64)  // viewport: three rows
+        let ids = window.project.tracks.map(\.id)
+        #expect(window.visibleTracks == ids && window.visibleRowCount == 3)
+        let (folder, _) = try makeFolder(window)
+        // A's three take rows push B and C out of view.
+        try window.control("takeFolder.\(folder).expand").action()
+        #expect(window.visibleTracks == [ids[0]] && window.visibleRowCount == 3)
+        window.scrollY = 3 * 64  // past A and its first two take rows: take 3, B, C
+        #expect(window.visibleTracks == [ids[0], ids[1], ids[2]])
+        try window.control("takeFolder.\(folder).expand").action()  // collapse
+        window.scrollY = 0
+        // Two automation lanes under B (track row 1): C is pushed to row 4, out of a three-row view.
+        try window.control("track.\(ids[1]).automation").action()
+        try window.control("track.\(ids[1]).automation.add.gain").action()
+        try window.control("track.\(ids[1]).automation.add.pan").action()
+        #expect(window.automation.layout.rowTotal == 5)
+        #expect(window.visibleTracks == [ids[0], ids[1]] && window.visibleRowCount == 3)
+        window.scrollY = 2 * 64  // B's two lanes and C
+        #expect(window.visibleTracks == [ids[1], ids[2]] && window.visibleRowCount == 3)
+        let state = UIStateDumper.dump(window, isMain: true)
+        #expect(state["visibleTracks"]?.arrayValue?.count == 2 && state["visibleRowCount"]?.int64Value == 3)
+        window.scrollY = 10_000
+        #expect(window.visibleTracks.isEmpty && window.visibleRowCount == 0)
+    }
+
     @Test("UI-016: collapsed a folder is its comp on the track row; expanding adds one row per take under the track; later tracks move down")
     func layoutAndGeometry() throws {
         let (window, _) = try makeWindow(tracks: ["A", "B"])

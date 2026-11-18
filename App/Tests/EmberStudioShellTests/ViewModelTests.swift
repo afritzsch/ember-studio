@@ -44,6 +44,9 @@ struct ViewModelTests {
         #expect(model.bottomPane == .pianoRoll)
         try model.control("pane.bottom.pianoRoll").action()
         #expect(model.bottomPane == nil, "the active tab closes the pane")
+        // DW-272 (T-095): no empty Comp Editor tab; comping lives in the arrange view (UI-016).
+        #expect(BottomPane.allCases == [.mixer, .pianoRoll, .deviceChain])
+        #expect(!model.controls.contains { $0.id == "pane.bottom.compEditor" })
 
         let start = model.pixelsPerBeat
         try model.control("zoom.in").action()
@@ -99,10 +102,23 @@ struct ViewModelTests {
         let bus = model.project.buses[0].id
         model.perform(AddSend(channelID: model.project.tracks[0].id, busID: bus))
         model.bottomPane = .mixer
-        let ids = model.controls.map(\.id)
-        #expect(Set(ids).count == ids.count)
+        let mixerIDs = model.controls.map(\.id)
+        #expect(Set(mixerIDs).count == mixerIDs.count)
+        // DW-278 (T-095): the Device Chain tab's controls too, with a built-in device on the selected
+        // track (one bottom tab shows at a time, so it is checked open on its own).
+        _ = ParamCatalog(engine: try EngineClient(.offline()))  // the built-ins' ParamInfo (FakeEngine has none)
+        model.pluginPanel.manager = try emptyManager()  // no system plugins in the picker
+        model.perform(InsertDevice(channel: model.project.tracks[0].id, device: .builtin(.eq)))
+        let eq = try #require(model.project.tracks[0].inserts.first?.id)
+        model.selectedTracks = [model.project.tracks[0].id]
+        model.bottomPane = .deviceChain
+        let chainIDs = model.controls.map(\.id)
+        #expect(Set(chainIDs).count == chainIDs.count)
+        #expect(chainIDs.contains("deviceChain.device.\(eq).bypass") && chainIDs.contains("deviceChain.add.builtin.eq"))
+        #expect(chainIDs.contains { $0.hasPrefix("deviceChain.device.\(eq).param.") })
+        let ids = mixerIDs + chainIDs.filter { !mixerIDs.contains($0) }
         for id in ids {
-            #expect(id.wholeMatch(of: /(transport|edit|zoom|pane|track|toast|snap|clip|pianoRoll|prefs|mixer|export)(\.[A-Za-z0-9]+)+/) != nil, "\(id)")
+            #expect(id.wholeMatch(of: /(transport|edit|zoom|pane|track|toast|snap|clip|pianoRoll|prefs|mixer|export|deviceChain)(\.[A-Za-z0-9]+)+/) != nil, "\(id)")
         }
         #expect(ids.contains("mixer.bus.\(bus).mute") && ids.contains("mixer.master.fader.reset"))
         let track = model.project.tracks[1].id

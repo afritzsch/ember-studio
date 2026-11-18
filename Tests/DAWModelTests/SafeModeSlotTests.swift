@@ -137,3 +137,91 @@ struct SafeModeSlotTests {
         await store.close()
     }
 }
+
+// DW-266 (T-095, docs/autobuild/DECISIONS.md "T-095 app decisions"): in safe mode one slot at a
+// time can be enabled ("Enable this plugin"). The override is session-only like safe mode: it lives
+// in EngineSync, never in the document, and has no undo entry.
+@Suite("Safe mode: enable one plugin slot (DW-266, PLUG-021)")
+@MainActor
+struct SafeModeSlotOverrideTests {
+    private func node(_ graph: EngineGraph, _ id: ModelID) -> EngineGraph.Node? { graph.nodes.first { $0.id == id } }
+
+    @Test("DW-266: build(enabledInSafeMode:) builds only the listed plugin slots with their plugin; outside safe mode it means nothing")
+    func builderOverride() throws {
+        let (p, au, vst3, eq, instrument) = safeModeProject()
+        let normal = GraphDescriptionBuilder.build(p, runtime: RuntimeIDs())
+        let safe = GraphDescriptionBuilder.build(p, runtime: RuntimeIDs(), pluginsDisabled: true, enabledInSafeMode: [au])
+        #expect(node(safe, au)?.configJSON == node(normal, au)?.configJSON)
+        for slot in [vst3, instrument] { #expect(node(safe, slot)?.configJSON.contains(#""disabled":true"#) == true) }
+        #expect(node(safe, eq)?.configJSON == node(normal, eq)?.configJSON)
+        let plain = GraphDescriptionBuilder.build(p, runtime: RuntimeIDs(), enabledInSafeMode: [au, vst3])
+        #expect(plain == normal)
+    }
+
+    @Test("DW-266: EngineSync applies the override (graph + bypass slots), keeps it out of the document and undo; leaving safe mode enables the rest")
+    func engineSyncOverride() async throws {
+        var (p, au, vst3, _, instrument) = safeModeProject()
+        // The AU slot is bypassed in the document: enabling it gives it that bypass back.
+        p.tracks[0].inserts[0].bypass = true
+        let store = ProjectStore(project: p)
+        store.autosavePolicy = nil
+        store.isSafeMode = true
+        let engine = FakeEngine()
+        let sync = try store.attachEngine(engine, debounce: .zero)
+        let bypassID = { (slot: ModelID) in try #require(sync.runtime.paramID(GraphNodeID.bypass(of: slot), 0)) }
+        let value = { (slot: ModelID) in engine.getParam(try bypassID(slot)) }
+        #expect(try value(vst3) == 1 && value(instrument) == 1 && value(au) == 1)
+        let before = engine.appliedGraphs.count
+
+        sync.pluginsEnabledInSafeMode = [instrument]
+        await sync.settle()
+        sync.flush()
+        #expect(engine.appliedGraphs.count == before + 1)
+        let graph = try #require(engine.appliedGraphs.last)
+        #expect(node(graph, instrument)?.configJSON.contains("disabled") == false)
+        #expect(node(graph, au)?.configJSON.contains(#""disabled":true"#) == true)
+        #expect(try value(instrument) == 0, "the enabled slot plays (its own bypass is off)")
+        #expect(try value(vst3) == 1)
+
+        sync.pluginsEnabledInSafeMode = [instrument, au]
+        await sync.settle()
+        sync.flush()
+        #expect(try value(au) == 1, "the AU's own bypass applies once it is enabled")
+        #expect(node(try #require(engine.appliedGraphs.last), au)?.configJSON.contains("disabled") == false)
+        #expect(store.project == p && !store.isDirty && !store.canUndo)
+
+        store.isSafeMode = false
+        sync.flush()
+        let all = try #require(engine.appliedGraphs.last)
+        for slot in [au, vst3, instrument] { #expect(node(all, slot)?.configJSON.contains("disabled") == false) }
+        #expect(try value(vst3) == 0 && value(au) == 1)
+        await store.close()
+    }
+
+    @Test("DW-266: ProjectStore.safeModeEnabledSlots reaches the attached engine and a newly attached one (handover); session-only")
+    func storeOverrideSurvivesHandover() async throws {
+        let (p, au, vst3, _, instrument) = safeModeProject()
+        let store = ProjectStore(project: p)
+        store.autosavePolicy = nil
+        store.isSafeMode = true
+        let first = FakeEngine()
+        let sync = try store.attachEngine(first, debounce: .zero)
+        store.safeModeEnabledSlots = [au]
+        #expect(sync.pluginsEnabledInSafeMode == [au])
+        sync.flush()
+        #expect(node(try #require(first.appliedGraphs.last), au)?.configJSON.contains("disabled") == false)
+        #expect(store.project == p && !store.isDirty && !store.canUndo)
+
+        // The engine moves (DW-156 handover): the new engine's graph has the slot enabled already.
+        let second = FakeEngine()
+        let next = try store.attachEngine(second, debounce: .zero)
+        #expect(next.pluginsEnabledInSafeMode == [au])
+        let graph = try #require(second.appliedGraphs.last)
+        #expect(node(graph, au)?.configJSON.contains("disabled") == false)
+        for slot in [vst3, instrument] { #expect(node(graph, slot)?.configJSON.contains(#""disabled":true"#) == true) }
+        let bypass = try #require(next.runtime.paramID(GraphNodeID.bypass(of: au), 0))
+        #expect(second.getParam(bypass) == 0)
+        #expect(!store.isDirty && !store.canUndo)
+        await store.close()
+    }
+}

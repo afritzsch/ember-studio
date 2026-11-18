@@ -2,8 +2,7 @@ import DAWModel
 import SwiftUI
 
 /// The project window (12 *Layout*): toolbar, browser | arrange | inspector, bottom pane, toasts.
-/// Thin over `ProjectWindowModel` (UI-003); the device chain and comp editor panes are placeholders
-/// until their tasks fill them in.
+/// Thin over `ProjectWindowModel` (UI-003).
 struct ProjectWindowView: View {
     @Bindable var model: ProjectWindowModel
 
@@ -59,13 +58,10 @@ struct ProjectWindowView: View {
                     // UI-030: strips need room for the fader between sends, pan and the buttons.
                     MixerPane(mixer: model.mixer)
                         .frame(height: 340)
-                } else if pane == .deviceChain {
+                } else {
                     // UI-032 (T-065): device cards need room for a column of generic controls.
                     DeviceChainPane(model: model.deviceChain)
                         .frame(height: 300)
-                } else {
-                    PanePlaceholder(title: pane.title, detail: "")
-                        .frame(height: 140)
                 }
             }
             Divider()
@@ -108,15 +104,41 @@ private struct ToolbarRow: View {
                     .accessibilityIdentifier("transport.time")
             }
             .frame(minWidth: 90, alignment: .leading)
+            // DW-180 (T-095): editable; a commit sets bar 1's tempo / signature (one undo entry).
             VStack(alignment: .leading, spacing: 0) {
-                Text(String(format: "%.2f BPM", model.tempo))
-                    .font(.system(.body, design: .monospaced))
-                    .accessibilityIdentifier("transport.tempo")
-                Text(model.signature)
-                    .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .accessibilityIdentifier("transport.signature")
+                HStack(spacing: 3) {
+                    CommitTextField(id: "transport.tempo", label: "Tempo at Bar 1 (BPM)", value: model.tempoFieldText,
+                                    commit: { model.commitTempo($0) }, width: 52)
+                    Text("BPM").font(.caption).foregroundStyle(.secondary).fixedSize()
+                    Group {
+                        if let down = controls["transport.tempo.down"] { ControlButton(control: down, systemImage: "minus") }
+                        if let up = controls["transport.tempo.up"] { ControlButton(control: up, systemImage: "plus") }
+                    }
+                    .buttonStyle(.borderless)
+                    .controlSize(.small)
+                    .imageScale(.small)
+                }
+                HStack(spacing: 2) {
+                    CommitTextField(id: "transport.signature", label: "Time Signature at Bar 1", value: model.signature,
+                                    commit: { model.commitSignature($0) }, width: 40)
+                    Menu {
+                        ForEach(ProjectWindowModel.signaturePresets.indices, id: \.self) { i in
+                            let preset = ProjectWindowModel.signaturePresets[i]
+                            if let item = controls["transport.signature.\(preset.numerator).\(preset.denominator)"] {
+                                ControlToggle(control: item)
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "chevron.down")
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .accessibilityIdentifier("transport.signature.menu")
+                }
+                .font(.caption)
             }
+            .fixedSize()
             Spacer()
             // DW-183: a session-rate change re-converting the project's audio (IO-033).
             if let reload = model.audioPrefs.reloadText {
@@ -215,9 +237,9 @@ private struct TrackHeaderColumn: View {
                         .padding(24)
                 }
                 ForEach(model.trackHeaders) { track in
-                    TrackHeaderRow(track: track)
+                    // DW-271 (T-095): "A" and "+ Lane" sit in the header's first line, not over its second.
+                    TrackHeaderRow(track: track, automation: AutomationTrackAccessory(model: model.automation, trackID: track.id))
                         .frame(height: ProjectWindowModel.trackHeight - 1)
-                        .overlay(alignment: .bottomTrailing) { AutomationTrackAccessory(model: model.automation, trackID: track.id) }
                     Divider()
                     TakeRowHeaders(model: model.takes, trackID: track.id)  // UI-016 (T-081): take rows come first
                     AutomationLaneHeaders(model: model.automation, trackID: track.id)  // UI-015 (T-075)
@@ -242,21 +264,32 @@ private struct TimelineCanvas: NSViewRepresentable {
 /// control (UI-052); the menus hold toggles, like the snap menu.
 private struct TrackHeaderRow: View {
     let track: TrackHeaderModel
+    /// UI-015: the automation "A" toggle and "+ Lane" menu, in the first line (DW-271).
+    let automation: AutomationTrackAccessory
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 6) {
+            HStack(spacing: 4) {
                 ControlButton(control: track.selectControl, face: track.name)
                     .buttonStyle(.plain)
                     .font(.headline)
                     .lineLimit(1)
-                Text(track.kind == .midi ? "MIDI" : "Audio")
+                // DW-271 (T-095): the kind as an icon, so the name keeps room beside A, +, M and S.
+                Image(systemName: track.kind == .midi ? "pianokeys" : "waveform")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .fixedSize()
-                Spacer(minLength: 4)
-                ControlToggle(control: track.muteControl, face: "M").fixedSize()
-                ControlToggle(control: track.soloControl, face: "S").fixedSize()
+                    .help(track.kind == .midi ? "MIDI track" : "Audio track")
+                    .accessibilityLabel(track.kind == .midi ? "MIDI" : "Audio")
+                    .accessibilityIdentifier("track.\(track.id).kind")
+                Spacer(minLength: 2)
+                // DW-271: small, like the second line's, so A, +, M and S fit beside the name.
+                HStack(spacing: 3) {
+                    automation
+                    ControlToggle(control: track.muteControl, face: "M").fixedSize()
+                    ControlToggle(control: track.soloControl, face: "S").fixedSize()
+                }
+                .controlSize(.small)
+                .fixedSize()
             }
             HStack(spacing: 4) {
                 // Hollow when disarmed: the red tint alone reads almost the same on and off.
@@ -273,8 +306,11 @@ private struct TrackHeaderRow: View {
                     .accessibilityIdentifier("track.\(track.id).input.menu")
                 }
                 if let midi = track.midiInputMenu {
+                    // DW-271 (T-095): the picker gives way (its title truncates) so "Mon: …" stays
+                    // inside the default header width.
                     TrackMidiInputPicker(menu: midi)  // T-093 (DW-216)
-                        .fixedSize()
+                        .frame(minWidth: 40)
+                        .layoutPriority(-1)
                         .accessibilityIdentifier("track.\(track.id).midiInput.menu")
                 }
                 Menu("Mon: \(TrackHeaderModel.monitoringTitle(track.monitoring))") {

@@ -46,6 +46,8 @@ final class DeviceChainModel {
     @ObservationIgnored private var pluginInfos: [NodeIDValue: PluginInfo] = [:]
     @ObservationIgnored private var lastInfoRefresh = Date.distantPast
     @ObservationIgnored private var cachedInSafeMode = false
+    /// DW-266 (T-095): the slots enabled one by one when `pluginInfos` was read.
+    @ObservationIgnored private var cachedEnabledInSafeMode: Set<NodeIDValue> = []
     @ObservationIgnored var now: () -> Date = { Date() }
     /// Where plugin info comes from: the window's engine (`pluginInfoJSON`), or a test's stand-in.
     @ObservationIgnored var readPluginInfo: (@MainActor (NodeIDValue) -> String)?
@@ -120,9 +122,8 @@ final class DeviceChainModel {
     }
 
     private func card(_ slot: DeviceSlot, channel: NodeIDValue, position: Int?, count: Int) -> DeviceCardModel {
-        let safeMode = window?.store.isSafeMode ?? false
         let info = slot.isPlugin ? pluginInfo(slot.id) : nil
-        let forced = slot.isPlugin && safeMode
+        let forced = window?.isDisabledBySafeMode(slot) ?? false  // DW-266: unless enabled one by one
         var card = DeviceCardModel(
             id: slot.id, name: MixerModel.insertName(slot.kind), format: Self.format(slot.kind), isInstrument: position == nil,
             position: position, bypass: slot.bypass, safeModeBypassed: forced, isPlugin: slot.isPlugin,
@@ -227,9 +228,12 @@ final class DeviceChainModel {
     func pluginInfo(_ slot: NodeIDValue) -> PluginInfo? {
         // T-083: safe mode builds plugin slots without their plugin (`"disabled": true`); toggling
         // it changes what the engine reports, so infos read either side of a toggle aren't reused.
+        // DW-266 (T-095): so does enabling one slot in safe mode.
         let safeMode = window?.store.isSafeMode ?? false
-        if safeMode != cachedInSafeMode {
+        let enabled = window?.store.safeModeEnabledSlots ?? []
+        if safeMode != cachedInSafeMode || enabled != cachedEnabledInSafeMode {
             cachedInSafeMode = safeMode
+            cachedEnabledInSafeMode = enabled
             pluginInfos = [:]
         }
         if let cached = pluginInfos[slot] { return cached }
@@ -308,6 +312,12 @@ final class DeviceChainModel {
             })
             controls.append(.button("\(prefix).moveDown", "Move \(name) Down", enabled: position < count - 1) { [weak self] in
                 self?.window?.perform(MoveDevice(slotID: id, index: position + 1))
+            })
+        }
+        if card.safeModeBypassed {
+            // DW-266 (T-095): load just this plugin in safe mode (session-only, no undo entry).
+            controls.append(.button("\(prefix).enablePlugin", "Enable \(name)") { [weak self] in
+                self?.window?.enablePluginInSafeMode(id)
             })
         }
         if card.isPlugin {

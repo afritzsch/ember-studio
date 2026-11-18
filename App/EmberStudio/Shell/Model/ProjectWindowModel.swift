@@ -2,16 +2,16 @@ import DAWModel
 import Foundation
 import Observation
 
-/// The panes of the bottom area (12 *Layout*).
+/// The panes of the bottom area (12 *Layout*). DW-272 (T-095): there is no comp editor tab; comping
+/// happens on the take rows in the arrange view (UI-016).
 enum BottomPane: String, CaseIterable, Codable, Sendable {
-    case mixer, pianoRoll, deviceChain, compEditor
+    case mixer, pianoRoll, deviceChain
 
     var title: String {
         switch self {
         case .mixer: "Mixer"
         case .pianoRoll: "Piano Roll"
         case .deviceChain: "Device Chain"
-        case .compEditor: "Comp Editor"
         }
     }
 }
@@ -298,14 +298,30 @@ final class ProjectWindowModel: Identifiable {
         return pairs.sorted()
     }
 
-    /// Tracks at least partly inside the arrange viewport (rows of `trackHeight`).
+    /// Tracks with at least one row partly inside the arrange viewport: the track's own row, one of
+    /// its expanded automation lanes (UI-015) or one of its take rows (UI-016), each `trackHeight`
+    /// tall and laid out as the canvas draws them (DW-270, T-095).
     var visibleTracks: [NodeIDValue] {
-        let top = scrollY
-        let bottom = scrollY + viewportHeight
-        return store.project.tracks.enumerated().compactMap { index, track in
-            let y = Double(index) * Self.trackHeight
-            return y + Self.trackHeight > top && y < bottom ? track.id : nil
-        }
+        let tracks = store.project.tracks
+        return visibleGeometry.visibleTracks(of: tracks.count).map { tracks[$0].id }
+    }
+
+    /// DW-270 (T-095): the display rows at least partly inside the viewport: track rows, automation
+    /// lane rows and take rows.
+    var visibleRowCount: Int {
+        let g = visibleGeometry
+        let total = g.slotCount(tracks: store.project.tracks.count)
+        let top = Int((scrollY / Self.trackHeight).rounded(.down))
+        let bottom = Int(((scrollY + viewportHeight) / Self.trackHeight).rounded(.up))
+        return max(min(bottom, total) - max(top, 0), 0)
+    }
+
+    /// The arrange geometry (lane and take rows included) over this window's scroll and viewport.
+    private var visibleGeometry: TimelineGeometry {
+        var g = arrange.geometry
+        g.scrollY = scrollY
+        g.size.height = viewportHeight + TimelineGeometry.rulerHeight
+        return g
     }
 
     // MARK: Toolbar (12 Layout)
@@ -377,6 +393,7 @@ final class ProjectWindowModel: Identifiable {
             .toggle("pane.browser", "Browser", isOn: showsBrowser) { [weak self] in self?.showsBrowser.toggle() },
             .toggle("pane.inspector", "Inspector", isOn: showsInspector) { [weak self] in self?.showsInspector.toggle() },
         ]
+        controls += tempoSignatureControls  // DW-180 (T-095): tempo nudges, signature menu
         controls += BottomPane.allCases.map { pane in
             .toggle("pane.bottom.\(pane.rawValue)", pane.title, isOn: bottomPane == pane) { [weak self] in
                 guard let self else { return }
@@ -495,7 +512,10 @@ final class ProjectWindowModel: Identifiable {
     @discardableResult
     func handleKey(_ chord: KeyChord, isRepeat: Bool = false) -> Bool {
         // UI-020: with the piano roll focused, its keys (⌫, ⌘A, Q) act on notes rather than clips.
-        let pianoRollBinding = pianoRoll.hasKeyFocus && pianoRoll.isOpen ? KeyBindings.pianoRollBinding(for: chord) : nil
+        let pianoRollFocused = pianoRoll.hasKeyFocus && pianoRoll.isOpen
+        // DW-179: the focused piano roll's own arrows transpose notes (PianoRollView.keyDown).
+        if pianoRollFocused, case .arrow = chord.key { return false }
+        let pianoRollBinding = pianoRollFocused ? KeyBindings.pianoRollBinding(for: chord) : nil
         guard let binding = pianoRollBinding ?? KeyBindings.binding(for: chord), !isRepeat || binding.repeats,
               let control = controls.first(where: { $0.id == binding.controlID }), control.isEnabled
         else { return false }
