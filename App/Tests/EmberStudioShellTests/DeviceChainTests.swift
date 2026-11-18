@@ -382,6 +382,59 @@ struct DeviceChainTests {
         await store.close()
     }
 
+    @Test("DW-266: in safe mode \"Enable this plugin\" on a card loads just that slot: its own bypass, editor allowed, mixer and banner follow; session-only (no undo, not dirty); Enable Plugins clears it")
+    func enableOnePluginInSafeMode() throws {
+        let (window, engine, a, _, _, _, _, _) = try chainWindow()
+        window.perform(InsertDevice(channel: a, device: .au(AUDescriptor(identifier: "aufx:dely:appl", name: "AUDelay"))))
+        window.perform(InsertDevice(channel: a, device: .au(AUDescriptor(identifier: "aufx:dist:appl", name: "AUDistortion"))))
+        let inserts = window.project.track(a)!.inserts
+        let delay = inserts[inserts.count - 2].id, dist = inserts[inserts.count - 1].id
+        window.perform(SetDeviceBypass(slotID: delay, bypass: true))  // its own bypass comes back
+        window.store.isSafeMode = true
+        let undoLabel = window.store.undoLabel
+        let dirty = window.store.isDirty
+        #expect(try card(window, delay).safeModeBypassed && card(window, dist).safeModeBypassed)
+        let enable = try window.control("deviceChain.device.\(delay).enablePlugin")
+        #expect(enable.kind == .button && enable.label == "Enable AUDelay")
+        #expect(window.safeModePlugins.map(\.slotID) == [delay, dist])
+
+        enable.action()
+        #expect(window.store.safeModeEnabledSlots == [delay])
+        #expect(window.store.engineSync?.pluginsEnabledInSafeMode == [delay])
+        #expect(window.store.undoLabel == undoLabel && window.store.isDirty == dirty, "session-only: no undo entry")
+        let enabled = try card(window, delay)
+        #expect(!enabled.safeModeBypassed && enabled.bypass)
+        #expect(try card(window, dist).safeModeBypassed, "the other plugin stays disabled")
+        #expect(!window.controls.contains { $0.id == "deviceChain.device.\(delay).enablePlugin" })
+        #expect(window.controls.contains { $0.id == "deviceChain.device.\(dist).enablePlugin" })
+        let toggle = try window.control("deviceChain.device.\(delay).bypass")
+        #expect(toggle.isEnabled && toggle.isOn == true && toggle.label == "Bypass AUDelay")
+        #expect(try window.control("deviceChain.device.\(delay).editor").isEnabled, "its editor can open")
+        #expect(try !window.control("deviceChain.device.\(dist).editor").isEnabled)
+        #expect(window.safeModePlugins.map(\.slotID) == [dist] && window.safeModeEnabledPlugins.map(\.slotID) == [delay])
+        #expect(window.safeModeMessage.contains("1 plugin is disabled") && window.safeModeMessage.contains("Enabled: AUDelay"))
+        #expect(window.toasts.toasts.last?.title == "Plugin enabled")
+        // The engine builds it with its plugin; the other stays absent.
+        window.store.engineSync?.flush()
+        let graph = try #require(engine.appliedGraphs.last)
+        #expect(graph.nodes.first { $0.id == delay }?.configJSON.contains("disabled") == false)
+        #expect(graph.nodes.first { $0.id == dist }?.configJSON.contains(#""disabled":true"#) == true)
+        // ui.state
+        let state = UIStateDumper.dump(window.deviceChain)
+        let devices = try #require(state["devices"]?.arrayValue)
+        #expect(devices.first { $0["id"]?.int64Value == Int64(bitPattern: delay) }?["safeModeBypassed"] == false)
+        #expect(devices.first { $0["id"]?.int64Value == Int64(bitPattern: dist) }?["safeModeBypassed"] == true)
+        // The mixer follows.
+        window.bottomPane = .mixer
+        let strip = try #require(window.mixer.strips.first { $0.id == a })
+        #expect(strip.inserts.first { $0.id == delay }?.safeModeBypassed == false)
+        #expect(strip.inserts.first { $0.id == dist }?.safeModeBypassed == true)
+        // Enable Plugins (the banner) ends safe mode and the per-slot set with it.
+        window.enablePlugins()
+        #expect(!window.store.isSafeMode && window.store.safeModeEnabledSlots.isEmpty)
+        #expect(window.store.undoLabel == undoLabel)
+    }
+
     @Test("DW-250: the mixer's inserts are editable: add from the picker (built-ins and scanned plugins; the master too), bypass, up/down, remove, show in the Device Chain tab")
     func mixerInserts() throws {
         let (window, _, a, _, _, eq, comp, delay) = try chainWindow()

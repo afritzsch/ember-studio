@@ -123,7 +123,7 @@ final class MixerModel {
         // T-063 (PLUG-017): plugins have an editor; whether it is open shows on the strip.
         MixerInsert(id: slot.id, name: Self.insertName(slot.kind), bypass: slot.bypass, isPlugin: slot.isPlugin,
                     editorOpen: window?.pluginEditors.isOpen(slot.id) ?? false,
-                    safeModeBypassed: slot.isPlugin && window?.store.isSafeMode == true,  // DW-226 (T-065)
+                    safeModeBypassed: window?.isDisabledBySafeMode(slot) ?? false,  // DW-226 (T-065), DW-266 (T-095)
                     format: DeviceChainModel.format(slot.kind))
     }
 

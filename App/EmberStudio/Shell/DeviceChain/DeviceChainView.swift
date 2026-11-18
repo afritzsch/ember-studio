@@ -95,6 +95,11 @@ private struct DeviceCardView: View {
                     .font(.caption)
                     .foregroundStyle(.orange)
                     .accessibilityIdentifier("\(card.controlPrefix).safeMode")
+                // DW-266 (T-095): load just this plugin (the banner's "Enable Plugins" loads them all).
+                if let enable = card.control("enablePlugin") {
+                    ControlButton(control: enable, face: "Enable this plugin")
+                        .controlSize(.small)
+                }
             } else if card.loaded == false {
                 Text(card.loadError.map { "Not loaded: \($0)" } ?? "Not loaded")
                     .font(.caption)

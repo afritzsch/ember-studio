@@ -48,9 +48,12 @@ final class PluginEditorModel {
     var openSlots: [NodeIDValue] { editors.keys.sorted() }
     func isOpen(_ slot: NodeIDValue) -> Bool { editors[slot] != nil }
 
-    /// A slot of the window's project that hosts an AU or VST3 plugin, with an engine and safe mode off.
+    /// A slot of the window's project that hosts an AU or VST3 plugin, with an engine and safe mode off
+    /// (or, DW-266, the slot enabled one by one in safe mode: its plugin is loaded).
     func canOpen(_ slot: NodeIDValue) -> Bool {
-        guard let window, window.engine != nil || makeView != nil, !window.store.isSafeMode else { return false }
+        guard let window, window.engine != nil || makeView != nil,
+              !window.store.isSafeMode || window.store.safeModeEnabledSlots.contains(slot)
+        else { return false }
         return Self.pluginSlot(slot, in: window.project) != nil
     }
 

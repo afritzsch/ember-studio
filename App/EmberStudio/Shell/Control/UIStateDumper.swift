@@ -29,7 +29,7 @@ import Foundation
 ///                    "selection", "marquee", "gesture", "playhead": {"tick", "x"}},
 ///        "pianoRoll": {…}, "audioPreferences": {…}, "mixer": {…}, "export": {…},
 ///        "engine": {"live", "mode"} | null, "feedbackWarning": {…} | null,
-///        "safeMode": {"on", "plugins": [{"slot", "format", "identifier", "name"}]}}],
+///        "safeMode": {"on", "plugins": [{"slot", "format", "identifier", "name"}], "enabled": [same]}}],
 ///      "liveWindow": id | null, "crashRecovery": {…} | null}
 @MainActor
 enum UIStateDumper {
@@ -144,7 +144,8 @@ enum UIStateDumper {
             "deviceChain": dump(window.deviceChain),  // T-065 (UI-032)
             "pluginManager": dump(window.pluginPanel),  // T-065 (UI-041)
             // T-083 (PLUG-021, DW-226): safe mode, with the plugin slots it keeps from loading.
-            "safeMode": ["on": .bool(store.isSafeMode), "plugins": plugins(window.safeModePlugins)],
+            "safeMode": ["on": .bool(store.isSafeMode), "plugins": plugins(window.safeModePlugins),
+                         "enabled": plugins(window.safeModeEnabledPlugins)],  // DW-266 (T-095)
         ]
     }
 
