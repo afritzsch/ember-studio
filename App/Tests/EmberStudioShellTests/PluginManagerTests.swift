@@ -25,9 +25,16 @@ private final class FakeScanner: PluginScanning, @unchecked Sendable {
     let lock = NSLock()
     private var results: [String: [PluginDescriptor]]
     private(set) var scannedPaths: [String] = []
+    private var limits: [String: TimeInterval] = [:]
     init(_ results: [String: [PluginDescriptor]]) { self.results = results }
     func set(_ path: String, _ plugins: [PluginDescriptor]) { lock.withLock { results[path] = plugins } }
     var scanned: [String] { lock.withLock { scannedPaths } }
+    /// T-094: the time limits of `scan(_:timeout:)` calls, by path.
+    var timeouts: [String: TimeInterval] { lock.withLock { limits } }
+    func scan(_ candidate: PluginCandidate, timeout: TimeInterval) throws(PluginCatalogError) -> [PluginDescriptor] {
+        lock.withLock { limits[candidate.path] = timeout }
+        return try scan(candidate)
+    }
     func scan(_ candidate: PluginCandidate) throws(PluginCatalogError) -> [PluginDescriptor] {
         lock.withLock {
             scannedPaths.append(candidate.path)
@@ -138,6 +145,39 @@ struct PluginManagerTests {
         #expect(window.deviceChain.choices.last?.name == "Alpha")
         try window.control("prefs.plugins.close").action()
         #expect(!window.pluginPanel.isOpen)
+    }
+
+    @Test("UI-041, PLUG-001 (DW-275): a plugin whose scan timed out offers Retry (120 s), which rescans it with the longer limit; ui.state marks it timedOut")
+    func timedOutRetry() async throws {
+        let dir = try TempDir()
+        let slow = vst3("/s.vst3", "Slowpoke")
+        let scanner = FakeScanner(["/a.vst3": [ok("/a.vst3", "Alpha")], "/s.vst3": [.timedOut(slow, after: 30)]])
+        let manager = PluginManagerModel(cacheURL: dir.file("plugins.json"), scannerURL: URL(fileURLWithPath: "/x/PluginScanner"),
+                                         discovery: FakeDiscovery([vst3("/a.vst3", "Alpha"), slow, vst3("/z.vst3", "Zap")]), scanner: scanner)
+        let (window, _) = try makeWindow()
+        window.pluginPanel.manager = manager
+        try window.control("prefs.plugins").action()
+        manager.scan()
+        await manager.scanTask?.value
+        #expect(manager.blocked.map(\.name) == ["Slowpoke", "Zap"])
+        #expect(manager.blocked.map(\.isTimedOut) == [true, false])
+        #expect(PluginManagerModel.retryTimeout == 120)
+        let ids = window.controls.filter { $0.id.hasPrefix("prefs.plugins.blocked") }.map(\.id)
+        #expect(ids == ["prefs.plugins.blocked.retry", "prefs.plugins.blocked.0.retry", "prefs.plugins.blocked.0.retryLong",
+                        "prefs.plugins.blocked.1.retry"])
+        #expect(try window.control("prefs.plugins.blocked.0.retryLong").label == "Retry Slowpoke (120 s)")
+        let state = UIStateDumper.dump(window.pluginPanel)
+        #expect(state["blocked"]?[0]?["timedOut"] == true && state["blocked"]?[1]?["timedOut"] == false)
+        #expect(state["blocked"]?[0]?["reason"] == "timed out after 30 s")
+
+        // The longer retry gets through (the plugin needed more than 30 s); only it got the limit.
+        scanner.set("/s.vst3", [ok("/s.vst3", "Slowpoke")])
+        try window.control("prefs.plugins.blocked.0.retryLong").action()
+        #expect(manager.isScanning)
+        await manager.scanTask?.value
+        #expect(scanner.timeouts == ["/s.vst3": 120])
+        #expect(manager.blocked.map(\.name) == ["Zap"] && manager.usable.map(\.name) == ["Alpha", "Slowpoke"])
+        #expect(!window.controls.contains { $0.id.hasSuffix(".retryLong") }, "a crash isn't offered the longer retry")
     }
 
     @Test("UI-041, CONV §9: a tool-launched app works on its own copy of the scan cache under $TMPDIR; a person's app on the user's cache")

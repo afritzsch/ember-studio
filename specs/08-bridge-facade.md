@@ -390,6 +390,15 @@ Additive. Safe mode builds plugin slots without their plugin (10 "Contract delta
 
 Affected: T-083 only. Tests: `AUPluginTests`/`VST3PluginTests` "safe mode" (`auSafeModeSlots`, `vst3SafeModeSlots`: fake AU / EmberTest instance counters unchanged, no failure, pass-through, state kept); `SafeModeSlotTests` (DAWModelTests).
 
+### Contract delta (T-094), accepted (autobuild, see docs/autobuild/DECISIONS.md "T-094 plugin info")
+Additive (DW-213). The hosting side is in 10 "Contract delta (T-094)".
+- **`pluginInfoJSON`** param rows gain `"steps": n` (always), `"labels": [...]` (steps + 1 strings, when the plugin names its steps; ≤ 128 steps) and `"display"` (the plugin's string for `"value"`, without the unit, when it has one). Same shape as `paramInfoJSON`'s steps/labels (06 "Contract delta (T-065)"). VST3 `min`/`max`/`value` stay normalized.
+- **New:** `std::string paramDisplay(NodeID slot, uint32_t param, float value) const;` (non-RT, any thread): the display string of `params[param]` at `value` (VST3: normalized, clamped, `getParamStringByValue`; AU: in the parameter's range, its step label or string-from-value). Empty when the slot has no loaded plugin (or is disabled by safe mode), the index is unknown, or the plugin has no string for it.
+- **Swift:** `EngineProtocol.paramDisplay(slot:index:value:) -> String`, a requirement with a default `""` in its own protocol extension at the end of `EngineProtocol.swift`; `EngineClient` forwards it. `FakeEngine` is unchanged.
+- **App (12 UI-032):** a generic plugin card shows the plugin's string with its unit for a continuous param (from `display` when the value is the plugin's own, else `paramDisplay`, cached per slot, param and value until the info changes). A switch or a stepped param of ≤ 128 steps is a toggle or a menu of its labels, like a built-in's (a switch whose labels are just Off/On, VST3's default strings, stays a toggle); more steps make a slider. `dawctl`/`dawmcp` see the new fields through `engine.pluginInfo`.
+
+Affected: T-094 only.
+
 ## Status
 | ID | status | test |
 |---|---|---|

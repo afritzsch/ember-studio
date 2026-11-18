@@ -17,19 +17,48 @@ final class FakeDiscovery: PluginDiscovering, @unchecked Sendable {
     func candidates() -> [PluginCandidate] { candidatesToReport }
 }
 
-/// Records which candidates were scanned. Paths containing "Crash" come back blocked, as the
-/// real launcher would report them.
+/// Records which candidates were scanned. Paths containing "Crash" come back blocked, and paths
+/// containing "Slow" time out unless given a time limit of their own, as the real launcher would
+/// report them. Scans may run in parallel (DW-018), so the log is kept sorted.
 final class RecordingScanner: PluginScanning, @unchecked Sendable {
     private let lock = NSLock()
     private var log: [String] = []
+    private var limits: [String: TimeInterval] = [:]
+    private var running = 0
+    private var peak = 0
+    /// How long each scan takes (to see scans overlap).
+    var delay: TimeInterval = 0
 
-    var scannedPaths: [String] { lock.withLock { log } }
-    func clear() { lock.withLock { log.removeAll() } }
+    /// The scanned paths, sorted (scan order isn't defined with parallel scans).
+    var scannedPaths: [String] { lock.withLock { log.sorted() } }
+    /// T-094: the time limits passed with `scan(_:timeout:)`, by path.
+    var timeouts: [String: TimeInterval] { lock.withLock { limits } }
+    /// DW-018: the most scans that ran at once.
+    var peakConcurrency: Int { lock.withLock { peak } }
+    func clear() { lock.withLock { log.removeAll(); limits.removeAll(); peak = 0 } }
+
+    func scan(_ candidate: PluginCandidate, timeout: TimeInterval) throws(PluginCatalogError) -> [PluginDescriptor] {
+        lock.withLock { limits[candidate.path] = timeout }
+        return try scan(candidate, limited: true)
+    }
 
     func scan(_ candidate: PluginCandidate) throws(PluginCatalogError) -> [PluginDescriptor] {
-        lock.withLock { log.append(candidate.path) }
+        try scan(candidate, limited: false)
+    }
+
+    private func scan(_ candidate: PluginCandidate, limited: Bool) throws(PluginCatalogError) -> [PluginDescriptor] {
+        lock.withLock {
+            log.append(candidate.path)
+            running += 1
+            peak = max(peak, running)
+        }
+        if delay > 0 { Thread.sleep(forTimeInterval: delay) }
+        lock.withLock { running -= 1 }
         if candidate.path.contains("Crash") {
             return [.blocked(candidate, reason: "scanner crashed (SIGSEGV)")]
+        }
+        if candidate.path.contains("Slow") && !limited {
+            return [.timedOut(candidate, after: ScannerLauncher.defaultTimeout)]
         }
         return [PluginDescriptor(
             format: candidate.format, identifier: "\(candidate.path)#1", name: candidate.name,
@@ -159,6 +188,77 @@ struct PluginCatalogTests {
         #expect(throws: PluginCatalogError.scannerUnavailable("test")) { try catalog.refresh() }
         #expect(!FileManager.default.fileExists(atPath: cacheURL.path))
         #expect(catalog.descriptors.isEmpty)
+    }
+
+    // MARK: T-094 (DW-018, DW-275)
+
+    @Test("DW-018: up to 4 candidates scan at once; the cache and summary keep discovery order")
+    func parallelScans() throws {
+        let dir = try TestDirectory()
+        let paths = (0..<10).map { "/P/Plugin\($0).vst3" }
+        let scanner = RecordingScanner()
+        scanner.delay = 0.3
+        var catalog = PluginCatalog(cacheURL: dir.path("plugins.json"), discovery: FakeDiscovery(paths.map { .vst3($0) }), scanner: scanner)
+        #expect(catalog.maxConcurrentScans == 4)
+        let start = Date()
+        let summary = try catalog.refresh()
+        #expect(scanner.peakConcurrency <= 4)
+        #expect(scanner.peakConcurrency >= 2, "scans overlap")
+        #expect(Date().timeIntervalSince(start) < 10 * 0.3, "faster than one at a time")
+        #expect(summary.scanned.map(\.path) == paths)
+        #expect(catalog.cache.entries.map(\.path) == paths)
+        #expect(scanner.scannedPaths == paths.sorted())
+
+        // One at a time when asked.
+        let serialDir = try TestDirectory()
+        scanner.clear()
+        scanner.delay = 0.05
+        var serial = PluginCatalog(cacheURL: serialDir.path("plugins.json"), discovery: FakeDiscovery(paths.map { .vst3($0) }), scanner: scanner)
+        serial.maxConcurrentScans = 1
+        try serial.refresh()
+        #expect(scanner.peakConcurrency == 1)
+        #expect(serial.cache.entries.map(\.path) == paths)
+    }
+
+    @Test("DW-018: a scanner that can't run fails the parallel scan and caches nothing")
+    func parallelScanFailure() throws {
+        let dir = try TestDirectory()
+        let cacheURL = dir.path("plugins.json")
+        let discovery = FakeDiscovery((0..<9).map { .vst3("/P/P\($0).vst3") })
+        var catalog = PluginCatalog(cacheURL: cacheURL, discovery: discovery, scanner: FailingScanner())
+        #expect(throws: PluginCatalogError.scannerUnavailable("test")) { try catalog.refresh() }
+        #expect(!FileManager.default.fileExists(atPath: cacheURL.path))
+    }
+
+    @Test("PLUG-001 (DW-275): a timed-out plugin is retried with the longer limit; other new plugins scan as usual")
+    func retryTimedOut() throws {
+        let dir = try TestDirectory()
+        let discovery = FakeDiscovery([.vst3("/P/A.vst3"), .vst3("/P/Slow.vst3"), .vst3("/P/Crash.vst3")])
+        let scanner = RecordingScanner()
+        var catalog = PluginCatalog(cacheURL: dir.path("plugins.json"), discovery: discovery, scanner: scanner)
+        try catalog.refresh()
+        #expect(catalog.blocked.map(\.identifier) == ["/P/Slow.vst3", "/P/Crash.vst3"])
+        #expect(catalog.blocked.map(\.isTimedOut) == [true, false])
+        #expect(catalog.blocked.first?.reason == "timed out after 30 s")
+        #expect(scanner.timeouts.isEmpty)
+
+        // A new plugin appears meanwhile; only the retried one gets the long limit.
+        discovery.candidatesToReport.append(.vst3("/P/New.vst3"))
+        scanner.clear()
+        let summary = try catalog.retryBlocked(identifiers: ["/P/Slow.vst3"], timeout: ScannerLauncher.retryTimeout)
+        #expect(scanner.scannedPaths == ["/P/New.vst3", "/P/Slow.vst3"])
+        #expect(scanner.timeouts == ["/P/Slow.vst3": 120])
+        #expect(summary.scanned.map(\.path) == ["/P/Slow.vst3", "/P/New.vst3"])
+        #expect(catalog.blocked.map(\.identifier) == ["/P/Crash.vst3"])
+        #expect(catalog.plugins.map(\.identifier).contains("/P/Slow.vst3#1"))
+        // Saved.
+        #expect(PluginCache.load(from: dir.path("plugins.json")) == catalog.cache)
+
+        // Without a timeout it is resetBlocked + refresh, at the scanner's own limit.
+        scanner.clear()
+        try catalog.retryBlocked()
+        #expect(scanner.scannedPaths == ["/P/Crash.vst3"])
+        #expect(scanner.timeouts.isEmpty)
     }
 
     // MARK: End to end

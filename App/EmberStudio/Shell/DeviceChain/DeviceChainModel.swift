@@ -173,10 +173,13 @@ final class DeviceChainModel {
             guard let info else { return [] }
             // DW-213 (T-094): the plugin's steps and value names make switches and menus, as for
             // built-ins; a param with more steps than a menu should hold stays a slider.
+            // A switch the plugin calls Off/On (VST3's default strings) stays a toggle.
             rows = info.params.map { p in
                 let steps = p.steps <= PluginInfo.Param.maxMenuSteps ? p.steps : 0
+                var labels = steps > 0 ? p.labels : nil
+                if steps == 1, let named = labels, named.map({ $0.lowercased() }) == ["off", "on"] { labels = nil }
                 return ParamDescriptor(index: p.index, id: p.id, name: p.name, min: p.min, max: p.max, default: p.min,
-                                       unit: p.unit, automatable: true, steps: steps, labels: steps > 0 ? p.labels : nil)
+                                       unit: p.unit, automatable: true, steps: steps, labels: labels)
             }
             for p in info.params {
                 pluginValues[p.index] = p.value
@@ -201,8 +204,10 @@ final class DeviceChainModel {
     /// `paramDisplay` (cached). Nil (the number shows) for menus, switches and params without strings.
     private func pluginDisplay(_ slot: NodeIDValue, _ param: PluginInfo.Param, row: ParamDescriptor, value: Float) -> String? {
         guard !row.isDiscrete, value.isFinite else { return nil }
-        var text = param.value.bitPattern == value.bitPattern ? param.display : nil
-        if text == nil {
+        var text: String?
+        if param.value.bitPattern == value.bitPattern {
+            text = param.display  // the plugin's own value: its string, or none
+        } else {
             let key = DisplayKey(slot: slot, index: param.index, bits: value.bitPattern)
             if let cached = displayCache[key] {
                 text = cached

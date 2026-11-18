@@ -101,6 +101,18 @@ Additive; the facade side is in 08 "Contract delta (T-083)", the dialog in 12 "C
 - **Recovery check** (MODEL-045, UI-043): `ProjectStore.hasNewerAutosave(at:)` (nonisolated, static) says whether a folder's `autosave/project.json` is newer than its `project.json`, or exists without one. It reads modification dates only, so the dialog can offer recovery before opening anything.
 - **Running marker directory**: the app's `--crash-marker-dir <path>` (12 "Crash recovery details") names where `CrashMarkerSession` reads and writes markers.
 
+### Contract delta (T-094), accepted (autobuild, see docs/autobuild/DECISIONS.md "T-094 plugin info")
+Additive; the facade side is in 08 "Contract delta (T-094)". Closes DW-213, DW-275, DW-018 and DW-276; DW-268 is in the T-094 report.
+- **PLUG-001 (updated).** The scanner gets **30 s** for a first scan (was 10 s; DW-275: FabFilter, AmpliTube, Komplete Kontrol and MODO need more on their first load, licence checks included). A crash, a timeout or unusable output still marks the plugin `blocked` with a reason; a timeout's reason is "timed out after N s" (`PluginDescriptor.isTimedOut`).
+  - **Retry with a longer limit.** `PluginScanning.scan(_:timeout:)` scans with a limit of its own (a default implementation ignores it, so fakes compile unchanged). `PluginCatalog.retryBlocked(identifiers:timeout:)` forgets those blocked plugins and refreshes; only they get `timeout`, other new or changed candidates the scanner's own limit. The plugin manager offers "Retry (120 s)" (`ScannerLauncher.retryTimeout`) for each timed-out plugin (12 "Plugin manager details").
+  - **Parallel scans (DW-018).** `refresh` runs up to `PluginCatalog.maxConcurrentScans` (4) scanner processes at once, still one per candidate, so a hanging plugin holds one worker for its timeout. The cache and the refresh summary keep discovery order. The first "scanner can't run" error stops handing out work and is thrown; nothing is cached then, as before.
+- **Discrete params and display strings (PLUG-015, DW-213).** VST3 values stay normalized 0…1 in the model and in automation (plain units would change what saved automation means). Each plugin parameter also reports:
+  - `steps`, as 06's `ParamInfo::steps`. VST3: `ParameterInfo::stepCount`. AU: 1 for a Boolean parameter; max − min for an Indexed one, or for one whose `valueStrings` name every integer of its range; else 0.
+  - `labels`: steps + 1 value names in value order, for steps ≤ 128. VST3: `getParamStringByValue(k / steps)`. AU: `valueStrings`, else its string for each step if the parameter has `kAudioUnitParameterFlag_ValuesHaveStrings`.
+  - `display`: the plugin's own string for the current value, without the unit. VST3: `getParamStringByValue`. AU: a step's label, else its string-from-value if it has strings, else none (the host formats the number).
+  - Labels are read once per instance on the first info read, not at instantiation (which runs on `daw.compile`). An AU parameter without a `unitName` gets its unit's symbol (Hz, dB, ms, %, …).
+- **AU edit observer follows the tree (DW-204, DW-276).** A V2 bridge can replace its parameter tree after the step that caused it has returned (seen after prepare under heavy load), and the automation observer stayed on the dropped tree, so an editor's gestures were lost. `AUInstance` now also follows `AUAudioUnit.parameterTree` by KVO. The observer state is shared and has its own lock, and teardown closes it, so a late callback is harmless.
+
 ## Status
 | ID | status | test |
 |---|---|---|

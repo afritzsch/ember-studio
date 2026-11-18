@@ -8,10 +8,11 @@ import Testing
 struct ScannerLauncherTests {
     let candidate = PluginCandidate.vst3("/Plugins/Thing.vst3", version: "2.0")
 
-    @Test("PLUG-001: default timeout is 10 s")
+    @Test("PLUG-001 (T-094, DW-275): default timeout is 30 s; a retry gets 120 s")
     func defaultTimeout() {
-        #expect(ScannerLauncher.defaultTimeout == 10)
-        #expect(ScannerLauncher(executableURL: URL(filePath: "/x")).timeout == 10)
+        #expect(ScannerLauncher.defaultTimeout == 30)
+        #expect(ScannerLauncher(executableURL: URL(filePath: "/x")).timeout == 30)
+        #expect(ScannerLauncher.retryTimeout == 120)
     }
 
     @Test("PLUG-001: scanner JSON on stdout is returned as descriptors")
@@ -44,6 +45,23 @@ struct ScannerLauncherTests {
         let result = try ScannerLauncher(executableURL: script, timeout: 0.5).scan(candidate)
         #expect(Date().timeIntervalSince(start) < 5)
         #expect(result == [.blocked(candidate, reason: "timed out after 0.5 s")])
+        #expect(result.first?.isTimedOut == true)
+    }
+
+    @Test("PLUG-001 (DW-275): a scan with a time limit of its own uses it instead of the launcher's")
+    func perScanTimeout() throws {
+        let dir = try TestDirectory()
+        let json = #"[{"format":1,"identifier":"/Plugins/Thing.vst3#ABC","name":"Thing","vendor":"V","version":"2.0","isInstrument":false,"hasSidechain":false,"numParams":1,"status":"ok"}]"#
+        let script = try Fixtures.script("sleep 1\nprintf '\(json)'", in: dir)
+        let launcher = ScannerLauncher(executableURL: script, timeout: 0.3)
+        let first = try launcher.scan(candidate)
+        #expect(first == [.timedOut(candidate, after: 0.3)])
+        #expect(first.first?.isTimedOut == true)
+        let retried = try launcher.scan(candidate, timeout: 20)
+        #expect(retried.map(\.status) == [.ok])
+        #expect(retried.first?.isTimedOut == false)
+        // Other blocked reasons aren't timeouts.
+        #expect(PluginDescriptor.blocked(candidate, reason: "scanner crashed (SIGSEGV)").isTimedOut == false)
     }
 
     @Test("PLUG-001: non-zero exit → blocked with the last stderr line")
