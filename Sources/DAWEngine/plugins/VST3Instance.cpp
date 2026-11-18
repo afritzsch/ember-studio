@@ -385,6 +385,9 @@ struct VST3Instance::Impl {
     std::mutex reporterMutex;
     LatencyReporter reporter;
     dispatch_source_t latencyTimer = nullptr;
+    // DW-218 (T-097): signalled by the timer's cancel handler, which runs once its event handler
+    // can no longer run (see ~VST3Instance).
+    dispatch_semaphore_t latencyTimerDone = nullptr;
 
     // Bus layout, fixed at instantiation. -1: none.
     int32 mainInput = -1, auxInput = -1, mainOutput = -1, eventInput = -1;
@@ -429,6 +432,7 @@ struct VST3Instance::Impl {
             dispatch_source_cancel(latencyTimer);
             dispatch_release(latencyTimer);
         }
+        if (latencyTimerDone != nullptr) dispatch_release(latencyTimerDone);
         if (processor) {
             if (processing) {
                 processor->setProcessing(false);
@@ -532,6 +536,17 @@ VST3Instance::VST3Instance(VST3PluginID plugin, std::shared_ptr<Impl> impl)
 
 VST3Instance::~VST3Instance() {
     reset_.reset();  // DW-242: unregistered (and any reset of it finished) before the plugin goes
+    // DW-218 (T-097): the latency timer's handler holds the Impl (weak_ptr::lock) while it runs, so
+    // a handler running now could drop the last reference after this instance has gone, and the
+    // plugin would be terminated and its module unloaded on the timer's utility thread, racing
+    // whatever this thread does next. Cancel the timer and wait for its cancel handler (it runs
+    // after any running event handler returns), so the plugin is torn down here, by impl_'s release
+    // below. Bounded: a handler only takes Impl::mutex for getLatencySamples.
+    if (impl_ && impl_->latencyTimer != nullptr) {
+        dispatch_source_cancel(impl_->latencyTimer);
+        if (impl_->latencyTimerDone != nullptr)
+            dispatch_semaphore_wait(impl_->latencyTimerDone, dispatch_time(DISPATCH_TIME_NOW, 2 * static_cast<int64_t>(NSEC_PER_SEC)));
+    }
 }
 
 namespace {
@@ -741,6 +756,16 @@ void VST3Instance::startLatencyTimer() {
     std::weak_ptr<Impl> weak = impl_;
     dispatch_source_set_event_handler(timer, ^{
         if (auto impl = weak.lock()) impl->refreshLatency();
+    });
+    // DW-218 (T-097): ~VST3Instance waits for this.
+    // The handler keeps its own reference (blocks in C++ don't retain dispatch objects), so a
+    // destructor that stopped waiting leaves it a live semaphore.
+    dispatch_semaphore_t done = dispatch_semaphore_create(0);
+    impl_->latencyTimerDone = done;
+    dispatch_retain(done);
+    dispatch_source_set_cancel_handler(timer, ^{
+        dispatch_semaphore_signal(done);
+        dispatch_release(done);
     });
     dispatch_resume(timer);
     impl_->latencyTimer = timer;

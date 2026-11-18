@@ -94,6 +94,18 @@ public:
 ```
 `RenderGraph` is built only by `GraphBuilder` (05-mixer-routing-pdc).
 
+### Contract delta (T-097), accepted (autobuild, see docs/autobuild/DECISIONS.md "T-097 hosted-plugin decisions")
+Additive (DW-211). `PrepareInfo` gains a defaulted field:
+```cpp
+struct PrepareInfo { double sampleRate; uint32_t maxBlock; uint32_t numIn, numOut;
+                     bool offline = false; };   // new, last
+```
+- `offline`: the node renders offline, so a node with a separate offline mode (hosted plugins: VST3 `kOffline`, AU `renderingOffline`) may use it. Nodes without one ignore it.
+- `GraphBuilder` and `GraphCompiler` get an extra constructor overload with `bool offline`; the old ones keep `false`. The facade passes `true` for an `EngineMode::offline` engine (08 "Contract delta (T-097)").
+- `Node::reset()` doesn't change. Hosted-plugin nodes use it as the DW-063 "offline render starts" hook and never wait in it (10 "Contract delta (T-097)").
+
+Affected: T-097 only. No other node reads the field.
+
 ## Status
 | ID | status | test |
 |---|---|---|

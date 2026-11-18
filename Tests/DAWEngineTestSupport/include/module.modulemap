@@ -25,6 +25,7 @@ module DAWEngineTestSupport {
   header "ParamChecks.h"
   header "PdcChecks.h"
   header "PluginInfoChecks.h"
+  header "PluginFollowupChecks.h"
   header "RtTrapTestSupport.h"
   header "SendChecks.h"
   header "TelemetryChecks.h"

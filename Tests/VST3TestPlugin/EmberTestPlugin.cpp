@@ -12,9 +12,14 @@
 // does (beginEdit / performEdit / endEdit, DW-204).
 // T-097: the controller maps MIDI controllers to parameters (IMidiMapping, DW-210): CC 7 → Gain,
 // CC 1 and channel aftertouch → Mod, pitch bend → Sidechain Mix, CC 123 → All Notes Off (channels
-// 1 and 2). The processors record each parameter's points of the newest block that had any
-// (ember_test_param_points), the process mode of setupProcessing and of the last process call
-// (DW-211), and count activations; setActive clears the effect's delay ring (DW-242).
+// 1 and 2). setActive clears the effect's delay ring (DW-242). Per-instance probes (the knobs
+// above are process-wide, and other suites run EmberTest at the same time): each processor links
+// itself to its controller when the host connects them, and the ember_test_probe_* exports take
+// the host's IEditController* (VST3Instance::editController()) to reach that processor: each
+// parameter's points of the newest block that had any, the process modes of setupProcessing and
+// of the last process call (DW-211), activations, note-offs, its own latency (overriding the global
+// one) and a restart request from process(); ember_test_processor_live tells whether a processor
+// still exists (DW-218).
 
 #include <algorithm>
 #include <atomic>
@@ -58,10 +63,18 @@ struct PointLog {
     std::atomic<int32> offsets[kMaxLoggedPoints];
     std::atomic<double> values[kMaxLoggedPoints];
 };
-PointLog gPoints[kParamCount];
-std::atomic<int64> gBlocks{0};
-std::atomic<int32> gSetupMode{-1}, gDataMode{-1};
-std::atomic<int32> gActivations{0};
+struct Probe {
+    PointLog points[kParamCount];
+    std::atomic<int64> blocks{0};
+    std::atomic<int32> setupMode{-1}, dataMode{-1};
+    std::atomic<int32> activations{0};
+    std::atomic<int64> noteOffs{0};
+    std::atomic<int64> latency{-1};  // -1: the global gLatency
+    std::atomic<bool> restartFromProcess{false};
+};
+std::atomic<int64> gNextProcessorID{1};
+std::mutex gProcessorsLock;
+std::vector<int64> gLiveProcessorIDs;
 
 std::atomic<int> gLiveProcessors{0};
 std::atomic<uint32> gLatency{0};
@@ -84,8 +97,12 @@ std::atomic<float> gControllerValue{0};
 
 void restartAll();
 
+class Processor;
+
 class EmberController final : public EditController, public IMidiMapping {
 public:
+    std::atomic<Processor*> processor{nullptr};  // T-097: linked by Processor::connect
+
     OBJ_METHODS(EmberController, EditController)
     DEFINE_INTERFACES
         DEF_INTERFACE(IMidiMapping)
@@ -182,19 +199,58 @@ public:
     Processor() {
         setControllerClass(kControllerUID);
         gLiveProcessors.fetch_add(1);
+        std::lock_guard lock(gProcessorsLock);
+        gLiveProcessorIDs.push_back(id);
     }
-    ~Processor() override { gLiveProcessors.fetch_sub(1); }
+    ~Processor() override {
+        gLiveProcessors.fetch_sub(1);
+        std::lock_guard lock(gProcessorsLock);
+        gLiveProcessorIDs.erase(std::remove(gLiveProcessorIDs.begin(), gLiveProcessorIDs.end(), id), gLiveProcessorIDs.end());
+    }
 
-    uint32 PLUGIN_API getLatencySamples() SMTG_OVERRIDE { return gLatency.load(); }
+    // T-097: the host connects the controller's IConnectionPoint here; find that controller.
+    tresult PLUGIN_API connect(IConnectionPoint* other) SMTG_OVERRIDE {
+        const tresult r = AudioEffect::connect(other);
+        std::lock_guard lock(gControllersLock);
+        for (EmberController* c : gControllers)
+            if (static_cast<IConnectionPoint*>(c) == other) {
+                c->processor.store(this);
+                controller_ = c;
+            }
+        return r;
+    }
+    tresult PLUGIN_API disconnect(IConnectionPoint* other) SMTG_OVERRIDE {
+        std::lock_guard lock(gControllersLock);
+        if (controller_ != nullptr && static_cast<IConnectionPoint*>(controller_) == other) {
+            controller_->processor.store(nullptr);
+            controller_ = nullptr;
+        }
+        return AudioEffect::disconnect(other);
+    }
+
+    Probe probe;
+    const int64 id = gNextProcessorID.fetch_add(1);
+    float gain() const { return gain_; }
+
+    uint32 latency() const {
+        const int64 own = probe.latency.load();
+        return own >= 0 ? static_cast<uint32>(own) : gLatency.load();
+    }
+    void restartOwn() {
+        std::lock_guard lock(gControllersLock);
+        if (controller_ != nullptr) controller_->restart();
+    }
+
+    uint32 PLUGIN_API getLatencySamples() SMTG_OVERRIDE { return latency(); }
     uint32 PLUGIN_API getTailSamples() SMTG_OVERRIDE { return 0; }
 
     // DW-211 (T-097).
     tresult PLUGIN_API setupProcessing(ProcessSetup& setup) SMTG_OVERRIDE {
-        gSetupMode.store(setup.processMode);
+        probe.setupMode.store(setup.processMode);
         return AudioEffect::setupProcessing(setup);
     }
     tresult PLUGIN_API setActive(TBool state) SMTG_OVERRIDE {
-        if (state) gActivations.fetch_add(1);
+        if (state) probe.activations.fetch_add(1);
         onActive(state);
         return AudioEffect::setActive(state);
     }
@@ -217,15 +273,16 @@ protected:
     void common(ProcessData& data) {
         if (gRestartFromProcess.exchange(false))
             if (EmberController* c = gLastController.load(std::memory_order_acquire)) c->restart();
+        if (probe.restartFromProcess.exchange(false)) restartOwn();  // T-097: from the audio thread
 
-        const int64 block = gBlocks.fetch_add(1);
-        gDataMode.store(data.processMode);
+        const int64 block = probe.blocks.fetch_add(1);
+        probe.dataMode.store(data.processMode);
         if (auto* changes = data.inputParameterChanges) {
             for (int32 i = 0; i < changes->getParameterCount(); ++i) {
                 IParamValueQueue* q = changes->getParameterData(i);
                 if (!q || q->getPointCount() <= 0) continue;
                 if (q->getParameterId() < static_cast<ParamID>(kParamCount)) {  // T-097: the point log
-                    PointLog& log = gPoints[q->getParameterId()];
+                    PointLog& log = probe.points[q->getParameterId()];
                     const int32 n = std::min(q->getPointCount(), kMaxLoggedPoints);
                     for (int32 k = 0; k < n; ++k) {
                         int32 offset = 0;
@@ -263,6 +320,7 @@ protected:
                     onNote(data, e);
                 } else if (e.type == Event::kNoteOffEvent) {
                     gNoteOffs.fetch_add(1);
+                    probe.noteOffs.fetch_add(1);
                 }
             }
         }
@@ -271,6 +329,7 @@ protected:
     virtual void onActive(TBool) {}
 
     float gain_ = 1.0f, mix_ = 0.0f;
+    EmberController* controller_ = nullptr;  // under gControllersLock
 };
 
 class EmberEffect final : public Processor {
@@ -294,7 +353,7 @@ public:
         const AudioBusBuffers* side = data.numInputs > 1 ? &data.inputs[1] : nullptr;
         const AudioBusBuffers& out = data.outputs[0];
         // The output really is delayed by the reported latency, so PDC tests see it as a real plugin.
-        const uint32 delay = std::min<uint32>(gLatency.load(), kRingSize - 1);
+        const uint32 delay = std::min<uint32>(latency(), kRingSize - 1);
         for (int32 c = 0; c < out.numChannels && c < 2; ++c) {
             Sample32* o = out.channelBuffers32[c];
             const Sample32* i = in.channelBuffers32[c < in.numChannels ? c : 0];
@@ -417,12 +476,24 @@ __attribute__((visibility("default"))) double ember_test_controller_param(uint32
     return c != nullptr ? c->getParamNormalized(id) : -1;
 }
 
-// T-097: the points parameter `id` got in the newest block that had any (up to `max`); `block` is
-// that block's number (gBlocks, -1: none yet). Returns the count.
-__attribute__((visibility("default"))) int32_t ember_test_param_points(uint32_t id, int32_t* offsets, double* values,
-                                                                     int32_t max, int64_t* block) {
-    if (id >= static_cast<uint32_t>(kParamCount)) return 0;
-    const PointLog& log = gPoints[id];
+// T-097 per-instance probes. `controller` is the host's IEditController* of the instance; null
+// processor (not connected, or gone): the getters return false / -1.
+namespace {
+Processor* probed(void* controller) {
+    if (controller == nullptr) return nullptr;
+    auto* c = static_cast<EmberController*>(static_cast<IEditController*>(controller));
+    return c->processor.load();
+}
+} // namespace
+
+// The points parameter `id` got in the newest block that had any (up to `max`); `block` is that
+// block's number for this processor (-1: none yet). Returns the count.
+__attribute__((visibility("default"))) int32_t ember_test_probe_points(void* controller, uint32_t id, int32_t* offsets,
+                                                                     double* values, int32_t max, int64_t* block) {
+    *block = -1;
+    Processor* p = probed(controller);
+    if (p == nullptr || id >= static_cast<uint32_t>(kParamCount)) return 0;
+    const PointLog& log = p->probe.points[id];
     const int32_t n = std::min(log.count.load(), max);
     for (int32_t k = 0; k < n; ++k) {
         offsets[k] = log.offsets[k].load();
@@ -432,14 +503,49 @@ __attribute__((visibility("default"))) int32_t ember_test_param_points(uint32_t 
     return n;
 }
 
-// T-097: blocks processed (all instances), process modes (DW-211: 0 kRealtime, 2 kOffline; -1
-// none yet) and setActive(true) calls (DW-242).
-__attribute__((visibility("default"))) void ember_test_process_stats(int64_t* blocks, int32_t* setupMode,
-                                                                      int32_t* dataMode, int32_t* activations) {
-    *blocks = gBlocks.load();
-    *setupMode = gSetupMode.load();
-    *dataMode = gDataMode.load();
-    *activations = gActivations.load();
+// Blocks processed, process modes (DW-211: 0 kRealtime, 2 kOffline; -1 none yet), setActive(true)
+// calls (DW-242), note-offs received (DW-225) and the processor's ID. False without a processor.
+__attribute__((visibility("default"))) int32_t ember_test_probe_stats(void* controller, int64_t* blocks, int32_t* setupMode,
+                                                                    int32_t* dataMode, int32_t* activations,
+                                                                    int64_t* noteOffs, int64_t* processorID) {
+    Processor* p = probed(controller);
+    if (p == nullptr) return 0;
+    *blocks = p->probe.blocks.load();
+    *setupMode = p->probe.setupMode.load();
+    *dataMode = p->probe.dataMode.load();
+    *activations = p->probe.activations.load();
+    *noteOffs = p->probe.noteOffs.load();
+    *processorID = p->id;
+    return 1;
+}
+
+// This instance's latency (and delay), overriding the global one; restartComponent(kLatencyChanged)
+// from here, or from its next process() call when `fromProcess`.
+__attribute__((visibility("default"))) void ember_test_probe_set_latency(void* controller, uint32_t samples,
+                                                                       int32_t fromProcess) {
+    Processor* p = probed(controller);
+    if (p == nullptr) return;
+    p->probe.latency.store(samples);
+    if (fromProcess) p->probe.restartFromProcess.store(true);
+    else p->restartOwn();
+}
+
+// The controller (as the host's IEditController*) of the live processor whose gain is exactly
+// `gain`, null if none: tests that only reach a plugin through the facade tag it with a unique gain
+// in its state.
+__attribute__((visibility("default"))) void* ember_test_probe_find_by_gain(float gain) {
+    std::lock_guard lock(gControllersLock);
+    for (EmberController* c : gControllers) {
+        Processor* p = c->processor.load();
+        if (p != nullptr && p->gain() == gain) return static_cast<IEditController*>(c);
+    }
+    return nullptr;
+}
+
+// Whether the processor with `processorID` still exists (DW-218).
+__attribute__((visibility("default"))) int32_t ember_test_processor_live(int64_t processorID) {
+    std::lock_guard lock(gProcessorsLock);
+    return std::find(gLiveProcessorIDs.begin(), gLiveProcessorIDs.end(), processorID) != gLiveProcessorIDs.end();
 }
 
 } // extern "C"

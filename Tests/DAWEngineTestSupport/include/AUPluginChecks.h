@@ -23,6 +23,16 @@ void setFakeAudioUnitLatency(double seconds);
 // T-064 (PLUG-022): every fake AU writes a NaN into the first frame of each block while set.
 void setFakeAudioUnitEmitsNaN(bool on);
 uint64_t fakeAudioUnitNoteOns();
+// T-097, one fake (`unit`: AUInstance::audioUnit()): note-offs and CC 123 (All Notes Off) it
+// received (DW-225); its -reset calls, which clear its delay line (DW-242); its renderingOffline
+// when it last allocated render resources (DW-211; -1 never, or not a fake).
+struct FakeProbe {
+    uint64_t noteOffs = 0, allNotesOff = 0, resets = 0;
+    int renderingOffline = -1;
+};
+FakeProbe fakeAudioUnitProbe(void* unit);
+// T-097: this fake's latency (and delay) only.
+void setFakeAudioUnitLatency(void* unit, double seconds);
 
 // PLUG-010: identifiers parse and format like the scanner's (four-character codes, 0x hex), and
 // the auPlugin configJSON parses identifier and base64 state (and refuses malformed configs).

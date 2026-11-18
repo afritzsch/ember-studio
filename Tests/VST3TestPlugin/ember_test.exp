@@ -13,5 +13,8 @@ _ember_test_edit
 _ember_test_controller_param
 _ember_test_view_info
 _ember_test_view_request_resize
-_ember_test_param_points
-_ember_test_process_stats
+_ember_test_probe_points
+_ember_test_probe_stats
+_ember_test_probe_set_latency
+_ember_test_processor_live
+_ember_test_probe_find_by_gain
