@@ -22,16 +22,15 @@ Error invalid(std::string message) { return makeError(ErrorCode::invalidArgument
 
 std::string nodeName(NodeID id) { return "node " + std::to_string(id); }
 
-// TIME-008: kinds that read the timeline and must be reset on a locate (T-008).
+// TIME-008: kinds that read the timeline and must be reset on a locate (T-008). The metronome
+// (TIME-010, T-024) places its clicks from the timeline too (DW-161).
 bool resetsOnLocate(NodeKind kind) {
-    return kind == NodeKind::audioClipPlayer || kind == NodeKind::midiClipPlayer;
+    return kind == NodeKind::audioClipPlayer || kind == NodeKind::midiClipPlayer ||
+           kind == NodeKind::metronome;
 }
 
-// MIX-023: kinds scheduled `latency` samples early (RenderStepDesc::timeline). The metronome
-// (TIME-010, T-024) places its clicks from the timeline too.
-bool readsTimeline(NodeKind kind) {
-    return resetsOnLocate(kind) || kind == NodeKind::metronome;
-}
+// MIX-023: kinds scheduled `latency` samples early (RenderStepDesc::timeline): the same kinds.
+bool readsTimeline(NodeKind kind) { return resetsOnLocate(kind); }
 
 // DW-030: the audio thread only DAW_RT_ASSERTs ParamIDs (compiled out in Release), so every range
 // is checked here: inside the table, and allocated (a freed slot may already belong to another

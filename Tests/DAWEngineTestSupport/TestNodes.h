@@ -14,6 +14,7 @@
 #include "core/NodeIO.h"
 #include "core/ProcessContext.h"
 #include "core/Result.h"
+#include "graph/LatencyReporter.h"
 #include "graph/NodeRegistry.h"
 
 namespace daw::testing {
@@ -115,6 +116,47 @@ private:
     float level_;
     std::atomic<uint64_t> blocks_{0};
     std::atomic<uint64_t> routed_{0};
+};
+
+// DW-138 (MIX-024): FakeLatencyNode whose latency may change after prepare. It delays its main
+// input (up to 2 channels) by latencySamples() from the next block and tells the engine through
+// the LatencyReporter its factory got. Delays up to kCapacity - 1 frames.
+class ReportingLatencyNode final : public Node {
+public:
+    static constexpr uint32_t kCapacity = 1u << 16;
+
+    ReportingLatencyNode(uint32_t latency, LatencyReporter reporter)
+        : latency_(latency), reporter_(std::move(reporter)) {}
+
+    void prepare(const PrepareInfo&) override { ring_.assign(2 * kCapacity, 0.0f); }
+    uint32_t latencySamples() const override { return latency_.load(std::memory_order_relaxed); }
+
+    // Non-RT, test thread.
+    void setLatency(uint32_t latency) {
+        latency_.store(latency, std::memory_order_relaxed);
+        reporter_.changed();
+    }
+
+    void process(ProcessContext&, NodeIO& io) DAW_RT override {
+        const uint32_t delay = latency_.load(std::memory_order_relaxed) & (kCapacity - 1);
+        const AudioBufferView& out = io.audioOut;
+        for (uint32_t c = 0; c < out.numChannels && c < 2; ++c) {
+            float* ring = ring_.data() + std::size_t{c} * kCapacity;
+            const float* in = c < io.audioIn.numChannels ? io.audioIn.channels[c] : nullptr;
+            for (uint32_t f = 0; f < out.numFrames; ++f) {
+                const uint32_t at = write_ + f;
+                ring[at & (kCapacity - 1)] = in ? in[f] : 0.0f;
+                out.channels[c][f] = ring[(at - delay) & (kCapacity - 1)];
+            }
+        }
+        write_ += out.numFrames;
+    }
+
+private:
+    std::atomic<uint32_t> latency_;
+    LatencyReporter reporter_;
+    std::vector<float> ring_;
+    uint32_t write_ = 0;
 };
 
 // An unprepared node for `spec` (its kind is not used here).

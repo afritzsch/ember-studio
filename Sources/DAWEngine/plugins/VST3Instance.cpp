@@ -410,6 +410,7 @@ struct VST3Instance::Impl {
     std::vector<int32> midiMap;  // kMidiChannels × kCountCtrlNumber
     bool hasMidiMap = false;
     bool offline = false;  // DW-211 (T-097): prepared with kOffline
+    bool exportOffline = false;  // DW-301 (T-103): switched to kOffline for an export (setExportOffline)
     Steinberg::Vst::ProcessContext context{};
     bool hadTransport = false;
     Tick lastEndTick = 0;
@@ -713,6 +714,38 @@ void VST3Instance::clearState() {
     impl.lastEndTick = 0;
 }
 
+// DW-301 (T-103). setupProcessing is only allowed while the component is inactive (VST3 docs),
+// hence the full deactivate/activate cycle; it also clears the plugin's processing state, as the
+// export's reset (resetAll) does next anyway.
+bool VST3Instance::setExportOffline(bool on) {
+    Impl& impl = *impl_;
+    std::lock_guard lock(impl.mutex);
+    if (!prepared_.load(std::memory_order_acquire) || !impl.processing || impl.offline || impl.exportOffline == on)
+        return false;
+    ProcessSetup setup{};
+    setup.processMode = on ? kOffline : kRealtime;
+    setup.symbolicSampleSize = kSample32;
+    setup.maxSamplesPerBlock = static_cast<int32>(maxBlock_);
+    setup.sampleRate = rate_;
+    impl.processor->setProcessing(false);
+    impl.component->setActive(false);
+    if (impl.processor->setupProcessing(setup) != kResultOk) {
+        // Keep the mode it had; the render still works.
+        setup.processMode = on ? kRealtime : kOffline;
+        impl.processor->setupProcessing(setup);
+    }
+    impl.component->setActive(true);
+    impl.processor->setProcessing(true);
+    impl.exportOffline = setup.processMode == kOffline;
+    impl.data.processMode = setup.processMode;
+    impl.held.clear();
+    impl.inEvents.clear();
+    impl.inParams.clear();
+    impl.hadTransport = false;
+    impl.lastEndTick = 0;
+    return impl.exportOffline == on;
+}
+
 void VST3Instance::resetNow() { reset_->resetNow(); }
 bool VST3Instance::consumeFreshReset() DAW_RT { return reset_->consumeFresh(); }
 void VST3Instance::requestReset() DAW_RT { reset_->request(); }
@@ -911,6 +944,7 @@ Result<void> VST3Instance::prepare(double sampleRate, uint32_t maxBlock, bool of
     impl.processing = true;
 
     impl.offline = offline;
+    impl.exportOffline = false;  // DW-301: a re-prepare sets the mode from `offline`
     impl.data = ProcessData{};
     impl.data.processMode = setup.processMode;
     impl.data.symbolicSampleSize = kSample32;

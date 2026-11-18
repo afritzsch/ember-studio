@@ -16,6 +16,7 @@
 #include <mach/mach_time.h>
 
 #include "RtTrapTestSupport.h"
+#include "TestNodes.h"
 #include "core/AudioBufferPool.h"
 #include "core/Engine.h"
 #include "core/Node.h"
@@ -141,20 +142,6 @@ public:
 
 private:
     uint64_t spinTicks_;
-};
-
-// TEST-004 AllocatingNode: allocates and frees once per block (two violations).
-class AllocatingNode final : public Node {
-public:
-    void prepare(const PrepareInfo&) override {}
-    void process(ProcessContext& ctx, NodeIO& io) DAW_RT override {
-        // Deliberate (the point of this node): the trap must count it.
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wfunction-effects"
-        (void)runProbe(RtProbe::malloc);
-#pragma clang diagnostic pop
-        fill(io.audioOut, ctx.numFrames, 0.0f);
-    }
 };
 
 // For the RetireQueue-full check: daw.reclaim gets stuck destroying a Blocker until released.

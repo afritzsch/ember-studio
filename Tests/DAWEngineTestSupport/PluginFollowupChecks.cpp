@@ -13,6 +13,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <string>
@@ -26,6 +27,8 @@
 #include "core/RtTrap.h"
 #include "daw/EngineFacade.h"
 #include "daw/GraphDescription.h"
+#include "facade/DriverAdapter.h"
+#include "facade/FacadeOptions.h"
 #include "graph/GraphBuilder.h"
 #include "graph/NodeRegistry.h"
 #include "plugins/AUInstance.h"
@@ -325,6 +328,55 @@ CheckResult auResetClearsTail() {
     return checks;
 }
 
+// DW-301 (T-103) probes
+
+namespace {
+
+struct ModeProbe {
+    int32_t setupMode = -1, dataMode = -1;
+    int64_t offlineBlocks = 0, setups = 0;
+    bool ok = false;
+};
+
+ModeProbe processMode(void* controller) {
+    using Fn = int32_t (*)(void*, int32_t*, int32_t*, int64_t*, int64_t*);
+    static const Fn fn = [] {
+        void* image = dlopen((repoRoot() / ".build/test-plugins/EmberTest.vst3/Contents/MacOS/EmberTest").c_str(), RTLD_NOW);
+        return image ? reinterpret_cast<Fn>(dlsym(image, "ember_test_probe_process_mode")) : nullptr;
+    }();
+    ModeProbe m;
+    if (fn && controller) m.ok = fn(controller, &m.setupMode, &m.dataMode, &m.offlineBlocks, &m.setups) != 0;
+    return m;
+}
+
+void* findByGain(float gain) {
+    using Find = void* (*)(float);
+    static const Find find = [] {
+        void* image = dlopen((repoRoot() / ".build/test-plugins/EmberTest.vst3/Contents/MacOS/EmberTest").c_str(), RTLD_NOW);
+        return image ? reinterpret_cast<Find>(dlsym(image, "ember_test_probe_find_by_gain")) : nullptr;
+    }();
+    return find ? find(gain) : nullptr;
+}
+
+// Exports [0, ticks) without a tail and waits for it to end; the final status.
+JobStatus exportAndWait(EngineFacade& f, const std::filesystem::path& path, Tick ticks,
+                        const std::function<void(JobID)>& whileRunning = {}) {
+    ExportSpecPOD spec;
+    spec.path = path.string();
+    spec.tailEnabled = false;
+    const JobID job = f.renderOffline(0, ticks, spec);
+    if (whileRunning) whileRunning(job);
+    JobStatus status;
+    (void)eventually([&] {
+        status = f.pollJob(job);
+        return status.state == JobState::succeeded || status.state == JobState::failed ||
+               status.state == JobState::cancelled;
+    }, 60000ms);
+    return status;
+}
+
+} // namespace
+
 // MARK: DW-211 + DW-242 through the builder and the facade
 
 namespace {
@@ -468,9 +520,12 @@ CheckResult pluginOfflineModeAndExportReset(bool au) {
     DAW_CHECK(facadeStats().ok && facadeStats().setupMode == 2);
     for (int i = 0; i < 2; ++i) {
         const int32_t activations = facadeStats().activations;
+        const int64_t setups = processMode(controller).setups;
         DAW_CHECK(exportOK(*f.facade, dir.path() / ("e" + std::to_string(i) + ".wav"), 96));
         DAW_CHECK(facadeStats().activations == activations + 1);
         DAW_CHECK(facadeStats().dataMode == 2);
+        // DW-301 (T-103): the export's setOfflineAll is a no-op on an offline engine.
+        DAW_CHECK(processMode(controller).setups == setups);
     }
     return checks;
 }
@@ -752,6 +807,103 @@ CheckResult auInstantiateVsLifecycle(uint32_t iterations) {
     DAW_CHECK(failures.load() == 0);
     DAW_CHECK(renderErrors.load() == 0);
     DAW_CHECK(eventually([] { return AUInstance::pendingV2Releases() == 0; }, 10000ms));
+    return checks;
+}
+
+
+// MARK: DW-301 (T-103)
+
+CheckResult pluginExportRendersOffline(bool au) {
+    CheckResult checks;
+    DAW_CHECK(RtTrap::install());
+    DAW_CHECK(emberReady());
+    DAW_CHECK(registerFakeAudioUnit());
+    if (!emberReady()) return checks;
+
+    if (au) {
+        // The host hook on a realtime builder's AUs: the fake AU (renderingOffline as it saw it
+        // when it allocated render resources) and Apple's AUDelay (a V2 unit behind the bridge,
+        // kAudioUnitProperty_OfflineRender) round-trip true → false, and keep rendering.
+        auto host = std::make_shared<AUPluginHost>();
+        Rig rig([host](NodeRegistry& r) { (void)r.set(NodeKind::auPlugin, host->kindInfo()); });
+        GraphDescription d = baseDescription();
+        d.nodes.push_back(NodeDesc{21, NodeKind::auPlugin, 1, 0, 0, AUPluginConfig::makeJSON(kFake, {})});
+        d.nodes.push_back(NodeDesc{22, NodeKind::auPlugin, 1, 0, 0, AUPluginConfig::makeJSON(kDelay, {})});
+        d.edges.push_back(EdgeDesc{2, 21, 22, EdgeKind::audio, 0});
+        d.edges.push_back(EdgeDesc{3, 22, 1, EdgeKind::audio, 0});
+        DAW_CHECK(rig.publish(d));
+        const auto unit = host->instance(21), delay = host->instance(22);
+        DAW_CHECK(unit && delay);
+        if (!unit || !delay) return checks;
+        DAW_CHECK(!unit->preparedOffline() && fake(unit).renderingOffline == 0 && !delay->renderingOffline());
+        for (bool on : {true, false, true, false}) {
+            host->setOfflineAll(on);
+            DAW_CHECK(fake(unit).renderingOffline == (on ? 1 : 0) && unit->renderingOffline() == on);
+            DAW_CHECK(delay->renderingOffline() == on);
+            DAW_CHECK(!unit->preparedOffline() && unit->isPrepared() && delay->isPrepared());
+            renderBlocks(rig, 4096);
+        }
+        DAW_CHECK(rig.violations() == 0);
+        // An offline-prepared AU is left alone: true and false are no-ops.
+        DAW_CHECK(unit->prepare(kRate, kMaxBlock, true).ok());
+        DAW_CHECK(!unit->setExportOffline(true) && !unit->setExportOffline(false));
+        DAW_CHECK(unit->renderingOffline() && fake(unit).renderingOffline == 1);
+        return checks;
+    }
+
+    // VST3 through a realtime facade on the fake devices: the plugin is prepared kRealtime, renders
+    // the export in kOffline (every export block), and is kRealtime again after it: after a
+    // finished export, a failed one and a cancelled one. Found by a unique gain in its state.
+    TempDir dir;
+    FacadeOptions options;
+    options.driver = std::make_unique<FakeDeviceDriverAdapter>(defaultFakeDeviceSpec());
+    DriverConfigPOD config;
+    config.driver = DeviceDriverKind::fake;
+    config.bufferFrames = 256;
+    EngineFacade* f = EngineFacadeAccess::create(EngineMode::realtime, config, std::move(options));
+    DAW_CHECK(f != nullptr);
+    if (!f) return checks;
+    constexpr float kTag = 0.2718282f;
+    GraphDescriptionBuilder g;
+    g.addNode(1, NodeKind::master, 0, 0, 0, "");
+    g.addNode(20, NodeKind::vst3Plugin, 0, 0, 0, VST3PluginConfig::makeJSON(emberIdentifier(kEffectUID), emberState(kTag, 0)));
+    g.addEdge(1, 20, 1, EdgeKind::audio, 0);
+    g.setTempo(0, 120.0);
+    g.setTimeSignature(0, 4, 4);
+    g.setMaster(1);
+    DAW_CHECK(published(*f, f->applyGraph(g.description())));
+    void* controller = findByGain(kTag);
+    DAW_CHECK(controller != nullptr);
+    ModeProbe m = processMode(controller);
+    DAW_CHECK(m.ok && m.setupMode == 0 && m.offlineBlocks == 0);
+
+    // A finished export: two mode switches (offline, realtime), every export block kOffline.
+    int64_t setups = m.setups;
+    JobStatus done = exportAndWait(*f, dir.path() / "done.wav", 960 * 8);
+    DAW_CHECK(done.state == JobState::succeeded && done.render.rtViolations == 0);
+    m = processMode(controller);
+    DAW_CHECK(m.setupMode == 0 && m.setups == setups + 2);
+    DAW_CHECK(m.offlineBlocks > 0 && done.render.blocks > 0 && m.offlineBlocks == int64_t(done.render.blocks));
+
+    // A failed export (its file can't be made): realtime again.
+    setups = m.setups;
+    JobStatus failed = exportAndWait(*f, dir.path() / "missing-dir" / "x" / "f.wav", 960 * 8);
+    DAW_CHECK(failed.state == JobState::failed);
+    m = processMode(controller);
+    DAW_CHECK(m.setupMode == 0 && (m.setups == setups + 2 || m.setups == setups));
+
+    // A cancelled export, cancelled while it renders: realtime again.
+    setups = m.setups;
+    const int64_t offlineBefore = m.offlineBlocks;
+    JobStatus cancelled = exportAndWait(*f, dir.path() / "cancel.wav", Tick{960} * 4 * 2000, [&](JobID job) {
+        DAW_CHECK(eventually([&] { return processMode(controller).offlineBlocks > offlineBefore; }, 20000ms));
+        DAW_CHECK(f->cancelJob(job));
+    });
+    DAW_CHECK(cancelled.state == JobState::cancelled && cancelled.render.rtViolations == 0);
+    m = processMode(controller);
+    DAW_CHECK(m.setupMode == 0 && m.setups == setups + 2);
+    if (f->telemetry().rtViolations != 0) DAW_CHECK(f->telemetry().rtViolations == 0);
+    releaseFacade(f);
     return checks;
 }
 

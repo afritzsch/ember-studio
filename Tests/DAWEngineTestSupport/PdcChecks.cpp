@@ -21,6 +21,7 @@
 #include <vector>
 
 #include "NodeTestHarness.h"
+#include "TestNodes.h"
 #include "core/Engine.h"
 #include "core/Node.h"
 #include "core/NodeIO.h"
@@ -58,89 +59,19 @@ bool eventually(F done, std::chrono::milliseconds timeout = 5000ms) {
 
 // MARK: Test nodes (TEST-004 style; test builds only)
 
-// TEST-004 FakeLatencyNode(n): delays its main input by latencySamples() and reports it. The
-// latency may change after prepare (MIX-024): the delay follows from the next block, and the
-// node tells the engine through the LatencyReporter its factory got.
-class FakeLatencyNode final : public Node {
-public:
-    static constexpr uint32_t kCapacity = 1u << 16;  // the longest delay it can apply
+// TEST-004 FakeLatencyNode with a changeable latency (MIX-024, ReportingLatencyNode) and the
+// free-running sources come from the shared TestNodes.h (DW-138).
 
-    FakeLatencyNode(uint32_t latency, LatencyReporter reporter)
-        : latency_(latency), reporter_(std::move(reporter)) {}
-
-    void prepare(const PrepareInfo&) override { ring_.assign(2 * kCapacity, 0.0f); }
-    uint32_t latencySamples() const override { return latency_.load(std::memory_order_relaxed); }
-
-    // Non-RT, test thread.
-    void setLatency(uint32_t latency) {
-        latency_.store(latency, std::memory_order_relaxed);
-        reporter_.changed();
-    }
-
-    void process(ProcessContext&, NodeIO& io) DAW_RT override {
-        const uint32_t delay = latency_.load(std::memory_order_relaxed) & (kCapacity - 1);
-        const AudioBufferView& out = io.audioOut;
-        for (uint32_t c = 0; c < out.numChannels && c < 2; ++c) {
-            float* ring = ring_.data() + std::size_t{c} * kCapacity;
-            const float* in = c < io.audioIn.numChannels ? io.audioIn.channels[c] : nullptr;
-            for (uint32_t f = 0; f < out.numFrames; ++f) {
-                const uint32_t at = write_ + f;
-                ring[at & (kCapacity - 1)] = in ? in[f] : 0.0f;
-                out.channels[c][f] = ring[(at - delay) & (kCapacity - 1)];
-            }
-        }
-        write_ += out.numFrames;
-    }
-
-private:
-    std::atomic<uint32_t> latency_;
-    LatencyReporter reporter_;
-    std::vector<float> ring_;
-    uint32_t write_ = 0;
-};
-
-// Free-running sources: they count the frames they have rendered, whatever the transport does.
+// Free-running sources (registered as sampler, so a locate never resets them):
 //   "impulse <first> <period> <amp>": amp at frames first, first + period, … (period 0: once)
 //   "sine <hz> <amp>"
-class SourceNode final : public Node {
-public:
-    explicit SourceNode(const std::string& config) {
-        char kind[16] = {};
-        double a = 0, b = 0, c = 0;
-        std::sscanf(config.c_str(), "%15s %lf %lf %lf", kind, &a, &b, &c);
-        sine_ = std::string(kind) == "sine";
-        if (sine_) {
-            hz_ = a;
-            amp_ = static_cast<float>(b);
-        } else {
-            first_ = static_cast<uint64_t>(a);
-            period_ = static_cast<uint64_t>(b);
-            amp_ = static_cast<float>(c);
-        }
-    }
-    void prepare(const PrepareInfo&) override {}
-
-    void process(ProcessContext&, NodeIO& io) DAW_RT override {
-        const AudioBufferView& out = io.audioOut;
-        for (uint32_t f = 0; f < out.numFrames; ++f) {
-            const uint64_t n = frame_ + f;
-            float x = 0.0f;
-            if (sine_) {
-                x = amp_ * static_cast<float>(std::sin(2.0 * std::numbers::pi * hz_ * double(n) / kRate));
-            } else if (n == first_ || (period_ > 0 && n > first_ && (n - first_) % period_ == 0)) {
-                x = amp_;
-            }
-            for (uint32_t c = 0; c < out.numChannels; ++c) out.channels[c][f] = x;
-        }
-        frame_ += out.numFrames;
-    }
-
-private:
-    bool sine_ = false;
-    double hz_ = 0;
-    float amp_ = 0;
-    uint64_t first_ = 0, period_ = 0, frame_ = 0;
-};
+std::unique_ptr<Node> makeSourceNode(const std::string& config) {
+    char kind[16] = {};
+    double a = 0, b = 0, c = 0;
+    std::sscanf(config.c_str(), "%15s %lf %lf %lf", kind, &a, &b, &c);
+    if (std::string(kind) == "sine") return std::make_unique<SineNode>(a, static_cast<float>(b));
+    return std::make_unique<ImpulseNode>(static_cast<uint32_t>(b), static_cast<float>(c), static_cast<uint32_t>(a));
+}
 
 // A timeline node (registered as audioClipPlayer, so the graph schedules it early): every frame
 // a segment covers carries its timeline sample position + 1, so silence (0) stands out.
@@ -178,12 +109,12 @@ private:
 // The latest FakeLatencyNode each NodeID got, for MIX-024.
 class LatencyNodes {
 public:
-    void add(NodeID id, FakeLatencyNode* node) {
+    void add(NodeID id, ReportingLatencyNode* node) {
         std::lock_guard lock(mutex_);
         nodes_[id] = node;
         ++creates_[id];
     }
-    FakeLatencyNode* get(NodeID id) const {
+    ReportingLatencyNode* get(NodeID id) const {
         std::lock_guard lock(mutex_);
         auto it = nodes_.find(id);
         return it == nodes_.end() ? nullptr : it->second;
@@ -196,11 +127,11 @@ public:
 
 private:
     mutable std::mutex mutex_;
-    std::map<NodeID, FakeLatencyNode*> nodes_;
+    std::map<NodeID, ReportingLatencyNode*> nodes_;
     std::map<NodeID, int> creates_;
 };
 
-// sampler: SourceNode(configJSON); delay: FakeLatencyNode(configJSON); audioClipPlayer:
+// sampler: makeSourceNode(configJSON); delay: FakeLatencyNode(configJSON); audioClipPlayer:
 // TimelineProbe; channelStrip, gain, bus (built in): pass through; compressor: input +
 // sidechain; midiClipPlayer: no audio. master is the engine's own.
 NodeRegistry pdcRegistry(std::shared_ptr<LatencyNodes> latencyNodes = std::make_shared<LatencyNodes>()) {
@@ -209,11 +140,11 @@ NodeRegistry pdcRegistry(std::shared_ptr<LatencyNodes> latencyNodes = std::make_
         return [f](const NodeCreateInfo& info) -> Result<std::unique_ptr<Node>> { return f(info); };
     };
     (void)registry.set(NodeKind::sampler, {make([](const NodeCreateInfo& info) {
-                           return std::unique_ptr<Node>(new SourceNode(info.desc.configJSON));
+                           return makeSourceNode(info.desc.configJSON);
                        })});
     (void)registry.set(NodeKind::delay, {make([latencyNodes](const NodeCreateInfo& info) {
                            const auto n = static_cast<uint32_t>(std::stoul(info.desc.configJSON));
-                           auto node = std::make_unique<FakeLatencyNode>(n, info.latency);
+                           auto node = std::make_unique<ReportingLatencyNode>(n, info.latency);
                            latencyNodes->add(info.desc.id, node.get());
                            return std::unique_ptr<Node>(std::move(node));
                        })});
@@ -726,7 +657,7 @@ CheckResult pdcClickOnBeatOne() {
                   .ok());
     // The latent "master plugin": a FakeLatencyNode in the master insert position.
     (void)registry.set(NodeKind::delay, {[](const NodeCreateInfo& info) -> Result<std::unique_ptr<Node>> {
-                           return std::unique_ptr<Node>(new FakeLatencyNode(2048, info.latency));
+                           return std::unique_ptr<Node>(new ReportingLatencyNode(2048, info.latency));
                        }});
     GraphBuilder builder(std::move(registry), kRate, kMaxBlock);
 
@@ -792,7 +723,7 @@ CheckResult pdcLatencyChangeRebuilds() {
         out.renderBlocks(engine, 8, 256);
         DAW_CHECK(engine.telemetry().snapshot().graphLatency == 100);
 
-        FakeLatencyNode* node = latencyNodes->get(21);
+        ReportingLatencyNode* node = latencyNodes->get(21);
         DAW_CHECK(node != nullptr);
         if (!node) return checks;
         node->setLatency(300);
@@ -834,12 +765,12 @@ CheckResult pdcLatencyChangeRebuilds() {
         }));
     }
     // The compiler is gone; the node (still in the engine's pool) reports into nothing.
-    if (FakeLatencyNode* node = latencyNodes->get(21)) node->setLatency(50);
+    if (ReportingLatencyNode* node = latencyNodes->get(21)) node->setLatency(50);
     // A builder without a compiler drops reports too.
     GraphBuilder lone(pdcRegistry(latencyNodes), kRate, 256);
     Engine other;
     DAW_CHECK(lone.build(d.d, other.nodes(), other.params()).ok());
-    if (FakeLatencyNode* node = latencyNodes->get(21)) node->setLatency(60);
+    if (ReportingLatencyNode* node = latencyNodes->get(21)) node->setLatency(60);
     DAW_CHECK(out.violations == 0);
     return checks;
 }

@@ -13,6 +13,7 @@
 #include "core/AudioBufferPool.h"
 #include "core/Realtime.h"
 #include "core/Result.h"
+#include "core/RtTrap.h"
 #include "core/SpscQueue.h"
 
 using namespace daw;
@@ -157,7 +158,19 @@ CheckResult rtAnnotationNonblocking() {
     if (!pool.ok()) return checks;
     const AudioBufferPool& p = *pool;
     DAW_CHECK(noexcept(rtRoundTrip(*queue, p)));
-    DAW_CHECK(rtRoundTrip(*queue, p) > 0);
+    // DW-009 (ENG-030..033): the compiler check above is static; also run it under the RT trap,
+    // which must count nothing. ASan/TSan hide allocations from the trap (DW-054/065), which can
+    // only lower the count, so 0 holds there too.
+    (void)RtTrap::install();
+    std::size_t moved = 0;
+    uint64_t violations = 0;
+    {
+        RtScope scope;
+        moved = rtRoundTrip(*queue, p);
+        violations = scope.violations();
+    }
+    DAW_CHECK(moved > 0);
+    DAW_CHECK(violations == 0);
     return checks;
 }
 

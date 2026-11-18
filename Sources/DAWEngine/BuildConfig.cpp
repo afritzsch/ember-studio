@@ -6,7 +6,9 @@
 
 static_assert(kVstVersionMajor == 3, "BUILD-003: unexpected VST3 SDK");
 
-// BUILD-005: this symbol exists only when the RT trap is compiled in (Debug).
+// BUILD-005: this symbol exists only when the RT trap is compiled in (Debug). scripts/test.sh's
+// BUILD-005 check greps libDAWEngine.a for it (present in Debug, absent in Release) alongside
+// RtTrap::install, so keep it (DW-002).
 #if DAW_RT_TRAP
 extern "C" const int daw_build_rt_trap_enabled = 1;
 #endif

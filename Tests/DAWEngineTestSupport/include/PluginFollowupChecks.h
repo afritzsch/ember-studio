@@ -29,6 +29,13 @@ CheckResult auResetClearsTail();
 // realtime builder (no PrepareInfo::offline) prepares kRealtime.
 CheckResult pluginOfflineModeAndExportReset(bool au);  // the AU half (builder only) or the VST3 half
 
+// DW-301 (T-103): an export from a realtime engine renders hosted plugins offline. VST3 (EmberTest
+// through a realtime facade on the fake devices): prepared kRealtime, every export block kOffline,
+// kRealtime again after a finished, a failed and a cancelled export; 0 RT violations. AU (host
+// hook on a realtime builder): the fake AU's and Apple AUDelay's renderingOffline round-trip
+// true → false while they keep rendering; an offline-prepared AU is left alone.
+CheckResult pluginExportRendersOffline(bool au);  // the AU half or the VST3 half
+
 // DW-233 / AUTO-003: in a block where automation wraps, a VST3 parameter gets the block's value at
 // offset 0, held up to the frame before the wrap and the after-wrap value at the wrap frame
 // (EmberTest's point log); an AU (the fake, which applies events at their frame) jumps at exactly
