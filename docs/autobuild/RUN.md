@@ -145,6 +145,9 @@ Unattended phases started by `/autobuild` (see `.claude/skills/autobuild/SKILL.m
 - Start: week 62%, five-hour window 42% (reset ~4 h away). WEEK_STOP 90 for this run.
 - 5-hour window hit 88% at 1794972134, ~16 min after the last worker started (week 69%). All four workers paused until the reset at 1794985800 + 120 s. Lead spec housekeeping committed meanwhile (DW-034, DW-035, DW-152).
 - Resumed all four at 1794985964 (pause ~3.8 h; five 0%, week 69%). T-095 may add its per-slot safe-mode set to ProjectStore (add-only); T-097 told not to block the render thread in the reset path.
+- T-099 merged (414de6d): test.sh 12/12, swift test 2x green. Worker closed.
+- T-095 merged (718d1ae): test.sh 11/12 (CTL-031 ProgressTests load flake DW-231, green 3x alone), swift test 2x green. Worker closed.
+- Second pause: 5-hour window 85% at 1794989647 (week 81%), T-097 (final test runs) and T-098 (merging main for T-099's telemetry fields) paused until 1795003800 + 120 s.
 
 ## Summary for the user
 
