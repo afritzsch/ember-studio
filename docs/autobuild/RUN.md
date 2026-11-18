@@ -15,6 +15,7 @@ Unattended phases started by `/autobuild` (see `.claude/skills/autobuild/SKILL.m
 | 9 | T-075, T-063, T-080, T-084 | all 4 (T-075, T-080, T-084, T-063) | 0 → 24 | New run (week reset). M7 complete (automation recording + lanes); loop takes/comping (T-081 ready); GitHub Actions CI + sanitizer/perf jobs (TEST-008 at ~4×, T-091 added); plugin editors + plugin → model edits (T-065 ready). Two worker setups failed on a git config lock (started in one batch), recovered by hand. One 5-hour pause (~4.2 h). Every trial merge 12/12 + swift test green |
 | 10 | T-065, T-081, T-083, T-091 | all 4 (T-083, T-081, T-065, T-091) | 24 → 45 | Started with the 5-hour window at 82%: prepared, then waited for the reset; one more pause (~4.4 h). M6 and M8 complete (device chain + plugin manager, take UI, crash dialog + safe-mode absent slots, TEST-008 at 10.7×). CI can't build on hosted runners (no Xcode 27): runner via `vars.CI_RUNNER` (DW-261). Package renamed (DW-066). Follow-up tasks T-092..T-096 added. **The user raised WEEK_STOP from 50 to 90 for this run** (conductor note, phase 10). |
 | 11 | T-092, T-093, T-094, T-096 | all 4 (T-096, T-093, T-094, T-092) | 46 → 62 | Per-track MIDI input picker (user backlog), render cancel/dither/meters/previewNote in the control protocol, VST3/AU display strings + scanner timeout/retry/parallel scans (DW-276 was a real AU parameter-tree bug, fixed), AUTO-003 wrap jump for every built-in, TEST-008 11.4×. One 5-hour pause (~2.2 h; T-096 merged during it). Lead spec housekeeping (DW-239/244/267/291); follow-up tasks T-097..T-099 added |
+| 12 | T-095, T-097, T-098, T-099 | all 4 (T-099, T-095, T-098, T-097) | 62 → 86 | Last phase: no `ready`/`wip`/`todo` tasks left (stop decision in DECISIONS). Engine/model correctness (telemetry clippedSamples/midiEventsDropped/bufferFrames, take-clip model fixes, stricter validate), app follow-ups (per-slot safe-mode enable, plugin-editor automation recording, arrow nudge, editable toolbar tempo/signature), `plugins.*`/`paramDisplay`/ordered dawmcp calls/stale warning, hosted-plugin reset/bypass note-offs/wrap jump/VST3 MIDI mapping/offline mode. Two 5-hour pauses (~3.8 h, ~3.9 h) |
 
 ## Phase notes
 
@@ -148,10 +149,45 @@ Unattended phases started by `/autobuild` (see `.claude/skills/autobuild/SKILL.m
 - T-099 merged (414de6d): test.sh 12/12, swift test 2x green. Worker closed.
 - T-095 merged (718d1ae): test.sh 11/12 (CTL-031 ProgressTests load flake DW-231, green 3x alone), swift test 2x green. Worker closed.
 - Second pause: 5-hour window 85% at 1794989647 (week 81%), T-097 (final test runs) and T-098 (merging main for T-099's telemetry fields) paused until 1795003800 + 120 s.
+- Resumed both at 1795003964. T-097 traced its export RT violations to a full param re-push after reset that trips Apple's V2 bridge allocation; fixed.
+- T-098 merged (32c04c1), then T-097 merged (e116757): test.sh 12/12 and swift test 2x green each. Workers closed.
+- End: 4/4 merged, main green, week ~86%. No task is ready/wip/todo, so the run stops (DECISIONS "Stop after phase 12").
 
 ## Summary for the user
 
-This run (the third) had one phase, 8 (2026-11-10 → 2026-11-11). The week went 43% → 61%. It stopped because the week passed the 50% limit during the phase. The wave was finished anyway.
+This run (the fourth) had four phases, 9–12 (2026-11-16 → 2026-11-18). The week went 0% → ~86%; you raised WEEK_STOP to 90 during phase 10. It stopped after phase 12 because **no task is left `ready`, `wip` or `todo`**. 81 discovered-work items stay open, and another phase would have run past the weekly cap.
+
+**Merged in this run (16 tasks, all on `main`, pushed):**
+- Phase 9: T-075 automation recording + lane UI, T-080 loop takes/comping, T-084 GitHub Actions CI + sanitizer/perf jobs, T-063 plugin editors.
+- Phase 10: T-065 device chain + plugin manager, T-081 take UI, T-083 crash dialog + safe-mode absent slots, T-091 DSP perf (TEST-008 10.7×).
+- Phase 11: T-092 wrap jump for built-ins (TEST-008 11.4×), T-093 per-track MIDI input picker, T-094 plugin display strings + scanner timeout/retry/parallel scan, T-096 render cancel/dither/meters/previewNote.
+- Phase 12: T-099 telemetry + model correctness, T-095 app follow-ups (per-slot "Enable this plugin" in safe mode, plugin-editor edits recorded as automation, arrow-key nudge, editable toolbar tempo/signature, Comp Editor tab removed), T-098 `plugins.*` / `engine.paramDisplay` in dawctl/dawmcp, ordered dawmcp calls and a stale-binary warning, T-097 hosted-plugin reset before exports (bit-identical repeated exports), bypass note-offs, wrap jump, VST3 MIDI CC mapping, offline process mode.
+- Milestones: M1–M8 are complete (80 tasks done).
+
+**Decisions to review:** `docs/autobuild/DECISIONS.md`, rows for phases 9–12. The main ones in phase 12:
+- the pre-accepted Interfaces additions (telemetry fields, `plugins.*`, `engine.paramDisplay`, `PrepareInfo.offline`);
+- bypassing an instrument plugin sends its held note-offs plus CC 123;
+- the per-slot safe-mode enable is session-only;
+- the Comp Editor tab was removed;
+- toolbar tempo/signature edits set bar 1's values;
+- stopping instead of creating more follow-up tasks.
+
+**Tasks parked:** none. No `wip` tasks or WIP branches. The next run's first lead must group open DW items into new tasks; HANDOVER → *Your first job* suggests groupings.
+
+**Questions only you can answer** (HANDOVER → *Open questions*), new in this phase:
+- DW-294: should the master limiter be exposed? Today `clippedSamples` is always 0.
+- DW-293: the orphan-lane inverse shape.
+- A manual check of T-095's app changes.
+
+Still open from before: DW-274 (JIT entitlements), DW-261 (CI runner), DW-281 (Low Power Mode perf), the repo being **public**, and the manual checks.
+
+**Permission prompts that blocked work:** none. `git worktree remove --force` is still denied in auto mode, so merged worktrees stay on disk (list in HANDOVER → *Sessions only the user can close*).
+
+**Sessions you should close:** the conductor ("macDAW") once it reports. Every phase-12 worker is closed, and the conductor closes this lead (12).
+
+### Earlier run (phase 8)
+
+That run (the third) had one phase, 8 (2026-11-10 → 2026-11-11). The week went 43% → 61%. It stopped because the week passed the 50% limit during the phase. The wave was finished anyway.
 
 **Merged in this run (4 tasks, all on `main`, pushed):**
 - **T-088**: insert-chain commands `InsertDevice`/`RemoveDevice`/`MoveDevice` on tracks, buses and the master (DW-149). Removing a send or device also removes its automation lanes, in one undo step (DW-234, your answer). Velocity-0 notes are repaired on open (your answer). SetLoop accepts any non-empty loop.
