@@ -533,8 +533,11 @@ public struct ControlPlugin: Codable, Hashable, Sendable {
 
 /// T-098: what a scan or retry did (`PluginCatalog.RefreshSummary`).
 public struct ControlPluginScanSummary: Codable, Hashable, Sendable {
-    /// New or changed candidates scanned now: AU identifiers or VST3 bundle paths, in scan order.
-    public var scanned: [String]
+    /// New or changed candidates scanned now.
+    public var scanned: Int
+    /// Those candidates: AU identifiers or VST3 bundle paths, in scan order (headless only; the
+    /// app's plugin manager keeps counts).
+    public var scannedCandidates: [String]?
     public var unchanged: Int
     public var removed: Int
     /// Usable and blocked plugins in the cache afterwards.
@@ -545,9 +548,10 @@ public struct ControlPluginScanSummary: Codable, Hashable, Sendable {
     /// Why a param was not used (attach mode scans with the app's own limit).
     public var note: String?
 
-    public init(scanned: [String], unchanged: Int, removed: Int, plugins: Int = 0, blocked: Int = 0,
-                timeoutSeconds: Double? = nil, note: String? = nil) {
+    public init(scanned: Int, scannedCandidates: [String]? = nil, unchanged: Int, removed: Int, plugins: Int = 0,
+                blocked: Int = 0, timeoutSeconds: Double? = nil, note: String? = nil) {
         self.scanned = scanned
+        self.scannedCandidates = scannedCandidates
         self.unchanged = unchanged
         self.removed = removed
         self.plugins = plugins

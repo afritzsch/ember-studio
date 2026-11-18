@@ -152,7 +152,8 @@ public final class CatalogPluginControl: ControlPluginProvider {
             do throws(PluginCatalogError) {
                 let summary = try work(&catalog)
                 return .success(ControlPluginScanSummary(
-                    scanned: summary.scanned.map(\.path), unchanged: summary.unchanged, removed: summary.removed,
+                    scanned: summary.scanned.count, scannedCandidates: summary.scanned.map(\.path),
+                    unchanged: summary.unchanged, removed: summary.removed,
                     plugins: catalog.plugins.count, blocked: catalog.blocked.count))
             } catch {
                 return .failure(error)
