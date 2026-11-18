@@ -39,4 +39,9 @@ CheckResult auEditorFinish();
 // matches it (or 300 ms pass), and the echo of a host push isn't an edit. 0 RT violations.
 CheckResult auPluginEditsBecomeEvents();
 
+// DW-276 (T-094): a V2 bridge replacing its parameter tree after the instance last looked (a bus
+// format set straight on the unit) doesn't strand the edit observer: a Touch on the new tree is
+// heard (the instance follows `parameterTree` by KVO).
+CheckResult auEditsFollowTreeSwap();
+
 } // namespace daw::testing

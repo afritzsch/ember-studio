@@ -22,6 +22,9 @@ struct PluginEditorTests {
     @Test("DW-204: AU Touch/Value/Release become begin/value/end edits; gestures and holds defer the model's push; echoes aren't edits; 0 RT violations")
     func auEdits() { expectPasses(daw.testing.auPluginEditsBecomeEvents()) }
 
+    @Test("DW-276: an AU edit observer follows a parameter tree the V2 bridge replaces later (KVO); the editor's Touch is still heard")
+    func auEditsFollowTreeSwap() { expectPasses(daw.testing.auEditsFollowTreeSwap()) }
+
     @MainActor
     @Test("PLUG-017: an AU editor (requestViewController, else the generic view) arrives on the main queue with a size; destroyPluginView closes it")
     func auEditor() async throws {
