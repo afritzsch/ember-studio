@@ -65,7 +65,7 @@ struct ModelFollowupTests {
     @Test("DW-258: through the undo stack (Debug validate() after every command), a refused removal leaves no undo entry")
     func removeAssetUndoStack() throws {
         let (p, _, used, _) = try takeProject()
-        let stack = UndoStack()
+        var stack = UndoStack()
         var q = p
         #expect(throws: DAWError.self) { try stack.perform(RemoveAsset(assetID: used), on: &q) }
         #expect(q == p && !stack.canUndo)
