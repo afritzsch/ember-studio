@@ -199,7 +199,7 @@ final class GoldenEngine: EngineProtocol {
 
     func telemetry() -> EngineTelemetry {
         // DW-240 (T-098): EngineClient's conversion, so no TelemetryPOD field is dropped here.
-        EngineClient.telemetry(facade.telemetry())
+        EngineClient.telemetry(from: facade.telemetry())
     }
 
     func nodeLatencies() -> [NodeLatency] {
