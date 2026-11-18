@@ -1137,6 +1137,18 @@ void EngineFacade::Impl::runExport(JobID jobID, Tick from, Tick to, const Export
         (void)engine.transport().setRecording(false);
         // DW-242 (T-097): hosted plugins are reset here, on daw.export before the first block with
         // the device stopped, so the DW-063 reset of the render's first block finds them clean.
+        // DW-301 (T-103): and switched to offline rendering for the export (a realtime engine
+        // prepared them kRealtime / online; an offline engine's are offline already and stay so).
+        // Back to realtime on every way out of this block, before the driver restarts below.
+        plugins->setOfflineAll(true);
+        vst3Plugins->setOfflineAll(true);
+        struct OnlineAgain {
+            Impl& impl;
+            ~OnlineAgain() {
+                impl.plugins->setOfflineAll(false);
+                impl.vst3Plugins->setOfflineAll(false);
+            }
+        } onlineAgain{*this};
         plugins->resetAll();
         vst3Plugins->resetAll();
         OfflineDriver offline;

@@ -67,6 +67,7 @@ struct Probe {
     PointLog points[kParamCount];
     std::atomic<int64> blocks{0};
     std::atomic<int32> setupMode{-1}, dataMode{-1};
+    std::atomic<int64> offlineBlocks{0}, setups{0};  // T-103 (DW-301): kOffline process calls, setupProcessing calls
     std::atomic<int32> activations{0};
     std::atomic<int64> noteOffs{0};
     std::atomic<int64> latency{-1};  // -1: the global gLatency
@@ -247,6 +248,7 @@ public:
     // DW-211 (T-097).
     tresult PLUGIN_API setupProcessing(ProcessSetup& setup) SMTG_OVERRIDE {
         probe.setupMode.store(setup.processMode);
+        probe.setups.fetch_add(1);
         return AudioEffect::setupProcessing(setup);
     }
     tresult PLUGIN_API setActive(TBool state) SMTG_OVERRIDE {
@@ -277,6 +279,7 @@ protected:
 
         const int64 block = probe.blocks.fetch_add(1);
         probe.dataMode.store(data.processMode);
+        if (data.processMode == kOffline) probe.offlineBlocks.fetch_add(1);
         if (auto* changes = data.inputParameterChanges) {
             for (int32 i = 0; i < changes->getParameterCount(); ++i) {
                 IParamValueQueue* q = changes->getParameterData(i);
@@ -516,6 +519,21 @@ __attribute__((visibility("default"))) int32_t ember_test_probe_stats(void* cont
     *activations = p->probe.activations.load();
     *noteOffs = p->probe.noteOffs.load();
     *processorID = p->id;
+    return 1;
+}
+
+// T-103 (DW-301): the process modes (0 kRealtime, 2 kOffline; -1 none yet) of the last
+// setupProcessing and the last process call, how many process calls were kOffline and how many
+// setupProcessing calls there were. False without a processor.
+__attribute__((visibility("default"))) int32_t ember_test_probe_process_mode(void* controller, int32_t* setupMode,
+                                                                           int32_t* dataMode, int64_t* offlineBlocks,
+                                                                           int64_t* setups) {
+    Processor* p = probed(controller);
+    if (p == nullptr) return 0;
+    *setupMode = p->probe.setupMode.load();
+    *dataMode = p->probe.dataMode.load();
+    *offlineBlocks = p->probe.offlineBlocks.load();
+    *setups = p->probe.setups.load();
     return 1;
 }
 

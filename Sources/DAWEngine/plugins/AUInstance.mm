@@ -382,6 +382,7 @@ struct AUInstance::Impl {
     Tick lastEndTick = 0;
     HeldNotes held;                                // DW-225 (T-097)
     bool offline = false;                          // DW-211 (T-097): prepared with renderingOffline
+    bool exportOffline = false;                    // DW-301 (T-103): switched for an export
     std::vector<uint64_t> addresses;               // params_[i].address
     // DW-213 (T-094): each stepped parameter's value names, read once on the first params(true)
     // (not at instantiation, which runs on daw.compile), under `mutex`.
@@ -784,6 +785,7 @@ Result<void> AUInstance::prepare(double sampleRate, uint32_t maxBlock, bool offl
         rate_ = sampleRate;
         maxBlock_ = maxBlock;
         impl.offline = offline;
+        impl.exportOffline = false;  // DW-301: a re-prepare sets the mode from `offline`
         impl.held.clear();
         inChannels_ = in;
         outChannels_ = out;
@@ -925,6 +927,46 @@ void AUInstance::clearState() {
         impl_->held.clear();
         impl_->hadTransport = false;
         impl_->lastEndTick = 0;
+    }
+}
+
+// DW-301 (T-103).
+bool AUInstance::setExportOffline(bool on) {
+    @autoreleasepool {
+        Impl& impl = *impl_;
+        std::lock_guard lock(impl.mutex);
+        if (!prepared_.load(std::memory_order_acquire) || impl.offline || impl.exportOffline == on) return false;
+        std::lock_guard lifecycle(gLifecycleMutex);  // DW-214
+        AUAudioUnit* unit = impl.unit;
+        if (unit.renderResourcesAllocated) [unit deallocateRenderResources];
+        unit.renderingOffline = on;
+        NSError* error = nil;
+        if (![unit allocateRenderResourcesAndReturnError:&error]) {
+            NSLog(@"Ember: %s refused offline rendering = %d (%@); keeping its mode", identifier().c_str(), on ? 1 : 0,
+                  error);
+            unit.renderingOffline = !on;
+            if (![unit allocateRenderResourcesAndReturnError:&error]) {
+                prepared_.store(false, std::memory_order_release);  // the node renders as if absent
+                return false;
+            }
+        }
+        if (static_cast<bool>(unit.renderingOffline) != on)
+            NSLog(@"Ember: %s ignores renderingOffline = %d", identifier().c_str(), on ? 1 : 0);
+        impl.renderBlock = unit.renderBlock;
+        impl.midiBlock = unit.scheduleMIDIEventBlock;
+        impl.paramBlock = unit.scheduleParameterBlock;
+        impl.exportOffline = on;  // what we asked for; switched back on `false` either way
+        impl.held.clear();
+        impl.hadTransport = false;
+        impl.lastEndTick = 0;
+        impl.observeEdits();  // DW-204: reallocation may rebuild a V2 bridge's tree
+        return static_cast<bool>(unit.renderingOffline) == on;
+    }
+}
+
+bool AUInstance::renderingOffline() const {
+    @autoreleasepool {
+        return impl_->unit.renderingOffline;
     }
 }
 

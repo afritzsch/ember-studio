@@ -101,6 +101,13 @@ public:
     Result<void> prepare(double sampleRate, uint32_t maxBlock, bool offline);
     bool isPrepared() const { return prepared_.load(std::memory_order_acquire); }
     bool preparedOffline() const;
+    // DW-301 (T-103), non-RT, only while nothing renders the instance (an export from a realtime
+    // engine, device stopped): switches a prepared instance's process mode for the export without
+    // re-preparing it: setProcessing(false), setActive(false), setupProcessing(kOffline, or
+    // kRealtime again for `false`; same rate and block size), setActive(true), setProcessing(true).
+    // An instance prepared offline (PrepareInfo::offline) is left alone, so `true` and `false` are
+    // both no-ops there. Returns whether the mode changed. preparedOffline() keeps the prepare mode.
+    bool setExportOffline(bool on);
     double preparedRate() const { return rate_; }
     uint32_t preparedMaxBlock() const { return maxBlock_; }
     uint32_t inputChannels() const { return inChannels_; }
