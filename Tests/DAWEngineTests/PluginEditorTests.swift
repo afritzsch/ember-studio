@@ -17,22 +17,24 @@ extension VST3PluginTests {
     func vst3Editor() { expectPasses(daw.testing.vst3EditorView()) }
 }
 
-@Suite("AU editors and plugin-side edits (PLUG-017, DW-204)", .serialized)
-struct PluginEditorTests {
-    @Test("DW-204: AU Touch/Value/Release become begin/value/end edits; gestures and holds defer the model's push; echoes aren't edits; 0 RT violations")
-    func auEdits() { expectPasses(daw.testing.auPluginEditsBecomeEvents()) }
+extension AUSuites {
+    @Suite("AU editors and plugin-side edits (PLUG-017, DW-204)", .serialized)
+    struct PluginEditorTests {
+        @Test("DW-204: AU Touch/Value/Release become begin/value/end edits; gestures and holds defer the model's push; echoes aren't edits; 0 RT violations")
+        func auEdits() { expectPasses(daw.testing.auPluginEditsBecomeEvents()) }
 
-    @Test("DW-276: an AU edit observer follows a parameter tree the V2 bridge replaces later (KVO); the editor's Touch is still heard")
-    func auEditsFollowTreeSwap() { expectPasses(daw.testing.auEditsFollowTreeSwap()) }
+        @Test("DW-276: an AU edit observer follows a parameter tree the V2 bridge replaces later (KVO); the editor's Touch is still heard")
+        func auEditsFollowTreeSwap() { expectPasses(daw.testing.auEditsFollowTreeSwap()) }
 
-    @MainActor
-    @Test("PLUG-017: an AU editor (requestViewController, else the generic view) arrives on the main queue with a size; destroyPluginView closes it")
-    func auEditor() async throws {
-        #expect(daw.testing.auEditorBegin())
-        let deadline = ContinuousClock.now + .seconds(10)
-        while !String(daw.testing.auEditorJSON()).contains("\"ready\":true"), ContinuousClock.now < deadline {
-            try await Task.sleep(for: .milliseconds(10))
+        @MainActor
+        @Test("PLUG-017: an AU editor (requestViewController, else the generic view) arrives on the main queue with a size; destroyPluginView closes it")
+        func auEditor() async throws {
+            #expect(daw.testing.auEditorBegin())
+            let deadline = ContinuousClock.now + .seconds(10)
+            while !String(daw.testing.auEditorJSON()).contains("\"ready\":true"), ContinuousClock.now < deadline {
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            expectPasses(daw.testing.auEditorFinish())
         }
-        expectPasses(daw.testing.auEditorFinish())
     }
 }

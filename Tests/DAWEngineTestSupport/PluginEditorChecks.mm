@@ -7,6 +7,7 @@
 
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <limits>
@@ -118,7 +119,9 @@ struct FacadeRef {
 };
 
 bool published(EngineFacade& f, uint64_t version) {
-    const GraphStatusPOD s = f.waitForGraph(version, 10000);
+    // 30 s: on a 3-core CI runner the DW-214 teardown stress holds the AU lifecycle lock for long
+    // stretches while this suite instantiates its AUs (DW-261).
+    const GraphStatusPOD s = f.waitForGraph(version, 30000);
     return s.publishedVersion >= version && s.lastError.ok();
 }
 
@@ -342,8 +345,15 @@ bool auEditorBegin() {
     delete gAUEditorFacade;
     gAUEditorFacade = new FacadeRef();
     FacadeRef& f = *gAUEditorFacade;
-    if (!f.facade || !auGraph(*f.facade)) return false;
-    return f->createPluginView(20) != nullptr && jsonHas(f->pluginViewJSON(20), "\"open\":true");
+    if (!f.facade || !auGraph(*f.facade)) {
+        std::fprintf(stderr, "auEditorBegin: no facade or the AU graph didn't publish\n");
+        return false;
+    }
+    if (f->createPluginView(20) == nullptr || !jsonHas(f->pluginViewJSON(20), "\"open\":true")) {
+        std::fprintf(stderr, "auEditorBegin: no plugin view: %s\n", f->pluginViewJSON(20).c_str());
+        return false;
+    }
+    return true;
 }
 
 std::string auEditorJSON() { return gAUEditorFacade && gAUEditorFacade->facade ? (*gAUEditorFacade)->pluginViewJSON(20) : ""; }

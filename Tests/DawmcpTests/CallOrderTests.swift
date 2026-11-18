@@ -33,6 +33,9 @@ private final class RawSession: @unchecked Sendable {
         process.standardError = FileHandle.nullDevice
         fromServer.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
+            // At EOF availableData is empty and the handler fires again at once: without this, it
+            // spins a core until the process exits, starving small CI runners (DW-261).
+            guard !data.isEmpty else { handle.readabilityHandler = nil; return }
             guard let self else { return }
             lock.withLock {
                 buffer.append(data)
@@ -145,7 +148,8 @@ struct CallOrderTests {
 
     @Test("DW-163: the sequencer runs numbers strictly in order, a cancelled number is released, and one that never starts is skipped")
     func sequencer() async throws {
-        let sequencer = CallSequencer(abandonAfter: .milliseconds(300))
+        // Long enough that a slow runner starting the tasks late doesn't abandon 0, 1, 3 or 5 (DW-261).
+        let sequencer = CallSequencer(abandonAfter: .seconds(2))
         let log = Log()
         let seqs = (0..<6).map { sequencer.issue(id: "n:\($0)") }
         await withTaskGroup(of: Void.self) { group in
@@ -161,6 +165,19 @@ struct CallOrderTests {
             sequencer.cancel(id: "n:2")
         }
         #expect(log.values == [0, 1, 3, 5])
+    }
+
+    @Test("DW-163: a number that comes up after it was abandoned runs at once instead of waiting forever")
+    func lateAfterAbandon() async throws {
+        let sequencer = CallSequencer(abandonAfter: .milliseconds(50))
+        let late = sequencer.issue(id: "n:0")
+        let next = sequencer.issue(id: "n:1")
+        try await Task.sleep(for: .milliseconds(100))
+        await sequencer.waitTurn(next)  // skips 0: it never started within 50 ms
+        sequencer.finish(next)
+        await sequencer.waitTurn(late)  // returns: 0's turn has passed
+        sequencer.finish(late)
+        #expect(sequencer.issue(id: nil) == 2)
     }
 
     // MARK: DW-147 / DW-151

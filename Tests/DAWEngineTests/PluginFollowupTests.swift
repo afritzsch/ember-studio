@@ -30,7 +30,7 @@ extension VST3PluginTests {
     func t097TeardownVsLatencyTimer() { expectPasses(daw.testing.vst3TeardownVsLatencyTimer(60)) }
 }
 
-extension AUPluginTests {
+extension AUSuites.AUPluginTests {
     @Test("DW-211: an offline builder prepares an AU with renderingOffline, a realtime one without")
     func t097OfflineMode() { expectPasses(daw.testing.pluginOfflineModeAndExportReset(true)) }
 
@@ -48,7 +48,7 @@ extension AUPluginTests {
 }
 
 // With the DW-214 teardown checks: they count the process's pending V2 releases, which this one adds to.
-extension AUTeardownStressTests {
+extension AUSuites.AUTeardownStressTests {
     @Test("DW-217: instantiating V2 AUs while others initialize and uninitialize on another thread is safe")
     func t097InstantiateVsLifecycle() { expectPasses(daw.testing.auInstantiateVsLifecycle(150)) }
 }

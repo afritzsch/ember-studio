@@ -8,58 +8,66 @@ import Testing
 // AUv3 registered in-process (FakeAudioUnit.mm: aux input bus, settable latency, MIDI impulses).
 // Serialized: the fake's latency knob acts on every live fake in the process.
 
-@Suite("AU hosting (PLUG-010, 012..016)", .serialized)
-struct AUPluginTests {
-    @Test("PLUG-010: AU identifiers and the auPlugin configJSON parse and round-trip")
-    func identifierAndConfig() { expectPasses(daw.testing.auIdentifierAndConfig()) }
+// DW-261: every suite that instantiates AUs is nested here, so they run one at a time. They share
+// the AU lifecycle lock (DW-214); on a 3-core CI runner the teardown stress held it long enough
+// that the other suites' graph rebuilds and editor setups timed out.
+@Suite("AU suites (one at a time)", .serialized)
+enum AUSuites {}
 
-    @Test("PLUG-010/015: AUDelay renders an echo 0.25 s later; param slots become render-thread events; 0 RT violations")
-    func delayThroughGraph() { expectPasses(daw.testing.auDelayThroughGraph()) }
+extension AUSuites {
+    @Suite("AU hosting (PLUG-010, 012..016)", .serialized)
+    struct AUPluginTests {
+        @Test("PLUG-010: AU identifiers and the auPlugin configJSON parse and round-trip")
+        func identifierAndConfig() { expectPasses(daw.testing.auIdentifierAndConfig()) }
 
-    @Test("PLUG-010: MIDI reaches the AU at exact frame offsets (fake AU, AUSampler); 0 RT violations")
-    func midiFrameOffsets() { expectPasses(daw.testing.auMidiFrameOffsets()) }
+        @Test("PLUG-010/015: AUDelay renders an echo 0.25 s later; param slots become render-thread events; 0 RT violations")
+        func delayThroughGraph() { expectPasses(daw.testing.auDelayThroughGraph()) }
 
-    @Test("PLUG-014: the aux input bus is fed from the node's sidechain port, silence without one")
-    func sidechain() { expectPasses(daw.testing.auSidechain()) }
+        @Test("PLUG-010: MIDI reaches the AU at exact frame offsets (fake AU, AUSampler); 0 RT violations")
+        func midiFrameOffsets() { expectPasses(daw.testing.auMidiFrameOffsets()) }
 
-    @Test("PLUG-013/MIX-024: an AU latency change (KVO) rebuilds the graph and PDC keeps paths aligned")
-    func latencyChange() { expectPasses(daw.testing.auLatencyChange()) }
+        @Test("PLUG-014: the aux input bus is fed from the node's sidechain port, silence without one")
+        func sidechain() { expectPasses(daw.testing.auSidechain()) }
 
-    @Test("PLUG-016: fullState round trip through the facade, off the RT thread; survives a rate change")
-    func stateRoundTrip() { expectPasses(daw.testing.auStateRoundTrip()) }
+        @Test("PLUG-013/MIX-024: an AU latency change (KVO) rebuilds the graph and PDC keeps paths aligned")
+        func latencyChange() { expectPasses(daw.testing.auLatencyChange()) }
 
-    @Test("PLUG-010/012: a missing AU renders as absent and is reported; slots keep their AU; parked AUs are adopted")
-    func failureAndAdoption() { expectPasses(daw.testing.auFailureAndAdoption()) }
+        @Test("PLUG-016: fullState round trip through the facade, off the RT thread; survives a rate change")
+        func stateRoundTrip() { expectPasses(daw.testing.auStateRoundTrip()) }
 
-    // T-064 (in this serialized suite: the fake AU's NaN knob is process-wide).
-    @Test("PLUG-022, PLUG-018: an AU writing NaN is silenced and reported once; AU host bypass passes the input, same AU")
-    func nanGuardAndBypass() { expectPasses(daw.testing.auNanGuardAndBypass()) }
+        @Test("PLUG-010/012: a missing AU renders as absent and is reported; slots keep their AU; parked AUs are adopted")
+        func failureAndAdoption() { expectPasses(daw.testing.auFailureAndAdoption()) }
 
-    // T-083 (DW-224; in this serialized suite: it counts live fake AUs).
-    @Test("DW-224, PLUG-021: a disabled (safe mode) AU slot is never instantiated; effect passes, instrument silent, state kept")
-    func safeModeSlots() { expectPasses(daw.testing.auSafeModeSlots()) }
-}
+        // T-064 (in this serialized suite: the fake AU's NaN knob is process-wide).
+        @Test("PLUG-022, PLUG-018: an AU writing NaN is silenced and reported once; AU host bypass passes the input, same AU")
+        func nanGuardAndBypass() { expectPasses(daw.testing.auNanGuardAndBypass()) }
 
-// DW-214: destroying AUs right after rendering parameter events. Before the fix this crashed in
-// Apple's AUAudioUnitV2Bridge parameter listener (SIGSEGV at 0x331) within ~100 iterations under
-// load, taking the whole test process down. The opt-in probe (DAW_AU_STRESS=<iterations>) also
-// prints the parameter-tree lag and how many immediate reads are stale.
-@Suite("AU teardown (DW-214)", .serialized)
-struct AUTeardownStressTests {
-    @Test("DW-214: 150 AUDelay/AUSampler instances destroyed right after parameter events; no crash, every bridge released")
-    func regression() { expectPasses(daw.testing.auTeardownRegression(150)) }
+        // T-083 (DW-224; in this serialized suite: it counts live fake AUs).
+        @Test("DW-224, PLUG-021: a disabled (safe mode) AU slot is never instantiated; effect passes, instrument silent, state kept")
+        func safeModeSlots() { expectPasses(daw.testing.auSafeModeSlots()) }
+    }
 
-    @Test("DW-214: V2 AUs initialized and uninitialized on two threads at once (daw.compile vs daw.reclaim); no crash")
-    func concurrentLifecycle() { expectPasses(daw.testing.auConcurrentLifecycle(40)) }
+    // DW-214: destroying AUs right after rendering parameter events. Before the fix this crashed in
+    // Apple's AUAudioUnitV2Bridge parameter listener (SIGSEGV at 0x331) within ~100 iterations under
+    // load, taking the whole test process down. The opt-in probe (DAW_AU_STRESS=<iterations>) also
+    // prints the parameter-tree lag and how many immediate reads are stale.
+    @Suite("AU teardown (DW-214)", .serialized)
+    struct AUTeardownStressTests {
+        @Test("DW-214: 150 AUDelay/AUSampler instances destroyed right after parameter events; no crash, every bridge released")
+        func regression() { expectPasses(daw.testing.auTeardownRegression(150)) }
 
-    @Test("DW-214 probe (opt-in): parameter-tree lag and a long teardown stress")
-    func stress() {
-        guard let n = ProcessInfo.processInfo.environment["DAW_AU_STRESS"].flatMap(UInt32.init) else { return }
-        let lag = daw.testing.auParamTreeLagMicros(200)
-        print("DW-214 tree lag worst µs:", lag)
-        let done = daw.testing.auTeardownStress(n, 8)
-        print("DW-214 teardown iterations:", done)
-        #expect(done == n)
-        expectPasses(daw.testing.auTeardownRegression(0))  // waits for the deferred releases
+        @Test("DW-214: V2 AUs initialized and uninitialized on two threads at once (daw.compile vs daw.reclaim); no crash")
+        func concurrentLifecycle() { expectPasses(daw.testing.auConcurrentLifecycle(40)) }
+
+        @Test("DW-214 probe (opt-in): parameter-tree lag and a long teardown stress")
+        func stress() {
+            guard let n = ProcessInfo.processInfo.environment["DAW_AU_STRESS"].flatMap(UInt32.init) else { return }
+            let lag = daw.testing.auParamTreeLagMicros(200)
+            print("DW-214 tree lag worst µs:", lag)
+            let done = daw.testing.auTeardownStress(n, 8)
+            print("DW-214 teardown iterations:", done)
+            #expect(done == n)
+            expectPasses(daw.testing.auTeardownRegression(0))  // waits for the deferred releases
+        }
     }
 }

@@ -34,12 +34,15 @@ private final class LiveDawctl: @unchecked Sendable {
         process.standardOutput = stdout
         process.standardError = stderr
         process.standardInput = input
+        // An empty read is EOF: drop the handler, or it fires again at once and spins a core (DW-261).
         stdout.fileHandleForReading.readabilityHandler = { [weak self] h in
             let d = h.availableData
+            guard !d.isEmpty else { h.readabilityHandler = nil; return }
             self?.lock.withLock { self?.out.append(d) }
         }
         stderr.fileHandleForReading.readabilityHandler = { [weak self] h in
             let d = h.availableData
+            guard !d.isEmpty else { h.readabilityHandler = nil; return }
             self?.lock.withLock { self?.err.append(d) }
         }
         try process.run()

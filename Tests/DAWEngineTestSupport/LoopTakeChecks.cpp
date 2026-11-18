@@ -473,11 +473,20 @@ CheckResult midiTakeReportsPasses() {
         DAW_CHECK(facade->injectMidi(0, true, kOn, 64, 90, 3).ok());
         std::this_thread::sleep_for(900ms);
         facade->stop();
+        // The take is finalized after stop(): wait for it (under TSan on a CI runner it came late, DW-261),
+        // then a little longer, so a second one would be seen.
         std::vector<EngineEventPOD> events;
         EngineEventPOD batch[8];
-        for (size_t n; (n = facade->pollEvents(batch, 8)) > 0;)
-            for (size_t i = 0; i < n; ++i)
-                if (batch[i].type == EngineEventType::recordingFinalized) events.push_back(batch[i]);
+        const auto drain = [&] {
+            for (size_t n; (n = facade->pollEvents(batch, 8)) > 0;)
+                for (size_t i = 0; i < n; ++i)
+                    if (batch[i].type == EngineEventType::recordingFinalized) events.push_back(batch[i]);
+        };
+        const auto finalizeBy = std::chrono::steady_clock::now() + 10s;
+        for (drain(); events.empty() && std::chrono::steady_clock::now() < finalizeBy; drain())
+            std::this_thread::sleep_for(5ms);
+        std::this_thread::sleep_for(100ms);
+        drain();
         DAW_CHECK(events.size() == 1);
         if (events.size() == 1) {
             const RecordingPOD& r = events[0].recording;

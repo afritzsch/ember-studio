@@ -4,8 +4,9 @@ import Foundation
 /// CTL-023 / CTL-011: starts **this checkout's** built app with a control socket and connects to it.
 ///
 /// - The app is `<root>/.build/xcode/Build/Products/Debug/Ember Studio.app`, the derived data path
-///   `scripts/test.sh` builds into. It is (re)built with `xcodebuild` when it is missing or older
-///   than the sources, unless the caller says not to.
+///   `scripts/test.sh` builds into. It is (re)built with `xcodebuild` (`buildIfNeeded`) when it is
+///   missing or older than any file under its inputs (walked recursively), unless the caller says
+///   not to.
 /// - It is launched with `Process` and an argument array, never `open -a` (which could pick another
 ///   worktree's build) and never through a shell, so the space in "Ember Studio.app" is safe
 ///   (DW-046).
@@ -69,6 +70,16 @@ public enum AppLauncher {
             }
         }
         return false
+    }
+
+    /// Rebuilds the checkout's app when `needsBuild` says it is stale (log:
+    /// `.build/attach/xcodebuild.log`); true when it ran `xcodebuild`. `dawctl --attach --launch` and
+    /// `daw_session_mode` both build this way before launching (DW-304).
+    @discardableResult
+    public static func buildIfNeeded(checkoutRoot root: URL) async throws(ControlError) -> Bool {
+        guard needsBuild(checkoutRoot: root) else { return false }
+        try await buildApp(checkoutRoot: root, log: root.appending(path: ".build/attach/xcodebuild.log"))
+        return true
     }
 
     /// `xcodebuild` into `<root>/.build/xcode` (as `scripts/test.sh`), its output appended to `log`.

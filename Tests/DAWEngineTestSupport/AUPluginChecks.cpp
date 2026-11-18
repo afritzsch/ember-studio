@@ -402,7 +402,12 @@ CheckResult auLatencyChange() {
     DAW_CHECK(check(0, "a.wav"));
     const uint64_t before = f->graphStatus().publishedVersion;
     setFakeAudioUnitLatency(0.01);  // 480 frames, reported through KVO
-    DAW_CHECK(eventually([&] { return f->pluginInfoJSON(20).find("\"latencySamples\":480") != std::string::npos; }));
+    if (!eventually([&] { return f->pluginInfoJSON(20).find("\"latencySamples\":480") != std::string::npos; })) {
+        // DW-261: seen only on CI runners; say what the host saw.
+        const std::string what = "latency 480 never reported; live fakes " + std::to_string(liveFakeAudioUnits()) +
+                                 ", node 20 " + f->pluginInfoJSON(20);
+        checks.fail(what.c_str(), __FILE__, __LINE__);
+    }
     // MIX-024: the compiler rebuilds on its own (no applyGraph; a latency rebuild republishes the
     // same version), re-planning PDC. Telemetry's graph latency comes from rendering, so export.
     DAW_CHECK(eventually([&] { return check(480, "b.wav"); }, 10000ms));

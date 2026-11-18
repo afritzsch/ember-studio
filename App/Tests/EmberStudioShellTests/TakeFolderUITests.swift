@@ -323,6 +323,10 @@ struct TakeFolderUITests {
         content.layoutSubtreeIfNeeded()
         let view = try #require(findCanvas(content))
         func snapshot() throws -> NSBitmapImageRep {
+            // A fixed canvas size: the window's follows the screen, and a CI runner's small display
+            // left the second take row outside the canvas (DW-261).
+            view.setFrameSize(NSSize(width: 1000, height: 600))
+            view.layout()
             view.displayNow()
             return NSBitmapImageRep(cgImage: try #require(view.snapshotImage(scale: 1)))
         }
@@ -344,7 +348,7 @@ struct TakeFolderUITests {
         // Take 1 isn't in the comp: dimmed. Take 2 plays [1920, 3840): bright there, dimmed before.
         let y1 = g.takeRowY(row: 0, take: 1) + 50, y2 = g.takeRowY(row: 0, take: 2) + 50
         let dim1 = rgb(rep, g.x(Tick(2400)), y1), bright2 = rgb(rep, g.x(Tick(2400)), y2), dim2 = rgb(rep, g.x(Tick(600)), y2)
-        #expect(bright2.b > dim1.b + 0.1 && bright2.b > dim2.b + 0.1, "comp part \(bright2) vs dimmed \(dim1), \(dim2)")
+        #expect(bright2.b > dim1.b + 0.1 && bright2.b > dim2.b + 0.1, "comp part \(bright2) vs dimmed \(dim1), \(dim2); canvas \(view.bounds.size), y2 \(y2)")
         // The comp part is outlined in the folder colour.
         let edge = rgb(rep, g.x(Tick(2400)), g.takeRowY(row: 0, take: 2) + 2)
         #expect(edge.r > 0.8 && edge.g > 0.5 && edge.b < 0.4, "outline: \(edge)")

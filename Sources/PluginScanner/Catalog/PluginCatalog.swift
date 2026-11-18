@@ -100,17 +100,25 @@ public struct PluginCatalog: Sendable {
         guard !jobs.isEmpty else { return [] }
         let state = ScanState(count: jobs.count)
         let workers = min(max(limit, 1), jobs.count)
-        DispatchQueue.concurrentPerform(iterations: workers) { _ in
-            while let index = state.next() {
-                let (candidate, timeout) = jobs[index]
-                do throws(PluginCatalogError) {
-                    let plugins = if let timeout { try scanner.scan(candidate, timeout: timeout) } else { try scanner.scan(candidate) }
-                    state.finish(index, plugins)
-                } catch {
-                    state.fail(error)
+        // Threads of their own: a scan mostly waits on the scanner process. concurrentPerform sizes
+        // itself to the idle cores, so on a busy 3-core CI runner it ran the scans one at a time.
+        let done = DispatchGroup()
+        for _ in 0..<workers {
+            done.enter()
+            Thread.detachNewThread {
+                defer { done.leave() }
+                while let index = state.next() {
+                    let (candidate, timeout) = jobs[index]
+                    do throws(PluginCatalogError) {
+                        let plugins = if let timeout { try scanner.scan(candidate, timeout: timeout) } else { try scanner.scan(candidate) }
+                        state.finish(index, plugins)
+                    } catch {
+                        state.fail(error)
+                    }
                 }
             }
         }
+        done.wait()
         return try state.results()
     }
 
