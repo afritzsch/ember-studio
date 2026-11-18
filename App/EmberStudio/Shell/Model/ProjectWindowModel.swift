@@ -495,7 +495,10 @@ final class ProjectWindowModel: Identifiable {
     @discardableResult
     func handleKey(_ chord: KeyChord, isRepeat: Bool = false) -> Bool {
         // UI-020: with the piano roll focused, its keys (⌫, ⌘A, Q) act on notes rather than clips.
-        let pianoRollBinding = pianoRoll.hasKeyFocus && pianoRoll.isOpen ? KeyBindings.pianoRollBinding(for: chord) : nil
+        let pianoRollFocused = pianoRoll.hasKeyFocus && pianoRoll.isOpen
+        // DW-179: the focused piano roll's own arrows transpose notes (PianoRollView.keyDown).
+        if pianoRollFocused, case .arrow = chord.key { return false }
+        let pianoRollBinding = pianoRollFocused ? KeyBindings.pianoRollBinding(for: chord) : nil
         guard let binding = pianoRollBinding ?? KeyBindings.binding(for: chord), !isRepeat || binding.repeats,
               let control = controls.first(where: { $0.id == binding.controlID }), control.isEnabled
         else { return false }

@@ -169,10 +169,51 @@ struct KeyBindingTests {
         #expect(KeyChord(characters: " ", modifiers: []) == KeyChord(.space))
         #expect(KeyChord(characters: "\u{7F}", modifiers: []) == KeyChord(.delete))
         #expect(KeyChord(characters: "\u{F728}", modifiers: []) == KeyChord(.delete), "forward delete")
-        #expect(KeyChord(characters: "\u{F702}", modifiers: []) == nil, "← is a function key")
+        // DW-179 (T-095): the arrows are kept (function keys with a direction); other function keys aren't.
+        #expect(KeyChord(characters: "\u{F702}", modifiers: []) == KeyChord(.arrow(.left)))
+        #expect(KeyChord(characters: "\u{F700}", modifiers: []) == KeyChord(.arrow(.up)))
+        #expect(KeyChord(characters: "\u{F701}", modifiers: []) == KeyChord(.arrow(.down)))
+        #expect(KeyChord(characters: "\u{F703}", modifiers: []) == KeyChord(.arrow(.right)))
+        #expect(KeyChord(characters: "\u{F704}", modifiers: []) == nil, "F1 is a function key")
+        #expect(KeyChord(.arrow(.left)).description == "←")
         #expect(KeyChord(characters: "", modifiers: []) == nil)
         #expect(KeyChord("t", [.command, .shift]).description == "⇧⌘T")
         #expect(KeyChord(.space).description == "Space" && KeyChord(.delete).description == "⌫")
+    }
+
+    @Test("DW-179: arrow keys nudge the selected clips a grid step (←/→) or a track (↑/↓), one undo entry each; nothing selected or the piano roll focused passes them on")
+    func arrowNudge() throws {
+        let (model, _, asset) = try makeArrange()
+        let clip = try model.addAudioClip(track: 0, start: 960, asset: asset)
+        #expect(!press(model, KeyChord(.arrow(.right))), "no selection: the key goes on to the focused view")
+        #expect(try model.audio(clip).start == Tick(960))
+        model.selectedClips = [clip]
+        model.arrange.snap = .beat
+        #expect(press(model, KeyChord(.arrow(.right))))
+        #expect(try model.audio(clip).start == Tick(1920))
+        #expect(model.store.undoLabel == "Move Clip")
+        #expect(press(model, KeyChord(.arrow(.right)), repeat: true), "a held arrow repeats")
+        #expect(try model.audio(clip).start == Tick(2880))
+        #expect(press(model, KeyChord(.arrow(.left))))
+        #expect(try model.audio(clip).start == Tick(1920))
+        model.arrange.snap = .bar
+        #expect(press(model, KeyChord(.arrow(.left))))
+        #expect(try model.audio(clip).start == Tick(0), "a bar back, clamped at 0")
+        #expect(press(model, KeyChord(.arrow(.down))))
+        #expect(model.trackOf(clip) == model.project.tracks[1].id)
+        #expect(press(model, KeyChord(.arrow(.up))))
+        #expect(model.trackOf(clip) == model.project.tracks[0].id)
+        model.store.undo()
+        #expect(model.trackOf(clip) == model.project.tracks[1].id, "each press is one undo entry")
+        // UI-020: with the piano roll focused its view transposes on the arrows; they don't move clips.
+        let midiTrack = model.project.tracks[2].id
+        try model.store.perform(AddClip(trackID: midiTrack, start: 0, length: 3840))
+        model.pianoRoll.open(try #require(model.project.track(midiTrack)?.clips.first?.id))
+        model.selectedClips = [clip]
+        model.pianoRoll.hasKeyFocus = true
+        #expect(!press(model, KeyChord(.arrow(.up))))
+        #expect(model.trackOf(clip) == model.project.tracks[1].id)
+        #expect(!press(model, KeyChord(.arrow(.left), .shift)), "only the plain arrows are bound")
     }
 
     @Test("UI-002, UI-052: every binding names a control the window has; chords are unique")
