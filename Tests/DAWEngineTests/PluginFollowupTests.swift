@@ -36,7 +36,10 @@ extension AUPluginTests {
 
     @Test("DW-225/PLUG-018: bypassing an AU that holds a note releases it (note-off + CC 123)")
     func t097BypassReleasesNotes() { expectPasses(daw.testing.pluginBypassReleasesNotes(true)) }
+}
 
+// With the DW-214 teardown checks: they count the process's pending V2 releases, which this one adds to.
+extension AUTeardownStressTests {
     @Test("DW-217: instantiating V2 AUs while others initialize and uninitialize on another thread is safe")
     func t097InstantiateVsLifecycle() { expectPasses(daw.testing.auInstantiateVsLifecycle(150)) }
 }
