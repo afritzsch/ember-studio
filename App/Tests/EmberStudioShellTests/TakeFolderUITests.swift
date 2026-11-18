@@ -319,7 +319,11 @@ struct TakeFolderUITests {
         // FakeEngine? parameter type (a redundant-#require warning).
         let engine = try #require(t.engines.last)
         let (folder, _) = try makeFolder(window, engine: engine)
-        let content = try #require(manager.nsWindow(for: window)?.contentView)
+        let nsWindow = try #require(manager.nsWindow(for: window))
+        // A fixed size: the default follows the screen, and a CI runner's small display left the
+        // second take row outside the canvas (DW-261).
+        nsWindow.setContentSize(NSSize(width: 1400, height: 1000))
+        let content = try #require(nsWindow.contentView)
         content.layoutSubtreeIfNeeded()
         let view = try #require(findCanvas(content))
         func snapshot() throws -> NSBitmapImageRep {

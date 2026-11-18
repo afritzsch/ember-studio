@@ -25,8 +25,9 @@ final class CallSequencer: @unchecked Sendable {
     private var started = Set<Int>()
     private var released = Set<Int>()
     private var idToSeq: [String: Int] = [:]
-    /// When `next` last changed, to notice a number that never starts.
-    private var nextSince = ContinuousClock.now
+    /// When `next` last changed (or, before that, when the first call waited), to notice a number
+    /// that never starts. Not the creation time: calls that come up late must not count as abandoned.
+    private var nextSince: ContinuousClock.Instant?
     let abandonAfter: Duration
 
     init(abandonAfter: Duration = .seconds(5)) {
@@ -46,8 +47,13 @@ final class CallSequencer: @unchecked Sendable {
     func waitTurn(_ seq: Int) async {
         while true {
             let go: Bool = lock.withLock {
+                // Already skipped as abandoned (its handler came up after the deadline, e.g. on a
+                // loaded machine): run it now. Waiting for `next` to come back would hang it forever.
+                if seq < next { return true }
                 // A number before ours that never started (the SDK dropped its request): skip it.
-                if next < seq, !started.contains(next), ContinuousClock.now - nextSince > abandonAfter {
+                let since = nextSince ?? .now
+                nextSince = since
+                if next < seq, !started.contains(next), ContinuousClock.now - since > abandonAfter {
                     release(next)
                 }
                 guard next == seq else { return false }
