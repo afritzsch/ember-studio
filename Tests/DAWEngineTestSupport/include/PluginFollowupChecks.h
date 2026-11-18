@@ -33,7 +33,7 @@ CheckResult pluginOfflineModeAndExportReset();
 // offset 0, held up to the frame before the wrap and the after-wrap value at the wrap frame
 // (EmberTest's point log); an AU (the fake, which applies events at their frame) jumps at exactly
 // the wrap frame. 0 RT violations.
-CheckResult pluginWrapJump();
+CheckResult pluginWrapJump(bool au);  // the AU half or the VST3 half
 
 // DW-210: VST3 MIDI CC, channel aftertouch and pitch bend become points of the parameters the
 // plugin maps them to (IMidiMapping) at their frames; unmapped controllers and channels are
@@ -44,7 +44,7 @@ CheckResult vst3MidiMapping();
 // channel: raw for AU, through the mapping for VST3) in its last processed block; notes that end
 // while bypassed send nothing more, and enabling it again sends nothing. VST3 (EmberTest synth)
 // and AU (the fake). 0 RT violations.
-CheckResult pluginBypassReleasesNotes();
+CheckResult pluginBypassReleasesNotes(bool au);  // the AU half or the VST3 half
 
 // DW-218 audit: a VST3 instance destroyed while its latency timer is active (restartComponent from
 // this thread and from process()) is torn down on the destroying thread, every time: EmberTest's

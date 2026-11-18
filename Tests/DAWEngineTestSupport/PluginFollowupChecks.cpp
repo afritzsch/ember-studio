@@ -473,7 +473,7 @@ CheckResult pluginOfflineModeAndExportReset() {
 
 // MARK: DW-233
 
-CheckResult pluginWrapJump() {
+CheckResult pluginWrapJump(bool au) {
     CheckResult checks;
     DAW_CHECK(RtTrap::install());
     DAW_CHECK(emberReady());
@@ -491,7 +491,7 @@ CheckResult pluginWrapJump() {
     const float before = 1900.0f / 1920.0f, after = 0.5f;
 
     // VST3: EmberTest's gain gets (0, before), (499, before), (500, after).
-    {
+    if (!au) {
         auto host = std::make_shared<VST3PluginHost>();
         Rig rig([host](NodeRegistry& r) { (void)r.set(NodeKind::vst3Plugin, host->kindInfo()); });
         const ParamID p = allocate(rig, 2);
@@ -522,7 +522,7 @@ CheckResult pluginWrapJump() {
     }
 
     // AU: the fake applies parameter events at their frame; output = gain × its input.
-    {
+    if (au) {
         auto host = std::make_shared<AUPluginHost>();
         Rig rig([host](NodeRegistry& r) { (void)r.set(NodeKind::auPlugin, host->kindInfo()); });
         rig.addAsset(makeAsset(7, 1, 480000, [](uint32_t, int64_t) { return 0.25f; }));
@@ -623,7 +623,7 @@ CheckResult vst3MidiMapping() {
 
 // MARK: DW-225
 
-CheckResult pluginBypassReleasesNotes() {
+CheckResult pluginBypassReleasesNotes(bool au) {
     CheckResult checks;
     DAW_CHECK(RtTrap::install());
     DAW_CHECK(emberReady());
@@ -665,7 +665,7 @@ CheckResult pluginBypassReleasesNotes() {
     };
 
     // VST3: CC 123 goes through the mapping, as a point (value 0) on "All Notes Off".
-    run(NodeKind::vst3Plugin, VST3PluginConfig::makeJSON(emberIdentifier(kSynthUID), {}),
+    if (!au) run(NodeKind::vst3Plugin, VST3PluginConfig::makeJSON(emberIdentifier(kSynthUID), {}),
         std::make_shared<VST3PluginHost>(), [](const std::shared_ptr<VST3PluginHost>& host) {
             auto instance = host->instance(3);
             // The newest block with an "All Notes Off" point, if it had exactly one (channel 1's) at 0.
@@ -673,7 +673,7 @@ CheckResult pluginBypassReleasesNotes() {
             const bool ours = allOff.values == std::vector<double>{0.0};
             return std::make_pair<int64_t, int64_t>(stats(instance).noteOffs, ours ? allOff.block : -2);
         });
-    run(NodeKind::auPlugin, AUPluginConfig::makeJSON(kFake, {}), std::make_shared<AUPluginHost>(),
+    if (au) run(NodeKind::auPlugin, AUPluginConfig::makeJSON(kFake, {}), std::make_shared<AUPluginHost>(),
         [](const std::shared_ptr<AUPluginHost>& host) {
             const FakeProbe p = fake(host->instance(3));
             return std::make_pair(static_cast<int64_t>(p.noteOffs), static_cast<int64_t>(p.allNotesOff));
