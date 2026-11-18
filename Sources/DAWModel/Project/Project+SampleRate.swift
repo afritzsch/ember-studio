@@ -1,7 +1,8 @@
 /// T-056 (MODEL-005 `SetSessionSampleRate`, DW-126): what a session-rate change does to the
 /// document. The tempo map follows the rate (DW-020), and every quantity counted in samples at the
 /// session rate is scaled by new/old:
-///   - `AudioClip.sourceOffsetSamples` (where in the asset the clip starts), and
+///   - `AudioClip.sourceOffsetSamples` (where in the asset the clip starts), of the track's clips
+///     and of its take folders' audio takes (DW-259, T-099), and
 ///   - a sampler zone's `loopStart`/`loopEnd` (source frames of the asset in RAM, which the engine
 ///     holds at the session rate, IO-031; 06 "Sampler semantics").
 /// Everything else is in ticks (clips, notes, fades, the loop, automation) or at the file's own
@@ -44,6 +45,14 @@ extension Project {
                 guard case .audio(var clip) = tracks[t].clips[c] else { continue }
                 clip.sourceOffsetSamples = Self.rescaleSamples(clip.sourceOffsetSamples, from: old, to: rate)
                 tracks[t].clips[c] = .audio(clip)
+            }
+            // DW-259 (T-099): an audio take's clip views its recording by sourceOffsetSamples too.
+            for f in tracks[t].takeFolders.indices {
+                for k in tracks[t].takeFolders[f].takes.indices {
+                    guard case .audio(var clip) = tracks[t].takeFolders[f].takes[k].clip else { continue }
+                    clip.sourceOffsetSamples = Self.rescaleSamples(clip.sourceOffsetSamples, from: old, to: rate)
+                    tracks[t].takeFolders[f].takes[k].clip = .audio(clip)
+                }
             }
         }
         updateEachDeviceSlot { slot in

@@ -167,6 +167,19 @@ extension DeviceSlot {
         }
     }
 
+    /// DW-251 (T-099): what an insert chain may hold, for every way a slot gets there (files,
+    /// `RestoreTrack`/`RestoreBus`/`RestoreDevice`, not only `InsertDevice`): a built-in effect
+    /// (`builtinInsertKinds`), the built-in metronome (the `metronome_click` golden uses one as a
+    /// track insert; it ignores its input and writes the click), or a hosted plugin. The sampler is
+    /// an instrument and the other built-in kinds are graph structure, so they never are inserts.
+    /// `InsertDevice` stays stricter (`checkInsertKind`: no metronome).
+    static let builtinInsertInvariantKinds: Set<NodeKind> = builtinInsertKinds.union([.metronome])
+
+    func checkInsertInvariant() throws(DAWError) {
+        guard case .builtin(let node) = kind, !Self.builtinInsertInvariantKinds.contains(node) else { return }
+        throw .invariant("device slot \(id) is a built-in \(node.rawValue), which is no insert")
+    }
+
     func forEachID(_ body: (ModelID, String) -> Void) {
         body(id, "device slot")
     }
@@ -189,6 +202,10 @@ extension Track {
         // T-093: only a MIDI track has a MIDI input other than the default.
         try midiInput.validate(id)
         guard kind == .midi || midiInput.isDefault else { throw .invariant("audio track \(id) has a MIDI input") }
+        // DW-199 (T-099): ArmTrack's range, for files and Restore commands too (REC-001).
+        guard inputPair <= Self.maxInputPair else {
+            throw .invariant("track \(id) input pair \(inputPair) is outside 0…\(Self.maxInputPair)")
+        }
         for send in sends { try send.validate() }
         if let instrument {
             // T-042: the instrument slot is a MIDI track's; a built-in one is the sampler (D-19).
@@ -196,7 +213,10 @@ extension Track {
             try instrument.checkInstrumentKind()
             try instrument.validate()
         }
-        for slot in inserts { try slot.validate() }
+        for slot in inserts {
+            try slot.validate()
+            try slot.checkInsertInvariant()  // DW-251
+        }
         for (i, clip) in clips.enumerated() {
             switch clip {
             case .audio(let audio):
@@ -236,7 +256,10 @@ extension Bus {
     func validateContents() throws(DAWError) {
         try strip.validate(id)
         for send in sends { try send.validate() }
-        for slot in inserts { try slot.validate() }
+        for slot in inserts {
+            try slot.validate()
+            try slot.checkInsertInvariant()  // DW-251
+        }
     }
 }
 
@@ -249,6 +272,9 @@ extension MasterChannel {
 
     func validateContents() throws(DAWError) {
         try strip.validate(id)
-        for slot in inserts { try slot.validate() }
+        for slot in inserts {
+            try slot.validate()
+            try slot.checkInsertInvariant()  // DW-251
+        }
     }
 }

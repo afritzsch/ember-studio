@@ -127,6 +127,9 @@ Additive. New methods and one new `render.offline` param; tools `daw_render_canc
 ### Contract delta (T-093), accepted (autobuild, see docs/autobuild/DECISIONS.md "T-093 model shape")
 Additive. `midi.inject` events take `source?`, a CoreMIDI unique ID (a number, as `midi.inputs` reports it): the message arrives as if from that source, so a track's MIDI input filter can be driven headless (up to 4 distinct IDs per engine). Without it, only tracks hearing all sources get the message (T-053's seam). The input itself is the command `SetTrackMidiInput` (07) through `command.apply`; `project.get` shows `tracks[i].midiInput` once it isn't the default. In the app, `ui.state`/`ui.perform` cover the picker (12 same heading).
 
+### Contract delta (T-099), accepted (autobuild, see docs/autobuild/DECISIONS.md "T-099 telemetry delta")
+Additive. No new method: `engine.telemetry` (and `daw_engine_telemetry`) has `clippedSamples`, `midiEventsDropped` and `bufferFrames` (08 "Contract delta (T-099)"), because the result encodes `EngineTelemetry` as is. IO-005's input latency is the existing `deviceInputLatency`.
+
 ### Contract delta (T-098), accepted (autobuild, see docs/autobuild/DECISIONS.md "T-098 control additions")
 Additive: new methods and tools. Existing methods, params and results keep their meaning. Tools follow CTL-021's naming: `daw_plugins_scan`, `daw_plugins_list`, `daw_plugins_blocked`, `daw_plugins_retry`, `daw_plugins_unblock`, `daw_engine_param_display`. `list`, `blocked` and `paramDisplay` are read-only.
 - **`plugins.*`** (DW-016, PLUG-001..004). The cache is 10's `plugins.json`; plugin code never loads in the calling process. A plugin is `ControlPlugin`: `{format: au|vst3, identifier, name, vendor, version, isInstrument, hasSidechain, numParams, status: ok|blocked, reason?, timedOut?}`. `identifier` is the scanner's (AU `type:subtype:manufacturer`, VST3 `path#classUID`; a blocked VST3 bundle the scanner couldn't report on: its path).

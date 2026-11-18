@@ -71,8 +71,20 @@ public struct RestoreSessionSampleRate: HistoryExemptCommand {
     }
 
     public var sampleRate: Double
+    /// Audio clips' and (DW-259) audio take clips' offsets, by clip ID.
     public var clipOffsets: [ClipOffset]
     public var zoneLoops: [ZoneLoop]
+
+    private enum CodingKeys: String, CodingKey { case sampleRate, clipOffsets, zoneLoops }
+
+    /// DW-185 (T-099): `clipOffsets` and `zoneLoops` may be left out of the JSON (missing = none).
+    /// Encoding is unchanged (both always written).
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        sampleRate = try c.decode(Double.self, forKey: .sampleRate)
+        clipOffsets = try c.decodeIfPresent([ClipOffset].self, forKey: .clipOffsets) ?? []
+        zoneLoops = try c.decodeIfPresent([ZoneLoop].self, forKey: .zoneLoops) ?? []
+    }
 
     public init(sampleRate: Double, clipOffsets: [ClipOffset] = [], zoneLoops: [ZoneLoop] = []) {
         self.sampleRate = sampleRate
@@ -86,6 +98,13 @@ public struct RestoreSessionSampleRate: HistoryExemptCommand {
         for track in project.tracks {
             for case .audio(let clip) in track.clips {
                 offsets.append(ClipOffset(clipID: clip.id, sourceOffsetSamples: clip.sourceOffsetSamples))
+            }
+            // DW-259 (T-099): take clips' offsets are session-rate samples too.
+            for folder in track.takeFolders {
+                for take in folder.takes {
+                    guard case .audio(let clip) = take.clip else { continue }
+                    offsets.append(ClipOffset(clipID: clip.id, sourceOffsetSamples: clip.sourceOffsetSamples))
+                }
             }
         }
         var loops: [ZoneLoop] = []
@@ -134,6 +153,17 @@ extension Project {
                 clip.sourceOffsetSamples = offset
                 tracks[t].clips[c] = .audio(clip)
                 return
+            }
+            // DW-259 (T-099): or a take's clip.
+            for f in tracks[t].takeFolders.indices {
+                for k in tracks[t].takeFolders[f].takes.indices where tracks[t].takeFolders[f].takes[k].clip.id == clipID {
+                    guard case .audio(var clip) = tracks[t].takeFolders[f].takes[k].clip else {
+                        throw .invalidArgument("clip \(clipID) is not an audio clip")
+                    }
+                    clip.sourceOffsetSamples = offset
+                    tracks[t].takeFolders[f].takes[k].clip = .audio(clip)
+                    return
+                }
             }
         }
         throw .notFound(kind: "clip", id: clipID)

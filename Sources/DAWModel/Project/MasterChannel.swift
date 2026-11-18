@@ -15,3 +15,20 @@ public struct MasterChannel: Identifiable, Hashable, Sendable, Codable {
         self.automation = automation
     }
 }
+
+// DW-235 (T-099): like Track, a missing `automation` key decodes as no lanes. Encoding is the
+// synthesized one with the same keys, so saved files stay byte-identical.
+extension MasterChannel {
+    private enum CodingKeys: String, CodingKey {
+        case id, inserts, strip, automation
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            id: try c.decode(NodeIDValue.self, forKey: .id),
+            inserts: try c.decode([DeviceSlot].self, forKey: .inserts),
+            strip: try c.decode(ChannelStripState.self, forKey: .strip),
+            automation: try c.decodeIfPresent([AutomationLane].self, forKey: .automation) ?? [])
+    }
+}

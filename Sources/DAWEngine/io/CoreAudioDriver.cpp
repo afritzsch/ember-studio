@@ -353,7 +353,9 @@ Result<void> CoreAudioDriver::Impl::open(const DriverConfig& request) {
     config.inputDevice = in ? in->id() : 0;
     config.separateInput = separate;
     config.sampleRate = rate;
-    config.bufferFrames = resolved->bufferFrames;
+    // DW-192 (T-099): the buffer size the output device reports now that it was set (what
+    // IO-005's latency counted), not just the one asked for; the request if it reports none.
+    config.bufferFrames = outLatency->bufferFrames > 0 ? outLatency->bufferFrames : resolved->bufferFrames;
     config.outputChannels = resolved->channels;
     config.inputChannels = in ? inResolved.channels : 0;
 

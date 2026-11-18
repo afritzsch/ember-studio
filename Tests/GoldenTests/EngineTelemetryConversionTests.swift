@@ -30,7 +30,7 @@ struct EngineTelemetryConversionTests {
             }
         }.map { $0.label ?? "?" }
         #expect(unmapped.isEmpty, "EngineTelemetry fields EngineClient.telemetry(from:) leaves at their default: \(unmapped)")
-        #expect(Mirror(reflecting: telemetry).children.count >= 31)
+        #expect(Mirror(reflecting: telemetry).children.count >= 34)  // T-099 added clippedSamples, midiEventsDropped, bufferFrames
     }
 
     @Test("DW-240: GoldenEngine and EngineClient report the same telemetry fields through the shared conversion")

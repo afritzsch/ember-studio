@@ -13,6 +13,9 @@
 //                                    rendered; one writer at a time (see below)
 //   built-in effects (T-070)         countNanBlock() from process() when the NaN guard silences a
 //                                    block (DSP-040, DW-142)
+//   master node (T-099)              countClippedSamples() from process() when the MIX-009 safety
+//                                    limiter clips (DW-083); Engine::render countMidiEventsDropped()
+//                                    with the MidiDelayLine overflows of the block (DW-170)
 //   channel strips, meters (T-013/T-020)  writeMeter() from process() for the MeterID the node was
 //                                    configured with (MIX-005); one node per MeterID
 //
@@ -61,6 +64,13 @@ struct TelemetrySnapshot {
     // DSP-040, DW-142: blocks the built-in effects' NaN guards silenced (each effect's own block
     // counts once, so one bad input through two effects counts twice).
     uint64_t nanBlocks = 0;
+    // DW-083 (T-099): samples the master's MIX-009 safety limiter clipped (or zeroed as NaN),
+    // summed over every master node since the engine was created (offline renders included).
+    uint64_t clippedSamples = 0;
+    // DW-170 (T-099): MIDI events the graph's MidiDelayLines dropped under their overflow policy
+    // (MIX-021 for MIDI edges, 05 "MIDI routing") since the engine was created. Not the live MIDI
+    // input drops (REC-010/011, the facade's midiInputDrops): those happen before the graph.
+    uint64_t midiEventsDropped = 0;
     // Output latency in samples: the device's (IO-005) plus the current graph's PDC latency
     // (MIX-021); outputLatency is their sum.
     uint32_t deviceOutputLatency = 0;
@@ -112,10 +122,12 @@ public:
                      uint64_t violations, uint64_t epoch) DAW_RT;
     void countOversizeBlock() DAW_RT;     // Engine::render only
     void countRetireQueueFull() DAW_RT;   // Engine::render only
+    void countMidiEventsDropped(uint64_t events) DAW_RT;  // Engine::render only (DW-170)
 
     // Any thread, any number of them.
     void countXrun() DAW_RT;
     void countNanBlock() DAW_RT;  // DSP-040, DW-142
+    void countClippedSamples(uint64_t samples) DAW_RT;  // MIX-009, DW-083
     void setDeviceOutputLatency(uint32_t samples) DAW_RT;
 
     // One writer at a time; it's simplest for the audio thread to copy the table from the graph
@@ -158,6 +170,8 @@ private:
         std::atomic<uint64_t> oversizeBlocks{0};
         std::atomic<uint64_t> retireQueueFullBlocks{0};
         std::atomic<uint64_t> nanBlocks{0};  // DW-142
+        std::atomic<uint64_t> clippedSamples{0};     // DW-083
+        std::atomic<uint64_t> midiEventsDropped{0};  // DW-170
         // Writer-private (audio thread): EMA state and the last known sample rate.
         float emaPercent = 0;
         bool emaSeeded = false;

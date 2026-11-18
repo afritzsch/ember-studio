@@ -5,8 +5,8 @@
 
 namespace daw {
 
-MasterNode::MasterNode(ParamID firstParam, uint32_t numParams)
-    : limiterParam_(firstParam), hasLimiter_(numParams > 0) {}
+MasterNode::MasterNode(ParamID firstParam, uint32_t numParams, Telemetry* telemetry)
+    : limiterParam_(firstParam), hasLimiter_(numParams > 0), telemetry_(telemetry) {}
 
 void MasterNode::process(ProcessContext& ctx, NodeIO& io) DAW_RT {
     passThrough(io);
@@ -24,7 +24,10 @@ void MasterNode::process(ProcessContext& ctx, NodeIO& io) DAW_RT {
             ++overs;
         }
     }
-    if (overs > 0) clipped_.fetch_add(overs, std::memory_order_relaxed);
+    if (overs > 0) {
+        clipped_.fetch_add(overs, std::memory_order_relaxed);
+        if (telemetry_ != nullptr) telemetry_->countClippedSamples(overs);  // DW-083
+    }
 }
 
 } // namespace daw
