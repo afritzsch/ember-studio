@@ -30,6 +30,8 @@ The engine is a set of **node instances** connected by an immutable **RenderGrap
 | ENG-014 | The audio thread never frees memory. All RT-retired objects go through `RetireQueue` (SPSC, RT → reclaim). | RT trap test |
 | ENG-015 | When no graph is published, render outputs silence. | Unit |
 
+*As built (DW-034):* `renderEpoch` is odd while a block runs and even when the audio thread is idle, so a graph replaced while the engine is idle (even epoch) can be freed at once. Both the audio thread's graph load/epoch store and `daw.reclaim`'s reads use `seq_cst` rather than the acquire/release pair ENG-011 names; that is stronger, not weaker.
+
 ### Param slots
 | ID | Requirement | Acceptance |
 |---|---|---|
