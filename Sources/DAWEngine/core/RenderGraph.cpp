@@ -528,6 +528,12 @@ void RenderGraph::resetAllNodes() const DAW_RT {
     for (std::size_t i = 0; i < monitors_.size(); ++i) monitorState_[i] = MonitorState{};
 }
 
+uint64_t RenderGraph::takeMidiDrops() const DAW_RT {
+    uint64_t total = 0;
+    for (const auto& line : midiLines_) total += line->takeNewDrops();  // bounded by the edge count
+    return total;
+}
+
 AudioBufferView RenderGraph::master(uint32_t numFrames) const DAW_RT {
     if (master_ == kNoBuffer) return {};
     return buffers_.view(master_, numFrames);

@@ -1833,6 +1833,9 @@ TelemetryPOD EngineFacade::telemetry() const {
         const uint64_t total = uint64_t{t.deviceInputLatency} + s.deviceOutputLatency + s.graphLatency;
         t.monitoringLatency = static_cast<uint32_t>(std::min<uint64_t>(total, UINT32_MAX));
     }
+    t.clippedSamples = s.clippedSamples;        // DW-083 (T-099)
+    t.midiEventsDropped = s.midiEventsDropped;  // DW-170 (T-099)
+    if (t.deviceRunning) t.bufferFrames = impl_->driver->current().bufferFrames;  // DW-192 (T-099)
     if (impl_->driver) {
         t.outputDeviceID = t.deviceRunning ? impl_->driver->current().outputDevice : 0;
         t.processorOverloads = impl_->driver->processorOverloads();
