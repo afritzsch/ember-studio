@@ -94,9 +94,16 @@ struct ControlFollowupTests {
         _ = try await dispatcher.ok(.projectNew, ["name": "jobs", "sampleRate": 48_000])
         _ = try await dispatcher.ok(.commandApply, ["command": ["type": "AddTrack", "name": "A", "kind": "audio"]])
         let engine = try #require(dispatcher.engine)
-        let long = Tick(Int64(600 * 2 * 960))
-        let first = engine.renderOffline(from: Tick(0), to: long, spec: ExportSpec(path: dir.file("1.wav").path, tailEnabled: false))
-        let second = engine.renderOffline(from: Tick(0), to: long, spec: ExportSpec(path: dir.file("2.wav").path, tailEnabled: false))
+        // DW-309: 600 s of silence rendered in ~1.3 s (debug), so a test thread stalled that long
+        // (idle-machine timer coalescing, parallel suites) saw the first render already finished.
+        // Four hours can't finish before the cancel (~30 s+ of rendering); the cancel stops it after
+        // a few blocks, so it stays cheap. Mono int16 bounds the file (1.4 GB) if a cancel ever fails.
+        let long = Tick(Int64(4 * 3600 * 2 * 960))
+        func spec(_ name: String) -> ExportSpec {
+            ExportSpec(path: dir.file(name).path, sampleFormat: .int16, numChannels: 1, tailEnabled: false)
+        }
+        let first = engine.renderOffline(from: Tick(0), to: long, spec: spec("1.wav"))
+        let second = engine.renderOffline(from: Tick(0), to: long, spec: spec("2.wav"))
         #expect(engine.cancelJob(second), "queued behind the first")
         #expect(engine.pollJob(second).state == .cancelled, "a queued render is cancelled at once")
         #expect(!engine.cancelJob(second), "already finished")
