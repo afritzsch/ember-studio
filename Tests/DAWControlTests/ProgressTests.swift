@@ -5,17 +5,30 @@ import Testing
 
 // CTL-031: long requests report progress while they run, in-process and over the socket.
 
+/// Opened by a test once it has seen what it waits for (DW-231).
+private final class Gate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var isOpen = false
+    func open() { lock.withLock { isOpen = true } }
+    var opened: Bool { lock.withLock { isOpen } }
+}
+
 /// FakeEngine whose offline renders take `duration` and report progress by elapsed time (FakeEngine
-/// itself finishes every job at once).
+/// itself finishes every job at once). DW-231 (T-101): with a `finishGate`, a job also keeps
+/// running (at most 99 %) until the gate opens, so a test that opens it on an intermediate progress
+/// update gets one however late a loaded machine polls. A gate that never opens ends the request
+/// with the dispatcher's job timeout, so the test fails rather than hangs.
 private final class SlowRenderEngine: EngineProtocol, @unchecked Sendable {
     let base: FakeEngine
     let duration: Duration
+    let finishGate: Gate?
     private let lock = NSLock()
     private var started: [JobID: ContinuousClock.Instant] = [:]
 
-    init(base: FakeEngine, duration: Duration) {
+    init(base: FakeEngine, duration: Duration, finishGate: Gate?) {
         self.base = base
         self.duration = duration
+        self.finishGate = finishGate
     }
 
     var mode: EngineMode { base.mode }
@@ -58,18 +71,21 @@ private final class SlowRenderEngine: EngineProtocol, @unchecked Sendable {
         let status = base.pollJob(job)
         guard let start = lock.withLock({ started[job] }) else { return status }
         let fraction = (ContinuousClock.now - start) / duration
-        guard fraction < 1 else { return status }
+        let gateOpen = finishGate?.opened ?? true
+        guard fraction < 1 || !gateOpen else { return status }
         var running = status
         running.state = .running
-        running.progress = fraction
+        running.progress = min(fraction, 0.99)
         return running
     }
 }
 
 @MainActor
-private func slowDispatcher(_ duration: Duration) -> Dispatcher {
+private func slowDispatcher(_ duration: Duration, finishGate: Gate? = nil) -> Dispatcher {
     Dispatcher(configuration: .init(
-        makeEngine: { rate throws(DAWError) in SlowRenderEngine(base: FakeEngine(mode: .offline(sampleRate: rate)), duration: duration) },
+        makeEngine: { rate throws(DAWError) in
+            SlowRenderEngine(base: FakeEngine(mode: .offline(sampleRate: rate)), duration: duration, finishGate: finishGate)
+        },
         workingDirectory: FileManager.default.temporaryDirectory, jobTimeout: .seconds(10), graphTimeout: .seconds(5)))
 }
 
@@ -78,17 +94,22 @@ private func slowDispatcher(_ duration: Duration) -> Dispatcher {
 struct ProgressTests {
     @Test("CTL-031: render.offline reports progress in rising steps of ≥ 1 % at most every 50 ms, ending at 1")
     func inProcess() async throws {
-        let dispatcher = slowDispatcher(.milliseconds(400))
+        let gate = Gate()
+        let dispatcher = slowDispatcher(.milliseconds(400), finishGate: gate)
         _ = try await dispatcher.ok(.projectNew, ["name": "p"])
         var updates: [(ContinuousClock.Instant, ControlProgress)] = []
         let path = FileManager.default.temporaryDirectory.appending(path: "progress-\(UUID().uuidString).wav").path
-        _ = try await dispatcher.call(.renderOffline, ["from": 0, "to": 960, "path": .string(path)]) { updates.append((.now, $0)) }
+        _ = try await dispatcher.call(.renderOffline, ["from": 0, "to": 960, "path": .string(path)]) {
+            updates.append((.now, $0))
+            if $0.progress < 1 { gate.open() }  // DW-231: the job ends only after an intermediate step
+        }
         let values = updates.map(\.1.progress)
         #expect(updates.allSatisfy { $0.1.method == "render.offline" })
         // DW-241 (T-084): how many 50 ms steps a loaded machine delivers is wall-clock luck; the
-        // perf job (DAW_PERF_TESTS=1) asserts at least two intermediate steps, the default run one value.
+        // perf job (DAW_PERF_TESTS=1) asserts at least two intermediate steps. The default run
+        // asserts one, which the gate guarantees (DW-231).
         let strict = ProcessInfo.processInfo.environment["DAW_PERF_TESTS"] == "1"
-        #expect(values.count >= (strict ? 3 : 1), "intermediate steps: \(values)")
+        #expect(values.count >= (strict ? 3 : 2), "intermediate steps: \(values)")
         #expect(values.last == 1)
         #expect(zip(values, values.dropFirst()).allSatisfy { $1 >= $0 + 0.01 }, "\(values)")
         let gaps = zip(updates, updates.dropFirst()).dropLast().map { $1.0 - $0.0 }
@@ -102,7 +123,10 @@ struct ProgressTests {
 
     @Test("CTL-031: over the socket, progress arrives as `progress` notifications before the response; none for notifications")
     func overSocket() async throws {
-        let dispatcher = slowDispatcher(.milliseconds(300))
+        // DW-231 (T-101): the first render ends only once the client has received an intermediate progress
+        // notification, so "before the response" holds however late a loaded machine polls.
+        let gate = Gate()
+        let dispatcher = slowDispatcher(.milliseconds(300), finishGate: gate)
         let path = ControlSocketPath.forProcess(Int32.random(in: 1_000_000...Int32.max))
         let server = ControlSocketServer(path: path, dispatcher: dispatcher)
         try server.start()
@@ -113,7 +137,10 @@ struct ProgressTests {
 
         let collected = Collected<ControlProgress>()
         let out = FileManager.default.temporaryDirectory.appending(path: "progress-\(UUID().uuidString).wav").path
-        let result = try await client.call(.renderOffline, ["from": 0, "to": 960, "path": .string(out)]) { collected.add($0) }
+        let result = try await client.call(.renderOffline, ["from": 0, "to": 960, "path": .string(out)]) {
+            collected.add($0)
+            if $0.progress < 1 { gate.open() }
+        }
         #expect(result["path"]?.stringValue == out)
         let values = collected.values.map(\.progress)
         #expect(values.count >= 2 && values.last == 1, "\(values)")

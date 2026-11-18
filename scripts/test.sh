@@ -57,6 +57,18 @@ swift_build() {
     no_warnings "$log"
 }
 
+# DW-262 (T-101): test targets are held to CONV §5.1 too. `swift test` would build them anyway, so
+# building them here first costs nothing extra. SwiftPM prints a file's warnings only when it
+# compiles that file, so (like swift_build) this catches warnings in what changed since the last
+# build of this .build folder, which on the lead's run after a merge is the merged work.
+swift_build_tests() {
+    local log="$logs/swift-build-tests.raw.log"
+    swift build -c debug --build-tests 2>&1 | tee "$log"
+    local rc=${PIPESTATUS[0]}
+    (( rc == 0 )) || return "$rc"
+    no_warnings "$log"
+}
+
 # BUILD-001/002/003: the manifest declares the layout from 01-build-layout.
 check_manifest() {
     swift package dump-package | python3 -I -c '
@@ -275,6 +287,7 @@ step submodule check_submodule
 step swift-build-debug swift_build debug
 # PLUG-011 (T-062): the real .vst3 bundles the VST3 tests load (no-op when current).
 step test-plugins scripts/build-test-vst3.sh
+step swift-build-tests swift_build_tests
 step swift-test swift_test
 step goldens check_goldens
 step swift-build-release swift_build release

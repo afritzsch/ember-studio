@@ -38,6 +38,43 @@ let usage = """
     Exit status: 0 all requests succeeded, 1 a request failed, 2 bad usage.
     """
 
+/// DW-300: dawctl's own output goes to a copy of the real stdout, and fd 1 becomes stderr (as in
+/// dawmcp), so whatever else in the process prints to stdout (a hosted plugin's printf, a stray
+/// print) lands on stderr instead of in the JSONL stream.
+let outputFD: Int32 = {
+    let fd = dup(STDOUT_FILENO)
+    guard fd >= 0, dup2(STDERR_FILENO, STDOUT_FILENO) >= 0 else {
+        FileHandle.standardError.write(Data("dawctl: cannot set up stdout\n".utf8))
+        exit(1)
+    }
+    return fd
+}()
+
+/// Writes to dawctl's output (the real stdout), unbuffered.
+func emit(_ text: String, terminator: String = "\n") {
+    var bytes = Array((text + terminator).utf8)[...]
+    while !bytes.isEmpty {
+        let written = bytes.withUnsafeBytes { write(outputFD, $0.baseAddress, $0.count) }
+        if written < 0 {
+            if errno == EINTR { continue }
+            return
+        }
+        bytes = bytes.dropFirst(written)
+    }
+}
+
+/// DW-300 test hook (debug builds): `DAWCTL_TEST_STRAY_STDOUT=1` writes to fd 1 before each
+/// request, both raw and through C stdio, standing in for a hosted plugin that prints.
+func strayStdoutForTests(_ method: String) {
+    #if DEBUG
+    guard ProcessInfo.processInfo.environment["DAWCTL_TEST_STRAY_STDOUT"] == "1" else { return }
+    let raw = "stray write(1) before \(method)\n"
+    _ = raw.withCString { write(STDOUT_FILENO, $0, strlen($0)) }
+    fputs("stray printf before \(method)\n", stdout)
+    fflush(stdout)
+    #endif
+}
+
 enum Exit: Int32 {
     case ok = 0
     case requestFailed = 1
@@ -98,7 +135,7 @@ while let argument = arguments.popFirst() {
         guard let value = arguments.popFirst(), let pid = Int32(value), pid > 0 else { fail("--parent-pid needs a pid\n\(usage)") }
         parentPID = pid
     case "-h", "--help", "help":
-        print(usage)
+        emit(usage)
         exit(Exit.ok.rawValue)
     default:
         if argument.hasPrefix("--") { fail("unknown option \(argument)\n\(usage)") }
@@ -119,6 +156,7 @@ enum Target {
 
     func handle(_ request: RPCRequest) async -> RPCResponse? {
         // DW-283 (T-098): Ctrl-C while this render runs cancels it.
+        strayStdoutForTests(request.method)  // DW-300
         let isRender = request.method == ControlMethod.renderOffline.rawValue && request.id != nil
         if isRender, let id = request.id { RenderInterrupt.running = (self, id) }
         defer { if isRender { RenderInterrupt.running = nil } }
@@ -248,7 +286,7 @@ enum RenderInterrupt {
     for line in script.lines {
         guard let response = await target.handle(line.request) else { continue }
         defer { if RenderInterrupt.interrupted { status = .requestFailed } }
-        print(response.line())
+        emit(response.line())
         if let error = response.error {
             status = .requestFailed
             FileHandle.standardError.write(Data("dawctl: line \(line.number): \(error.message)\n".utf8))
@@ -264,17 +302,16 @@ enum RenderInterrupt {
     var nextID: Int64 = 1
     while true {
         if interactive {
-            print("dawctl> ", terminator: "")
-            fflush(stdout)
+            emit("dawctl> ", terminator: "")
         }
         guard let line = readLine() else { break }
         switch line.trimmingCharacters(in: .whitespaces) {
         case "quit", "exit": return status
         case "help":
-            print(usage)
+            emit(usage)
             continue
         case "methods":
-            for method in ControlMethod.allCases { print("\(method.rawValue)  \(method.summary)") }
+            for method in ControlMethod.allCases { emit("\(method.rawValue)  \(method.summary)") }
             continue
         default: break
         }
@@ -284,12 +321,12 @@ enum RenderInterrupt {
             request = parsed
         } catch {
             status = .requestFailed
-            print(RPCResponse(id: nil, error: error.rpcError).line())
+            emit(RPCResponse(id: nil, error: error.rpcError).line())
             continue
         }
         nextID += 1
         if let response = await target.handle(request) {
-            print(response.line())
+            emit(response.line())
             if response.isError { status = .requestFailed }
         }
     }
@@ -314,9 +351,9 @@ enum RenderInterrupt {
         withJSONObject: JSONSerialization.jsonObject(with: result.data(), options: .fragmentsAllowed),
         options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes, .fragmentsAllowed])
     {
-        print(String(decoding: data, as: UTF8.self))
+        emit(String(decoding: data, as: UTF8.self))
     } else {
-        print(result.jsonString())
+        emit(result.jsonString())
     }
     return .ok
 }
@@ -364,7 +401,7 @@ case "serve":
     guard positional.count == 1 else { fail("serve takes no arguments besides options\n\(usage)") }
     await serve()
 case "methods":
-    for method in ControlMethod.allCases { print("\(method.rawValue)  \(method.summary)") }
+    for method in ControlMethod.allCases { emit("\(method.rawValue)  \(method.summary)") }
     status = .ok
 case "script":
     guard positional.count == 2 else { fail("script needs one file (or - for stdin)\n\(usage)") }

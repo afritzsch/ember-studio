@@ -16,13 +16,14 @@ struct Run {
     var lines: [String] { stdout.split(separator: "\n").map(String.init) }
 }
 
-func dawctl(_ arguments: [String], stdin: String? = nil, in directory: URL) throws -> Run {
+func dawctl(_ arguments: [String], stdin: String? = nil, in directory: URL, environment: [String: String] = [:]) throws -> Run {
     let process = Process()
     process.executableURL = Bundle(for: BundleMarker.self).bundleURL.deletingLastPathComponent().appending(path: "dawctl")
     process.arguments = arguments
     process.currentDirectoryURL = directory
     // Only the fixtures a test passes; never the checkout's.
     process.environment = ProcessInfo.processInfo.environment.filter { $0.key != "DAWCTL_FIXTURES" }
+        .merging(environment) { $1 }
     let out = Pipe()
     let err = Pipe()
     let input = Pipe()

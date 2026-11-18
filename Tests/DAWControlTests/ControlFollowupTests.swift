@@ -100,8 +100,15 @@ struct ControlFollowupTests {
         #expect(engine.cancelJob(second), "queued behind the first")
         #expect(engine.pollJob(second).state == .cancelled, "a queued render is cancelled at once")
         #expect(!engine.cancelJob(second), "already finished")
-        // Let the first one start writing.
-        for _ in 0..<500 where engine.pollJob(first).progress <= 0 { try await Task.sleep(for: .milliseconds(2)) }
+        // Let the first one start writing. DW-231 (T-101): wait on the job, not ~1 s of wall clock (a
+        // loaded machine can take longer to start the render); stop early if it ends some other way.
+        let deadline = ContinuousClock.now + .seconds(30)
+        while ContinuousClock.now < deadline {
+            let poll = engine.pollJob(first)
+            if poll.progress > 0 || poll.state.isFinished { break }
+            try await Task.sleep(for: .milliseconds(2))
+        }
+        #expect(engine.pollJob(first).progress > 0, "the first render has started writing")
         #expect(engine.pollJob(first).state == .running)
         #expect(engine.cancelJob(first))
         let status = await engine.waitForJob(first, timeout: .seconds(10))

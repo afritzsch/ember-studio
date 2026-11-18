@@ -235,7 +235,23 @@ CheckResult recorderPunchesInAndOut() {
         (void)rig.transport.setRecording(true);
         std::mt19937 rng(seed);
         std::uniform_int_distribution<uint32_t> size(1, seed == 1 ? 1 : 4096);
-        while (rig.transport.samplePos() < 52000) rig.block(size(rng));
+        // DW-231 (T-101): the rig runs far faster than real time, and every block is a FIFO chunk
+        // (at most RecordFifo::kChunks queued). With 1-frame blocks, a disk writer that a loaded
+        // machine leaves unscheduled for a few of its 10 ms polls would see blocks dropped
+        // (REC-002, not under test here). So the feed waits for the writer to catch up before
+        // the queue is half full, on the writer's progress rather than a clock.
+        bool caughtUp = true;
+        while (rig.transport.samplePos() < 52000) {
+            if (rec.queuedFrames() >= RecordFifo::kChunks / 2) {
+                const auto deadline = std::chrono::steady_clock::now() + 10s;
+                while (rec.queuedFrames() >= RecordFifo::kChunks / 4 && std::chrono::steady_clock::now() < deadline)
+                    std::this_thread::sleep_for(1ms);
+                caughtUp = caughtUp && rec.queuedFrames() < RecordFifo::kChunks / 4;
+            }
+            rig.block(size(rng));
+        }
+        DAW_CHECK(caughtUp);
+        DAW_CHECK(rec.droppedFrames() == 0);
         const std::vector<FinalizedTake> takes = rec.finalize();
         DAW_CHECK(takes.size() == 1);
         if (takes.size() != 1) continue;
