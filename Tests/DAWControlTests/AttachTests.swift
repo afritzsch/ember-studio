@@ -173,4 +173,51 @@ struct AttachTests {
                                               ofItemAtPath: root.appending(path: "Sources/X/a.swift").path)
         #expect(AppLauncher.needsBuild(checkoutRoot: root), "a source changed since")
     }
+
+    @Test("DW-304: a change deep under App/ (App/EmberStudio/Shell/Mixer/…) makes the app stale")
+    func nestedAppSourceIsStale() throws {
+        let dir = try TempDir()
+        let root = dir.url
+        let nested = root.appending(path: "App/EmberStudio/Shell/Mixer/MixerStripModel.swift")
+        try FileManager.default.createDirectory(at: nested.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try "m".write(to: nested, atomically: true, encoding: .utf8)
+        let executable = AppLauncher.appExecutable(checkoutRoot: root)
+        try FileManager.default.createDirectory(at: executable.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try "bin".write(to: executable, atomically: true, encoding: .utf8)
+        let old = Date(timeIntervalSinceNow: -100)
+        for path in ["App/EmberStudio/Shell/Mixer/MixerStripModel.swift", "App/EmberStudio/Shell/Mixer",
+                     "App/EmberStudio/Shell", "App/EmberStudio", "App"]
+        {
+            try FileManager.default.setAttributes([.modificationDate: old], ofItemAtPath: root.appending(path: path).path)
+        }
+        #expect(!AppLauncher.needsBuild(checkoutRoot: root), "built after every source")
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: 10)], ofItemAtPath: nested.path)
+        #expect(AppLauncher.needsBuild(checkoutRoot: root), "a nested Mixer source changed since")
+    }
+
+    @Test("DW-304: `dawctl --attach --launch` rebuilds a stale app before launching it (xcodebuild runs, here and fails)")
+    func launchRebuildsStaleApp() throws {
+        let dir = try TempDir()
+        try "p".write(to: dir.file("Package.swift"), atomically: true, encoding: .utf8)
+        // dawctl finds its checkout from its own path first, so run a copy inside the temp checkout
+        // (otherwise it would rebuild this worktree's real app).
+        let bin = dir.file(".build/debug")
+        try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+        let copy = bin.appending(path: "dawctl")
+        try FileManager.default.copyItem(at: dawctlBinary(), to: copy)
+        // No app and no Xcode project: needsBuild is true, so dawctl runs xcodebuild, which fails.
+        let run = Process()
+        run.executableURL = copy
+        run.arguments = ["--attach", "--launch", "project.get"]
+        run.currentDirectoryURL = dir.url
+        let stderr = Pipe()
+        run.standardError = stderr
+        run.standardOutput = FileHandle.nullDevice
+        run.standardInput = FileHandle.nullDevice
+        try run.run()
+        let message = String(decoding: stderr.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        #expect(waitForExit(run, timeout: .seconds(60)))
+        #expect(run.terminationStatus == 1 && message.contains("xcodebuild failed"), "\(message)")
+        #expect(FileManager.default.fileExists(atPath: dir.file(".build/attach/xcodebuild.log").path))
+    }
 }

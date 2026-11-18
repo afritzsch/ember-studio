@@ -268,6 +268,10 @@ enum RenderInterrupt {
     RenderInterrupt.socketPath = path  // DW-283
     do {
         guard launch, let root else { return try ControlSocketClient(path: path) }
+        // DW-304: rebuild a stale app first, as daw_session_mode does.
+        if !ControlSocketClient.isListening(at: path), try await AppLauncher.buildIfNeeded(checkoutRoot: root) {
+            FileHandle.standardError.write(Data("dawctl: rebuilt the app (\(root.path)/.build/attach/xcodebuild.log)\n".utf8))
+        }
         let app = try await AppLauncher.attach(
             .app(checkoutRoot: root), socketPath: path, parentPID: nil,
             log: root.appending(path: ".build/attach/app.log"))
