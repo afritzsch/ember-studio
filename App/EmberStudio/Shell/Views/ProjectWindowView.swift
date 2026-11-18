@@ -106,17 +106,17 @@ private struct ToolbarRow: View {
             .frame(minWidth: 90, alignment: .leading)
             // DW-180 (T-095): editable; a commit sets bar 1's tempo / signature (one undo entry).
             VStack(alignment: .leading, spacing: 0) {
-                HStack(spacing: 2) {
+                HStack(spacing: 3) {
                     CommitTextField(id: "transport.tempo", label: "Tempo at Bar 1 (BPM)", value: model.tempoFieldText,
                                     commit: { model.commitTempo($0) }, width: 52)
-                    Text("BPM").font(.caption).foregroundStyle(.secondary)
-                    VStack(spacing: 0) {
-                        if let up = controls["transport.tempo.up"] { ControlButton(control: up, systemImage: "chevron.up") }
-                        if let down = controls["transport.tempo.down"] { ControlButton(control: down, systemImage: "chevron.down") }
+                    Text("BPM").font(.caption).foregroundStyle(.secondary).fixedSize()
+                    Group {
+                        if let down = controls["transport.tempo.down"] { ControlButton(control: down, systemImage: "minus") }
+                        if let up = controls["transport.tempo.up"] { ControlButton(control: up, systemImage: "plus") }
                     }
                     .buttonStyle(.borderless)
+                    .controlSize(.small)
                     .imageScale(.small)
-                    .font(.system(size: 7))
                 }
                 HStack(spacing: 2) {
                     CommitTextField(id: "transport.signature", label: "Time Signature at Bar 1", value: model.signature,
@@ -138,6 +138,7 @@ private struct ToolbarRow: View {
                 }
                 .font(.caption)
             }
+            .fixedSize()
             Spacer()
             // DW-183: a session-rate change re-converting the project's audio (IO-033).
             if let reload = model.audioPrefs.reloadText {
@@ -268,19 +269,27 @@ private struct TrackHeaderRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 6) {
+            HStack(spacing: 4) {
                 ControlButton(control: track.selectControl, face: track.name)
                     .buttonStyle(.plain)
                     .font(.headline)
                     .lineLimit(1)
-                Text(track.kind == .midi ? "MIDI" : "Audio")
+                // DW-271 (T-095): the kind as an icon, so the name keeps room beside A, +, M and S.
+                Image(systemName: track.kind == .midi ? "pianokeys" : "waveform")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .fixedSize()
-                Spacer(minLength: 4)
-                automation
-                ControlToggle(control: track.muteControl, face: "M").fixedSize()
-                ControlToggle(control: track.soloControl, face: "S").fixedSize()
+                    .help(track.kind == .midi ? "MIDI track" : "Audio track")
+                    .accessibilityLabel(track.kind == .midi ? "MIDI" : "Audio")
+                    .accessibilityIdentifier("track.\(track.id).kind")
+                Spacer(minLength: 2)
+                // DW-271: small, like the second line's, so A, +, M and S fit beside the name.
+                HStack(spacing: 3) {
+                    automation
+                    ControlToggle(control: track.muteControl, face: "M").fixedSize()
+                    ControlToggle(control: track.soloControl, face: "S").fixedSize()
+                }
+                .controlSize(.small)
+                .fixedSize()
             }
             HStack(spacing: 4) {
                 // Hollow when disarmed: the red tint alone reads almost the same on and off.
@@ -297,8 +306,11 @@ private struct TrackHeaderRow: View {
                     .accessibilityIdentifier("track.\(track.id).input.menu")
                 }
                 if let midi = track.midiInputMenu {
+                    // DW-271 (T-095): the picker gives way (its title truncates) so "Mon: …" stays
+                    // inside the default header width.
                     TrackMidiInputPicker(menu: midi)  // T-093 (DW-216)
-                        .fixedSize()
+                        .frame(minWidth: 40)
+                        .layoutPriority(-1)
                         .accessibilityIdentifier("track.\(track.id).midiInput.menu")
                 }
                 Menu("Mon: \(TrackHeaderModel.monitoringTitle(track.monitoring))") {
