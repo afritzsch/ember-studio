@@ -22,12 +22,16 @@ struct ScannedPlugin: Equatable, Sendable, Identifiable {
     var numParams: UInt32
     /// PLUG-001: why the scan blocked it; nil for a usable plugin.
     var blockedReason: String?
+    /// PLUG-001 (T-094, DW-275): blocked because its scan ran out of time; the manager offers a
+    /// retry with `PluginManagerModel.retryTimeout`.
+    var isTimedOut = false
 
     var id: String { "\(format.rawValue):\(identifier)" }
     var isBlocked: Bool { blockedReason != nil }
 
     init(format: Format, identifier: String, name: String, vendor: String = "", version: String = "",
-         isInstrument: Bool = false, hasSidechain: Bool = false, numParams: UInt32 = 0, blockedReason: String? = nil) {
+         isInstrument: Bool = false, hasSidechain: Bool = false, numParams: UInt32 = 0, blockedReason: String? = nil,
+         isTimedOut: Bool = false) {
         self.format = format
         self.identifier = identifier
         self.name = name
@@ -37,12 +41,13 @@ struct ScannedPlugin: Equatable, Sendable, Identifiable {
         self.hasSidechain = hasSidechain
         self.numParams = numParams
         self.blockedReason = blockedReason
+        self.isTimedOut = isTimedOut && blockedReason != nil
     }
 
     fileprivate init(_ d: PluginDescriptor) {
         self.init(format: d.format == .au ? .au : .vst3, identifier: d.identifier, name: d.name, vendor: d.vendor,
                   version: d.version, isInstrument: d.isInstrument, hasSidechain: d.hasSidechain, numParams: d.numParams,
-                  blockedReason: d.status == .blocked ? (d.reason ?? "blocked") : nil)
+                  blockedReason: d.status == .blocked ? (d.reason ?? "blocked") : nil, isTimedOut: d.isTimedOut)
     }
 }
 
@@ -53,8 +58,10 @@ struct ScannedPlugin: Equatable, Sendable, Identifiable {
 ///   - **Scan**: scans new or changed plugins only, drops vanished ones (`PluginCatalog.refresh`).
 ///   - **Rescan All**: forgets the cache and scans every plugin again.
 ///   - **Blocked list**: plugins whose scan crashed, hung or failed, with the reason. "Retry"
-///     forgets one (or all) and scans again.
-/// Scans run off the main actor, one at a time; the panel shows progress as `isScanning`.
+///     forgets one (or all) and scans again. A plugin whose scan timed out also offers
+///     "Retry (120 s)": the same with `retryTimeout` (DW-275, T-094).
+/// Scans run off the main actor, one at a time (each runs up to 4 scanner processes at once,
+/// DW-018); the panel shows progress as `isScanning`.
 @Observable
 @MainActor
 final class PluginManagerModel {
@@ -171,12 +178,15 @@ final class PluginManagerModel {
         }
     }
 
+    /// PLUG-001 (T-094, DW-275): the time limit of "Retry (120 s)" for a plugin that timed out.
+    nonisolated static let retryTimeout: TimeInterval = ScannerLauncher.retryTimeout
+
     /// PLUG-004: forgets blocked plugins (those in `identifiers`, or all of them) and scans again,
-    /// so they get another chance.
-    func retryBlocked(_ identifiers: Set<String>? = nil) {
+    /// so they get another chance; with `timeout`, those get that time limit (DW-275's longer
+    /// retry) instead of the scanner's first-scan limit.
+    func retryBlocked(_ identifiers: Set<String>? = nil, timeout: TimeInterval? = nil) {
         run { catalog in
-            try catalog.resetBlocked(identifiers: identifiers)
-            return try catalog.refresh()
+            try catalog.retryBlocked(identifiers: identifiers, timeout: timeout)
         }
     }
 
@@ -187,7 +197,7 @@ final class PluginManagerModel {
         isScanning = true
         error = nil
         scanTask = Task { [weak self] in
-            // Off the main actor: every candidate runs the helper process, up to 10 s each.
+            // Off the main actor: every candidate runs the helper process, up to 30 s each (4 at a time).
             let outcome = await Task.detached(priority: .userInitiated) { () -> Result<(PluginCatalog, PluginCatalog.RefreshSummary), PluginCatalogError> in
                 var working = start
                 do {

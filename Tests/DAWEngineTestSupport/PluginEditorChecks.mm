@@ -2,6 +2,7 @@
 
 #import <AppKit/AppKit.h>
 #import <AudioToolbox/AudioToolbox.h>
+#import <AVFoundation/AVFoundation.h>
 #include <dlfcn.h>
 
 #include <chrono>
@@ -21,6 +22,7 @@
 #include "daw/EngineFacade.h"
 #include "daw/GraphDescription.h"
 #include "graph/NodeRegistry.h"
+#include "plugins/AUIdentifier.h"
 #include "plugins/AUInstance.h"
 #include "plugins/AUPluginConfig.h"
 #include "plugins/AUPluginHost.h"
@@ -392,9 +394,24 @@ CheckResult auPluginEditsBecomeEvents() {
 
     @autoreleasepool {
         AUAudioUnit* unit = (__bridge AUAudioUnit*)instance->audioUnit();
-        AUParameter* mix = unit.parameterTree.allParameters.firstObject;  // index 0: dry/wet mix %
+        // Index 0: dry/wet mix %. Always from the unit's current tree: the V2 bridge may replace its
+        // tree after prepare, late under load (DW-276), and a value set on a tree it dropped reaches
+        // no one (as for an editor still bound to it).
+        auto currentMix = [&]() -> AUParameter* { return unit.parameterTree.allParameters.firstObject; };
+        AUParameter* mix = currentMix();
         DAW_CHECK(mix != nil);
         if (mix == nil) return checks;
+
+        // DW-276 (T-094): robust under load. Every wait polls with a generous deadline (the V2
+        // bridge reports on its own queue, late on a loaded machine). The hold after a release or an
+        // ungestured edit lasts kHold from when the observer saw it, which is after `since` was
+        // taken; so a check made less than kHoldSure after `since` must still see the hold, and a
+        // later one (a starved test thread at load 20+) can't tell, so it only checks what holds
+        // either way. The window is measured after the decision it vouches for.
+        constexpr auto kWait = 15000ms;
+        constexpr auto kHoldSure = 250ms;  // < AUInstance's 300 ms hold
+        using Clock = std::chrono::steady_clock;
+        auto withinHold = [=](Clock::time_point since) { return Clock::now() - since < kHoldSure; };
 
         // An editor's gesture: Touch, values, Release.
         std::vector<PluginParamEdit> edits;
@@ -402,18 +419,32 @@ CheckResult auPluginEditsBecomeEvents() {
             return eventually([&] {
                 for (const auto& e : queue->take()) edits.push_back(e);
                 return edits.size() >= atLeast;
-            });
+            }, kWait);
         };
         [mix setValue:30 originator:nil atHostTime:0 eventType:AUParameterAutomationEventTypeTouch];
-        // The gesture is open: a model value isn't pushed (it would fight the knob).
-        DAW_CHECK(eventually([&] { return instance->pushDecision(0, 10.0f) == AUInstance::PushDecision::defer; }));
+        int touches = 1;
+        // The gesture is open: a model value isn't pushed (it would fight the knob). A Touch sent on a
+        // tree the bridge then replaced is sent again on the new one (the instance follows the new
+        // tree, by KVO); each Touch gets a Release below, and a Release with no gesture open is ignored.
+        DAW_CHECK(eventually([&] {
+            if (instance->pushDecision(0, 10.0f) == AUInstance::PushDecision::defer) return true;
+            if (AUParameter* now = currentMix(); now != nil && now != mix) {
+                mix = now;
+                [mix setValue:30 originator:nil atHostTime:0 eventType:AUParameterAutomationEventTypeTouch];
+                ++touches;
+            }
+            return false;
+        }, kWait));
+        mix = currentMix();
         for (float v : {40.0f, 50.0f}) [mix setValue:v originator:nil atHostTime:0 eventType:AUParameterAutomationEventTypeValue];
-        [mix setValue:50 originator:nil atHostTime:0 eventType:AUParameterAutomationEventTypeRelease];
+        const auto released = Clock::now();
+        for (int t = 0; t < touches; ++t)
+            [mix setValue:50 originator:nil atHostTime:0 eventType:AUParameterAutomationEventTypeRelease];
         DAW_CHECK(collect(3));
         DAW_CHECK(eventually([&] {
             for (const auto& e : queue->take()) edits.push_back(e);
             return !edits.empty() && edits.back().phase == PluginEditKind::end;
-        }));
+        }, kWait));
         if (edits.size() >= 3) {
             DAW_CHECK(edits.front().slot == 20 && edits.front().index == 0 && edits.front().phase == PluginEditKind::begin);
             DAW_CHECK(edits.back().phase == PluginEditKind::end);
@@ -425,7 +456,8 @@ CheckResult auPluginEditsBecomeEvents() {
         // (the AU has it), then the model leads.
         rig->engine().params().set(p + 0, 20.0f);
         rig->render(256);
-        DAW_CHECK(std::fabs(mix.value - 50.0f) < 1e-4f);
+        const bool heldAfterRelease = withinHold(released);  // so the render's decision was inside it
+        if (heldAfterRelease) DAW_CHECK(std::fabs(currentMix().value - 50.0f) < 1e-4f);  // 20 deferred, never scheduled
         rig->engine().params().set(p + 0, 50.0f);
         rig->render(256);
         auto pooled = std::static_pointer_cast<AUPluginNode>(rig->engine().nodes().get(20));
@@ -433,7 +465,7 @@ CheckResult auPluginEditsBecomeEvents() {
         rig->engine().params().set(p + 0, 80.0f);
         rig->render(256);
         DAW_CHECK(pooled && pooled->paramEventsPushed() == pushedBefore + 1);
-        DAW_CHECK(eventually([&] { return std::fabs(instance->params(true)[0].value - 80.0f) < 1e-3f; }));
+        DAW_CHECK(eventually([&] { return std::fabs(instance->params(true)[0].value - 80.0f) < 1e-3f; }, kWait));
         // The tree reports the push back (V2 bridge): that echo is no edit.
         std::this_thread::sleep_for(100ms);
         edits.clear();
@@ -442,14 +474,55 @@ CheckResult auPluginEditsBecomeEvents() {
 
         // A plain value change (a menu, a preset) is an ungestured edit; the model's older value is
         // held back until it matches or 300 ms pass.
-        mix.value = 25;
+        const auto edited = Clock::now();
+        currentMix().value = 25;
         DAW_CHECK(collect(1));
         if (!edits.empty()) DAW_CHECK(edits.back().phase == PluginEditKind::value && std::fabs(edits.back().value - 25.0f) < 1e-4f);
-        DAW_CHECK(instance->pushDecision(0, 80.0f) == AUInstance::PushDecision::defer);
-        // The hold lasts ~300 ms (a timer on a utility queue; later under load).
-        DAW_CHECK(eventually([&] { return instance->pushDecision(0, 80.0f) == AUInstance::PushDecision::push; }, 3000ms));
+        // pushDecision never returns skip here (80 isn't the held 25), so defer, or push once the hold
+        // ran out; only a check inside the window can insist on defer.
+        const AUInstance::PushDecision decision = instance->pushDecision(0, 80.0f);
+        const bool heldAfterEdit = withinHold(edited);  // measured after the decision
+        DAW_CHECK(decision != AUInstance::PushDecision::skip);
+        if (heldAfterEdit) DAW_CHECK(decision == AUInstance::PushDecision::defer);
+        // The hold lasts ~300 ms (its deadline is checked when the node asks).
+        DAW_CHECK(eventually([&] { return instance->pushDecision(0, 80.0f) == AUInstance::PushDecision::push; }, kWait));
     }
     DAW_CHECK(rig->violations() == 0);
+    return checks;
+}
+
+
+// DW-276 (T-094): a V2 bridge that replaces its parameter tree later, behind the instance's back
+// (here: a bus format set straight on the unit; the bridge rebuilds the tree asynchronously), still
+// has its editor's gestures heard: the instance follows `parameterTree` by KVO.
+CheckResult auEditsFollowTreeSwap() {
+    CheckResult checks;
+    auto component = parseAUIdentifier(kDelay);
+    DAW_CHECK(component.ok());
+    if (!component) return checks;
+    auto made = AUInstance::instantiate(*component);
+    DAW_CHECK(made.ok());
+    if (!made) return checks;
+    std::shared_ptr<AUInstance> instance = made.value();
+    @autoreleasepool {
+        AUAudioUnit* unit = (__bridge AUAudioUnit*)instance->audioUnit();
+        AUParameterTree* before = unit.parameterTree;
+        // A rate the unit isn't at (it starts at 44.1 kHz) on both buses, as prepare does.
+        AVAudioFormat* format = [[AVAudioFormat alloc] initStandardFormatWithSampleRate:48000 channels:2];
+        NSError* error = nil;
+        DAW_CHECK([unit.inputBusses[0] setFormat:format error:&error]);
+        DAW_CHECK([unit.outputBusses[0] setFormat:format error:&error]);
+        DAW_CHECK(eventually([&] { return unit.parameterTree != before; }, 15000ms));
+        AUParameter* mix = unit.parameterTree.allParameters.firstObject;
+        DAW_CHECK(mix != nil);
+        if (mix == nil) return checks;
+        DAW_CHECK(instance->pushDecision(0, 10.0f) == AUInstance::PushDecision::push);
+        [mix setValue:30 originator:nil atHostTime:0 eventType:AUParameterAutomationEventTypeTouch];
+        DAW_CHECK(eventually([&] { return instance->pushDecision(0, 10.0f) == AUInstance::PushDecision::defer; }, 15000ms));
+        [mix setValue:30 originator:nil atHostTime:0 eventType:AUParameterAutomationEventTypeRelease];
+        DAW_CHECK(eventually([&] { return instance->pushDecision(0, 10.0f) != AUInstance::PushDecision::defer ||
+                                          instance->pushDecision(0, 30.0f) == AUInstance::PushDecision::skip; }, 15000ms));
+    }
     return checks;
 }
 

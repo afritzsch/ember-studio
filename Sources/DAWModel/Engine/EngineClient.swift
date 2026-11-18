@@ -225,6 +225,11 @@ public final class EngineClient: EngineProtocol {
 
     /// PLUG-010/015 (T-061).
     public func pluginInfoJSON(slot: NodeIDValue) -> String { String(facade.pluginInfoJSON(slot)) }
+    /// DW-213 (T-094).
+    public func paramDisplay(slot: NodeIDValue, index: Int, value: Float) -> String {
+        guard index >= 0, index <= Int(UInt32.max) else { return "" }
+        return String(facade.paramDisplay(slot, UInt32(index), value))
+    }
     // PLUG-017 (T-063): main thread (the facade refuses elsewhere).
     public func createPluginView(slot: NodeIDValue) -> UnsafeMutableRawPointer? { facade.__createPluginViewUnsafe(slot) }
     public func destroyPluginView(slot: NodeIDValue) { facade.destroyPluginView(slot) }

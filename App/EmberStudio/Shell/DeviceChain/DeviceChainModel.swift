@@ -49,6 +49,16 @@ final class DeviceChainModel {
     @ObservationIgnored var now: () -> Date = { Date() }
     /// Where plugin info comes from: the window's engine (`pluginInfoJSON`), or a test's stand-in.
     @ObservationIgnored var readPluginInfo: (@MainActor (NodeIDValue) -> String)?
+    /// DW-213 (T-094): where a plugin's display string of a value other than its own comes from:
+    /// the window's engine (`paramDisplay`), or a test's stand-in.
+    @ObservationIgnored var readParamDisplay: (@MainActor (NodeIDValue, Int, Float) -> String)?
+    /// DW-213: display strings already asked for, by slot, index and value (cleared with the infos).
+    @ObservationIgnored private var displayCache: [DisplayKey: String] = [:]
+    private struct DisplayKey: Hashable {
+        var slot: NodeIDValue
+        var index: Int
+        var bits: UInt32
+    }
     /// How often an open tab re-reads its plugins' info (their own values move under their editors).
     static let infoRefreshInterval: TimeInterval = 0.5
 
@@ -155,16 +165,26 @@ final class DeviceChainModel {
     func params(_ slot: DeviceSlot, info: PluginInfo?) -> [DeviceParamModel] {
         let rows: [ParamDescriptor]
         var pluginValues: [Int: Float] = [:]
+        var pluginParams: [Int: PluginInfo.Param] = [:]
         switch slot.kind {
         case .builtin(let kind):
             rows = (catalog.infos[kind] ?? [:]).values.sorted { $0.index < $1.index }
         case .au, .vst3:
             guard let info else { return [] }
+            // DW-213 (T-094): the plugin's steps and value names make switches and menus, as for
+            // built-ins; a param with more steps than a menu should hold stays a slider.
+            // A switch the plugin calls Off/On (VST3's default strings) stays a toggle.
             rows = info.params.map { p in
-                ParamDescriptor(index: p.index, id: p.id, name: p.name, min: p.min, max: p.max, default: p.min,
-                                unit: p.unit, automatable: true)
+                let steps = p.steps <= PluginInfo.Param.maxMenuSteps ? p.steps : 0
+                var labels = steps > 0 ? p.labels : nil
+                if steps == 1, let named = labels, named.map({ $0.lowercased() }) == ["off", "on"] { labels = nil }
+                return ParamDescriptor(index: p.index, id: p.id, name: p.name, min: p.min, max: p.max, default: p.min,
+                                       unit: p.unit, automatable: true, steps: steps, labels: labels)
             }
-            for p in info.params { pluginValues[p.index] = p.value }
+            for p in info.params {
+                pluginValues[p.index] = p.value
+                pluginParams[p.index] = p
+            }
         }
         let automation = window?.automation
         return rows.map { row in
@@ -173,8 +193,34 @@ final class DeviceChainModel {
             let target = ParamTarget.device(slot: slot.id, index: row.index)
             let value = automation?.displayed(target, own) ?? own
             let automated = window?.project.automationLane(for: target).map { $0.lane.mode != .off } ?? false
-            return DeviceParamModel(slot: slot.id, row: row, value: value, isSet: stored != nil, automated: automated)
+            let text = pluginParams[row.index].flatMap { pluginDisplay(slot.id, $0, row: row, value: value) }
+            return DeviceParamModel(slot: slot.id, row: row, value: value, isSet: stored != nil, automated: automated,
+                                    pluginDisplay: text)
         }
+    }
+
+    /// DW-213 (T-094): what a plugin calls `value` of a continuous param, with the unit: its own
+    /// string from `pluginInfoJSON` when `value` is the plugin's value, else the engine's
+    /// `paramDisplay` (cached). Nil (the number shows) for menus, switches and params without strings.
+    private func pluginDisplay(_ slot: NodeIDValue, _ param: PluginInfo.Param, row: ParamDescriptor, value: Float) -> String? {
+        guard !row.isDiscrete, value.isFinite else { return nil }
+        var text: String?
+        if param.value.bitPattern == value.bitPattern {
+            text = param.display  // the plugin's own value: its string, or none
+        } else {
+            let key = DisplayKey(slot: slot, index: param.index, bits: value.bitPattern)
+            if let cached = displayCache[key] {
+                text = cached
+            } else {
+                let read = readParamDisplay.map { $0(slot, param.index, value) }
+                    ?? window?.engine?.paramDisplay(slot: slot, index: param.index, value: value) ?? ""
+                if displayCache.count >= 4096 { displayCache.removeAll() }
+                displayCache[key] = read
+                text = read
+            }
+        }
+        guard let text, !text.isEmpty else { return nil }
+        return PluginInfo.Param.withUnit(text, row.unit)
     }
 
     /// A plugin's info from the engine (cached; re-read at the window's poll while the tab shows).
@@ -211,7 +257,10 @@ final class DeviceChainModel {
                 changed = true
             }
         }
-        if changed { pluginInfoRevision += 1 }
+        if changed {
+            pluginInfoRevision += 1
+            displayCache = [:]  // DW-213: a plugin's strings can change with its state
+        }
     }
 
     private func pluginInfoJSON(_ slot: NodeIDValue) -> String? {
@@ -450,6 +499,7 @@ final class DeviceChainModel {
         genericShown = []
         noEditor = []
         pluginInfos = [:]
+        displayCache = [:]
         pluginInfoRevision += 1
     }
 
@@ -457,6 +507,7 @@ final class DeviceChainModel {
     func engineChanged() {
         endDrag()
         pluginInfos = [:]
+        displayCache = [:]
         pluginInfoRevision += 1
     }
 }
@@ -525,12 +576,15 @@ struct DeviceParamModel: Identifiable, Equatable {
     /// The document stores a value (else a built-in's default or a plugin's own value shows).
     let isSet: Bool
     let automated: Bool
+    /// DW-213 (T-094): a hosted plugin's own string for `value`, with the unit (nil: the number or
+    /// the label shows).
+    var pluginDisplay: String? = nil
 
     var id: Int { row.index }
     var index: Int { row.index }
     /// 0…1 along the control (the param's mapping, AUTO-008).
     var position: Double { Double(min(max(row.mapping.normalize(value), 0), 1)) }
-    var display: String { row.display(value) }
+    var display: String { pluginDisplay ?? row.display(value) }
     /// `slider`, `toggle` or `menu`.
     var style: String {
         if row.isSwitch && row.labels == nil { return "toggle" }
@@ -548,8 +602,17 @@ struct PluginInfo: Equatable, Sendable {
         var min: Float
         var max: Float
         var value: Float
+        /// DW-213 (T-094): the plugin's steps (06 ParamInfo `steps`), value names (steps + 1 or
+        /// nil) and its string for `value`.
+        var steps = 0
+        var labels: [String]?
+        var display: String?
 
-        private enum CodingKeys: String, CodingKey { case index, id, name, unit, min, max, value }
+        /// DW-213: a plugin param with more steps than this is drawn as a slider, not a menu (the
+        /// engine sends value names up to the same count).
+        static let maxMenuSteps = 128
+
+        private enum CodingKeys: String, CodingKey { case index, id, name, unit, min, max, value, steps, labels, display }
 
         init(from decoder: any Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -560,6 +623,18 @@ struct PluginInfo: Equatable, Sendable {
             min = try c.decodeIfPresent(Float.self, forKey: .min) ?? 0
             max = try c.decodeIfPresent(Float.self, forKey: .max) ?? 1
             value = try c.decodeIfPresent(Float.self, forKey: .value) ?? min
+            steps = Swift.max(try c.decodeIfPresent(Int.self, forKey: .steps) ?? 0, 0)
+            let labels = try? c.decodeIfPresent([String].self, forKey: .labels)
+            self.labels = labels?.count == steps + 1 && steps > 0 ? labels : nil
+            let display = try? c.decodeIfPresent(String.self, forKey: .display)
+            self.display = display?.isEmpty == false ? display : nil
+        }
+
+        /// "0.00" and "dB" → "0.00 dB"; a string that already names its unit is left alone.
+        static func withUnit(_ text: String, _ unit: String) -> String {
+            let unit = unit.trimmingCharacters(in: .whitespaces)
+            guard !unit.isEmpty, !text.localizedCaseInsensitiveContains(unit) else { return text }
+            return "\(text) \(unit)"
         }
     }
 

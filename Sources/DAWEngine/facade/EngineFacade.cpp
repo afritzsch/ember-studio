@@ -1627,6 +1627,15 @@ void EngineFacade::setPluginState(NodeID slot, const ByteVector& state) {
 std::string EngineFacade::pluginInfoJSON(NodeID slot) const {
     return impl_->vst3Plugins->knows(slot) ? impl_->vst3Plugins->infoJSON(slot) : impl_->plugins->infoJSON(slot);
 }
+// DW-213 (T-094): the slot's current instance (none while disabled by safe mode) names the value.
+std::string EngineFacade::paramDisplay(NodeID slot, uint32_t param, float value) const {
+    if (impl_->vst3Plugins->knows(slot)) {
+        auto instance = impl_->vst3Plugins->current(slot);
+        return instance ? instance->displayString(param, value) : std::string();
+    }
+    auto instance = impl_->plugins->current(slot);
+    return instance ? instance->displayString(param, value) : std::string();
+}
 // PLUG-017 (T-063): main thread only (PluginViewHost). The slot's current instance (its latest
 // node's, else a parked one) of whichever host knows the slot.
 void* EngineFacade::createPluginView(NodeID slot) {

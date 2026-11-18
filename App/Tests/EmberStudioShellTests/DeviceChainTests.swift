@@ -255,6 +255,54 @@ struct DeviceChainTests {
         window.pluginEditors.closeAll()
     }
 
+    @Test("DW-213: plugin cards show the plugin's own display strings with the unit; its steps and labels make menus and toggles; other values ask paramDisplay once")
+    func pluginDisplayStrings() throws {
+        let (window, _, a, _, _, _, _, _) = try chainWindow()
+        window.perform(InsertDevice(channel: a, index: 0, device: .vst3(VST3Descriptor(identifier: "/x.vst3#01", name: "Pro"))))
+        let slot = window.project.track(a)!.inserts[0].id
+        window.deviceChain.readPluginInfo = { id in
+            guard id == slot else { return "" }
+            return #"{"slot":\#(id),"loaded":true,"name":"Pro","params":["#
+                + #"{"index":0,"id":"7","name":"Gain","unit":"dB","min":0,"max":1,"value":0.25,"steps":0,"display":"-12.0"},"#
+                + #"{"index":1,"id":"8","name":"Shape","unit":"","min":0,"max":1,"value":0.5,"steps":2,"labels":["Bell","Shelf","Cut"],"display":"Shelf"},"#
+                + #"{"index":2,"id":"9","name":"Fine","unit":"Hz","min":0,"max":1,"value":0.1,"steps":1000},"#
+                + #"{"index":3,"id":"10","name":"Solo","unit":"","min":0,"max":1,"value":0,"steps":1,"labels":["Off","On"],"display":"Off"},"#
+                + #"{"index":4,"id":"11","name":"Mix","unit":"%","min":0,"max":1,"value":1,"steps":0,"display":"100 %"}]}"#
+        }
+        var asked: [(Int, Float)] = []
+        window.deviceChain.readParamDisplay = { id, index, value in
+            #expect(id == slot)
+            asked.append((index, value))
+            return index == 0 ? "-3.1" : ""
+        }
+        window.deviceChain.genericShown.insert(slot)
+        var params = try card(window, slot).params
+        #expect(params.map(\.style) == ["slider", "menu", "slider", "toggle", "slider"])
+        #expect(params[0].display == "-12.0 dB", "the plugin's string, with the unit")
+        #expect(params[1].display == "Shelf" && params[1].row.choices.map(\.label) == ["Bell", "Shelf", "Cut"])
+        #expect(params[2].row.steps == 0, "too many steps for a menu: a slider")
+        #expect(params[2].display == "0.10 Hz", "no plugin string: the number")
+        #expect(params[3].display == "Off")
+        #expect(params[4].display == "100 %", "a string that names its unit isn't given it twice")
+        #expect(asked.isEmpty, "the plugin's own values need no query")
+
+        // A value the plugin doesn't hold (the model's, here a drag) asks paramDisplay, once.
+        let key = DeviceParamKey(slot: slot, index: 0)
+        window.deviceChain.beginDrag(key)
+        window.deviceChain.updateDrag(key, position: 0.7)
+        window.deviceChain.endDrag()
+        params = try card(window, slot).params
+        #expect(params[0].display == "-3.1 dB")
+        _ = try card(window, slot)
+        #expect(asked.count == 1 && asked.first?.0 == 0 && abs((asked.first?.1 ?? 0) - 0.7) < 1e-6)
+        // The menu sets the step's value (normalized), its label shows.
+        try window.control("deviceChain.device.\(slot).param.1.value.2").action()
+        #expect(try param(window, slot, 1).display == "Cut" && value(window, slot, 1) == 1)
+        let state = UIStateDumper.dump(window.deviceChain)
+        let rows = state["devices"]?[0]?["params"]
+        #expect(rows?[0]?["display"] == "-3.1 dB" && rows?[1]?["labels"]?[2] == "Cut" && rows?[1]?["steps"] == 2)
+    }
+
     @Test("DW-253: the \"+ Lane\" menu lists a hosted plugin's params by their pluginInfoJSON names; a plugin not loaded yet lists none")
     func laneMenuPluginParams() throws {
         let (window, _, a, _, _, _, _, _) = try chainWindow()

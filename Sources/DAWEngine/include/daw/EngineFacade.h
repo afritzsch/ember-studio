@@ -621,6 +621,13 @@ public:
     // Param slot i of the auPlugin or vst3Plugin node drives params[i]. {"slot": n, "loaded": false} for a slot
     // the engine has no plugin for. Non-RT, any thread.
     std::string pluginInfoJSON(NodeID slot) const;
+    // DW-213 (T-094, 08 "Contract delta (T-094)"): the plugin's own display string of param
+    // `param` (pluginInfoJSON's params[param]) at `value` (VST3: normalized, getParamStringByValue;
+    // AU: in the parameter's range, its string-from-value, else a step's value name), without the
+    // unit. Empty when the slot has no loaded plugin, the index is unknown or the plugin has no
+    // string for it. pluginInfoJSON rows also carry "steps", "labels"? and "display"? (the string
+    // of "value"). Non-RT, any thread.
+    std::string paramDisplay(NodeID slot, uint32_t param, float value) const;
     void destroyPluginView(NodeID slot);
     // PLUG-017 (T-063, accepted (autobuild, see docs/autobuild/DECISIONS.md "T-063 editors")).
     // createPluginView (main thread only; null elsewhere) opens the editor of the slot's plugin

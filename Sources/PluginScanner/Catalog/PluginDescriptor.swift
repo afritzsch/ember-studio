@@ -46,6 +46,20 @@ public struct PluginDescriptor: Codable, Hashable, Sendable {
             version: candidate.version, isInstrument: false, hasSidechain: false, numParams: 0,
             status: .blocked, reason: reason)
     }
+
+    /// PLUG-001: the entry for a candidate whose scan was killed after `seconds`. Its reason starts
+    /// with "timed out", which is what `isTimedOut` reads (the cache keeps no other field for it).
+    public static func timedOut(_ candidate: PluginCandidate, after seconds: TimeInterval) -> PluginDescriptor {
+        blocked(candidate, reason: "\(timedOutPrefix) \(ScannerLauncher.format(seconds)) s")
+    }
+
+    static let timedOutPrefix = "timed out after"
+
+    /// PLUG-001 (T-094, DW-275): blocked because its scan ran out of time, so a retry with a longer
+    /// limit (`ScannerLauncher.retryTimeout`) may get through.
+    public var isTimedOut: Bool {
+        status == .blocked && (reason?.hasPrefix(Self.timedOutPrefix) ?? false)
+    }
 }
 
 /// The scanner's stdout format, shared by the scanner (encode) and the launcher (decode).

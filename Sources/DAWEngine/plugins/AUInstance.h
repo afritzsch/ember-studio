@@ -63,6 +63,14 @@ struct AUParamInfo {
     float value = 0;          // when read (AUInstance::params(true)), else at instantiation
     bool canRamp = false;     // kAudioUnitParameterFlag_CanRamp
     bool writable = true;
+    // DW-213 (T-094): discrete values as 06's ParamInfo::steps (0 continuous; a Boolean param 1,
+    // an Indexed one max − min). `labels` (steps + 1 value names: the AU's valueStrings, else its
+    // strings for each step) and `display` (the AU's string for `value`, when it has strings) are
+    // filled by params(true) only; labels only for steps ≤ kMaxLabelledSteps.
+    uint32_t steps = 0;
+    std::vector<std::string> labels;
+    std::string display;
+    static constexpr uint32_t kMaxLabelledSteps = 128;
 };
 
 class AUInstance {
@@ -97,6 +105,10 @@ public:
     // PLUG-015. Fixed when instantiated; `current` re-reads every value (non-RT).
     const std::vector<AUParamInfo>& params() const { return params_; }
     std::vector<AUParamInfo> params(bool current) const;
+    // DW-213 (T-094), non-RT: the AU's display string of parameter `index` at `value` (its
+    // string-from-value, else a step's value name), without the unit. Empty for an unknown index
+    // or a parameter without strings.
+    std::string displayString(uint32_t index, float value) const;
 
     // PLUG-016, non-RT: `fullState` as a binary plist, and back. setFullState fails with
     // invalidArgument for bytes that aren't a plist dictionary.
