@@ -135,7 +135,7 @@ public enum ControlMethod: String, CaseIterable, Hashable, Sendable {
         case .midiInject: "Feed MIDI messages as if from a controller (test seam, realtime engines) {events: [{sample | framesFromNow, status, data1?, data2?, source?}]} → {accepted} (source: a CoreMIDI unique ID from midi.inputs, for a track's MIDI input filter)"
         case .uiState: "UI state dump (attach only)"
         case .uiSnapshot: "Window snapshot as PNG {path?, pluginEditor?: slot} → {pngPath} (attach only)"
-        case .uiPerform: "Click or toggle a control {accessibilityId, action} (attach only)"
+        case .uiPerform: "Click, toggle or type into a control {accessibilityId, action[, text]} (attach only)"
         case .testFixture: "Build a fixture project from its script {name}"
         case .pluginsScan: "Scan new or changed AU/VST3 plugins out of process {timeoutSeconds?} → {scanned, unchanged, removed, plugins, blocked}"
         case .pluginsList: "Usable plugins in the scan cache → {plugins: [{format, identifier, name, vendor, version, isInstrument, …}], cachePath}"
