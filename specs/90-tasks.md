@@ -143,6 +143,13 @@ DSP effects (T-070..073) depend only on the Node API and can be **pulled forward
 | T-095 | U (+M) | App follow-ups 2: enable one slot in safe mode, plugin-editor edits into `AutomationRecorder`, `visibleTracks` counting lane/take rows, track header overlap, the empty "Comp Editor" tab, `deviceChain` id prefix in `ViewModelTests`, arrow-key clip nudge, editable toolbar tempo/signature | DW-266, DW-277, DW-270, DW-271, DW-272, DW-278, DW-179, DW-180 | T-065, T-081, T-083 | ready |
 | T-096 | B+U | Control/export follow-ups: cancel a running export (facade + dialog), `render.offline` dither, meters through the control protocol, headless `engine.previewNote` | DW-220, DW-219, DW-174, DW-189 | T-082 | done |
 
+### Follow-ups from autobuild phase 11 (open DW items; see docs/autobuild/DECISIONS.md "Phase 11 follow-up tasks")
+| Task | Lane | Title | Requirements | Depends on | Status |
+|---|---|---|---|---|---|
+| T-097 | P | Hosted-plugin follow-ups: AU/VST3 `reset()` so an offline render starts without a plugin's tail; all-notes-off when an instrument plugin is bypassed; AUTO-003 wrap jump for hosted plugins (`ParamSlotTable::afterWrap`); VST3 MIDI CC/pitch bend/aftertouch through `IMidiMapping`; VST3 offline process mode for renders; lifecycle-lock audit of `AUInstance::instantiate` and the VST3 teardown path | DW-242, DW-225, DW-233, DW-210, DW-211, DW-217, DW-218 (AUTO-003, PLUG-018, DW-063) | T-094 | ready |
+| T-098 | B | Control/tooling follow-ups: dawctl/dawmcp plugin scan, list and blocked/retry (`plugins.*`); `engine.paramDisplay`; Ctrl-C cancels `dawctl render.offline`; `midi.inject` summary; shared fixture-folder lookup; pipelined dawmcp calls run in order; one telemetry conversion shared by `GoldenEngine` and `EngineClient`; dawmcp notices a stale binary | DW-016, DW-289, DW-283, DW-285, DW-132, DW-163, DW-240, DW-147, DW-151 | T-094, T-096 | ready |
+| T-099 | E+M | Engine/model correctness follow-ups: telemetry `clippedSamples`, `midiEventsDropped`, `inputLatency`, `bufferFrames`; `RemoveAsset` checks take clips; session-rate change rescales take offsets; `Bus`/`MasterChannel` decode a missing `automation` key; `validate()` checks `inputPair` and insert kinds; `RestoreSessionSampleRate` optional arrays | DW-083, DW-170, DW-192, DW-258, DW-259, DW-235, DW-199, DW-251, DW-185 (MODEL-005, ENG-050) | T-093 | ready |
+
 ## Critical path
 `T-001 → T-002 → T-004 → T-012 → T-014 → T-016 → T-017 → T-018` unlocks agent self-testing. Prioritize it; everything else fans out from there.
 
@@ -452,7 +459,7 @@ Recorded by the lead from worker reports.
 | DW-236 | T-074 | The model doesn't know built-in `automatable` flags (ParamCatalog parses only defaults), so a lane on a non-automatable built-in param is accepted by the model and dropped by the engine; T-075's lane UI should offer only automatable params, or ParamCatalog parses the flag | M/U (T-075) | done (T-075) |
 | DW-237 | T-074 | While stopped, `AutomationSet` writes lane values once per position or graph change: a `SetParam` while stopped holds until play/locate, and any rebuild while stopped rewrites the lane value at the playhead. T-075 (AUTO-007) should confirm | E/U (T-075) | done (T-075) |
 | DW-238 | T-074 (T-064) | Swift warning in `Tests/DAWModelTests/HostBypassModelTests.swift:192` ('open' mutated after capture by sendable closure) | M (tests) | todo |
-| DW-239 | T-077 | 14's golden table has no rows for `clip_overlap_crossfade`, `export_normalize`, `input_monitoring_loopback`, `plugin_bypass_null` | lead (14) | todo |
+| DW-239 | T-077 | 14's golden table has no rows for `clip_overlap_crossfade`, `export_normalize`, `input_monitoring_loopback`, `plugin_bypass_null` | lead (14) | done (lead, phase 11) |
 | DW-240 | T-077 | `Tests/GoldenTests/GoldenEngine.swift` mirrors `EngineClient`'s telemetry by hand and dropped `nanBlocks` (fixed in T-077); it may drop other later fields (`recordDrops`, `deviceInputLatency`, `armedTracks`, …). Share one conversion | B / tests | todo |
 | DW-241 | T-077 | Wall-clock tests flaky under parallel load besides UI-010 (DW-223): DW-032 `SyncCostTests` step-cost bounds, CTL-031 `ProgressTests` values.count ≥ 3 | E/B (T-084 perf job) | done (T-084) |
 | DW-242 | T-089 | `AUPluginNode::reset()` and `VST3PluginNode::reset()` do nothing, so the DW-063 reset before an offline render doesn't clear a hosted plugin's tail (AU: `AudioUnitReset`; VST3: processor reset/flush) | P | todo |

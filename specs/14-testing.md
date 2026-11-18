@@ -54,6 +54,10 @@
 | `builtin_bypass_null` | M7 | PLUG-018 for the built-ins (bypassed EQ/comp/delay/reverb null against the dry signal) |
 | `effect_param_steps` | M7 | ENG-022, AUTO-002 on effect params (EQ gain, comp makeup, delay mix, reverb mix ramp over one block) |
 | `m7_scene` | M7 | DSP-030..033, MIX-007, AUTO-002, IO-011 (EQ → comp → send → reverb bus, delay insert, two lanes; bit-identical on fresh engines) |
+| `clip_overlap_crossfade` | M3 | DSP-002 ("later clip wins" with 64-sample equal-power crossfades at both boundaries of an overlap; T-035) |
+| `input_monitoring_loopback` | M5 | REC-020, REC-021 (a monitored track plays its input through its chain; fake-device loopback, T-054) |
+| `plugin_bypass_null` | M6 | PLUG-018 (host bypass of a latent device nulls against a phase-inverted copy; bypass is a slot write; T-064) |
+| `export_normalize` | M7 | UI-042 (`render.offline {normalize}`: sample peak −0.1 dBFS before quantization, int24, `dither: false` since T-096; T-082) |
 
 ## Agent verification recipe
 When an agent finishes an audio-affecting task it must:
