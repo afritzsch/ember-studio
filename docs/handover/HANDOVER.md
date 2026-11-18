@@ -50,7 +50,7 @@ You are AUTOBUILD phase lead 14. Read CLAUDE.md, then `.claude/skills/autobuild/
   - Review the phase-8 to phase-11 rows in DECISIONS.md.
   - `gh` reports `afritzsch/ember-studio` as **PUBLIC** (earlier handovers said private). Pushes and CI publish the code; make it private again if that wasn't intended.
   - **New in phase 10:**
-    - CI (DW-261): set the repo variable `CI_RUNNER` to a self-hosted Mac runner with Xcode 27, or wait for a GitHub image with Xcode 27. Until then, every push's CI run fails in the Xcode step.
+    - CI (DW-261): **resolved 2026-11-19 (PR #1).** CI runs on GitHub's `xcode-27` image (`vars.CI_RUNNER` still overrides) and the push `test` job is green. Still open in the weekly jobs: PLUG-013's rebuild under ASan/TSan (DW-359) and TEST-008 at 9.4–9.6× vs the 10× floor on some hosted runs (DW-360, a call for the user).
     - DW-274: should the app (and the embedded scanner) get the `com.apple.security.cs.allow-jit` / `allow-unsigned-executable-memory` entitlements? That would let the 46 plugins killed under hardened runtime (UADx, Neural DSP, soothe2, …) load. It is a security trade-off.
     - DW-281: the machine runs in **Low Power Mode**, and TEST-008 measured 10.7× there (11.4× after T-092). Re-run `scripts/ci.sh perf` with it off.
   - **New in phase 11:**
