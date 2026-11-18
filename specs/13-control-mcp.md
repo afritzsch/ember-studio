@@ -130,6 +130,35 @@ Additive. `midi.inject` events take `source?`, a CoreMIDI unique ID (a number, a
 ### Contract delta (T-099), accepted (autobuild, see docs/autobuild/DECISIONS.md "T-099 telemetry delta")
 Additive. No new method: `engine.telemetry` (and `daw_engine_telemetry`) has `clippedSamples`, `midiEventsDropped` and `bufferFrames` (08 "Contract delta (T-099)"), because the result encodes `EngineTelemetry` as is. IO-005's input latency is the existing `deviceInputLatency`.
 
+### Contract delta (T-098), accepted (autobuild, see docs/autobuild/DECISIONS.md "T-098 control additions")
+Additive: new methods and tools. Existing methods, params and results keep their meaning. Tools follow CTL-021's naming: `daw_plugins_scan`, `daw_plugins_list`, `daw_plugins_blocked`, `daw_plugins_retry`, `daw_plugins_unblock`, `daw_engine_param_display`. `list`, `blocked` and `paramDisplay` are read-only.
+- **`plugins.*`** (DW-016, PLUG-001..004). The cache is 10's `plugins.json`; plugin code never loads in the calling process. A plugin is `ControlPlugin`: `{format: au|vst3, identifier, name, vendor, version, isInstrument, hasSidechain, numParams, status: ok|blocked, reason?, timedOut?}`. `identifier` is the scanner's (AU `type:subtype:manufacturer`, VST3 `path#classUID`; a blocked VST3 bundle the scanner couldn't report on: its path).
+  - **`plugins.scan {timeoutSeconds?}`** → `{scanned, scannedCandidates?, unchanged, removed, plugins, blocked, timeoutSeconds, note?}`. It scans new or changed candidates and drops vanished ones (`PluginCatalog.refresh`). Blocked entries stay blocked. `timeoutSeconds` is each scan's limit, default 30 and at most 3600 (`invalidParams` outside (0, 3600]).
+  - **`plugins.list`** → `{plugins, cachePath}`: the usable plugins.
+  - **`plugins.blocked`** → `{blocked, cachePath}`: the blocked plugins, with reasons.
+  - **`plugins.retry {id?, timeoutSeconds?}`** → `{retried, scan, stillBlocked}`. It forgets the blocked plugin `id` (all of them without it) and scans again (`retryBlocked`). The default limit is 120 s when a retried plugin had timed out (the plugin manager's "Retry (120 s)", DW-275), else 30 s.
+  - **`plugins.unblock {id?}`** → `{unblocked}`. It forgets them without scanning (`resetBlocked`), so the next `plugins.scan` tries them again.
+  - An `id` that isn't blocked is `invalidArgument`. A scanner that can't run is `internalError`, and nothing is cached.
+  - *Headless* (`dawctl`, `dawmcp`, `CatalogPluginControl`):
+    - Scanner: `PluginScanner` next to the binary (`scripts/dawmcp.sh` builds it), or `$DAWCTL_PLUGIN_SCANNER`.
+    - Cache: `<checkout>/.build/plugins/plugins.json`, first copied from the user's cache so it lists what the app's scans found. Its own scans never write the user's file or another worktree's (CONV §9). `$DAWCTL_PLUGIN_CACHE` names another file.
+    - Folders: `$DAWCTL_VST3_DIRS` (colon-separated) replaces PLUG-003's VST3 folders. `$DAWCTL_AU=0` leaves out audio units.
+    - The cache is re-read on every call, so separate `dawctl` runs share it.
+  - *Attach mode*: the app's plugin manager (UI-041). The app's UI provider implements `ControlPluginProvider` (`Dispatcher.Configuration.plugins` is the explicit hook), so the panel shows what a scan through the socket found. Differences from headless:
+    - `scan` uses the app's own 30 s limit (a given `timeoutSeconds` is reported in `note`);
+    - summaries have counts only (no `scannedCandidates`);
+    - `plugins.unblock` is -32006 `notSupported` (the manager rescans what it forgets; use `plugins.retry`).
+- **`engine.paramDisplay {node, param, value?}`** → `{node, param, value, display}` (DW-289): the facade's `paramDisplay` (08 "Contract delta (T-094)").
+  - `node` is a device slot hosting an AU/VST3 plugin, as `engine.pluginInfo`'s `slot`; `param` is the index in its `params`.
+  - `value` is VST3 normalized, AU in the param's range. Without it, the param's current `value` from `pluginInfoJSON` is used; then a slot without a loaded plugin, or an unknown param, is `invalidArgument`.
+  - `display` is the plugin's own string without the unit, `""` when it has none (the host formats the number).
+- **`dawctl` Ctrl-C** (DW-283): SIGINT while `render.offline` runs sends `render.cancel {id}` for it: in-process headless, or over a side connection with `--attach`/`--socket`. The render fails with -32005 `cancelled` and deletes its file, and dawctl exits 1 (a script stops there). SIGINT with no render running, a second one, or a render still running 10 s later exits 130.
+- **dawmcp `tools/call` order** (DW-163): calls run strictly in arrival order. stdin passes through a tagger that numbers each `tools/call` in `params._meta["dev.emberstudio.dawmcp/seq"]` before the SDK, which runs each request in a task of its own, sees it. `daw_render_cancel` isn't numbered (it must reach the render it cancels). A numbered call the SDK never hands over (cancelled by `notifications/cancelled`, or dropped) releases its turn, at the latest 5 s after it came up. Execution is ordered; responses can still be written slightly out of order (a turn passes on when the handler returns, before the SDK writes its response), which JSON-RPC allows, since responses carry their ids.
+- **Stale dawmcp** (DW-147, DW-151): while dawmcp's executable on disk is newer than its launch, every tool result (errors too) ends with an extra text item `stale: dawmcp binary rebuilt since launch; restart the MCP server …`. It doesn't restart itself (the session's project would be lost). The engine is linked into the binary, so its date covers engine changes. `scripts/dawmcp.sh` records its build check in `.build/debug/dawmcp.stamp` instead of touching the binary, so a build that changes nothing doesn't mark a running server stale. `scripts/dawmcp.sh --help` and 14's *Agent verification recipe* say so.
+- **Also:** `midi.inject`'s summary (`dawctl methods`, the tool description) names `source?` (DW-285). `dawctl`'s fixture lookup is `ControlFixtures.defaultDirectories()` (DW-132). `GoldenEngine` and `EngineClient` share one `TelemetryPOD` conversion, `EngineClient.telemetry(from:)` (DW-240).
+
+Affected: T-098 only. Tests: `ToolingFollowupTests` (DAWControlTests), `CallOrderTests` and `LauncherTests` (DawmcpTests), `EngineTelemetryConversionTests` (GoldenTests).
+
 ### `dawctl`
 | ID | Requirement |
 |---|---|

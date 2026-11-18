@@ -198,32 +198,8 @@ final class GoldenEngine: EngineProtocol {
     // MARK: Observability
 
     func telemetry() -> EngineTelemetry {
-        let t = facade.telemetry()
-        var out = EngineTelemetry()
-        out.dspLoadPercent = t.dspLoadPercent
-        out.lastBlockLoadPercent = t.lastBlockLoadPercent
-        out.xruns = t.xruns
-        out.rtViolations = t.rtViolations
-        out.graphEpoch = t.graphEpoch
-        out.oversizeBlocks = t.oversizeBlocks
-        out.retireQueueFullBlocks = t.retireQueueFullBlocks
-        out.deviceOutputLatency = t.deviceOutputLatency
-        out.graphLatency = t.graphLatency
-        out.outputLatency = t.outputLatency
-        out.numNodeLatencies = t.numNodeLatencies
-        out.graphVersion = t.graphVersion
-        out.blocksRendered = t.blocksRendered
-        out.paramsAllocated = t.paramsAllocated
-        out.paramsPendingFree = t.paramsPendingFree
-        out.assetsLoaded = t.assetsLoaded
-        out.eventsDropped = t.eventsDropped
-        out.sampleRate = t.sampleRate
-        out.deviceRunning = t.deviceRunning
-        out.outputDeviceID = t.outputDeviceID
-        out.processorOverloads = t.processorOverloads
-        out.renderOverruns = t.renderOverruns
-        out.nanBlocks = t.nanBlocks  // DW-142 (T-070); T-077 reads it in effects_silence_nan_guard
-        return out
+        // DW-240 (T-098): EngineClient's conversion, so no TelemetryPOD field is dropped here.
+        EngineClient.telemetry(from: facade.telemetry())
     }
 
     func nodeLatencies() -> [NodeLatency] {

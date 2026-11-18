@@ -299,3 +299,13 @@ let package = Package(
 for target in package.targets where target.name == "EmberStudioShell" || target.name == "EmberStudioShellTests" {
     target.dependencies.append("PluginCatalog")
 }
+
+// T-098 (DW-016): plugins.* in DAWControl run the catalog headless, with the PluginScanner binary
+// next to dawctl/dawmcp (the tests launch it, so `swift test` builds it). Appended: Package.swift
+// is add-only while several workers change it.
+for target in package.targets where target.name == "DAWControl" || target.name == "DAWControlTests" {
+    target.dependencies.append("PluginCatalog")
+}
+for target in package.targets where ["DAWControlTests", "DawmcpTests"].contains(target.name) {
+    target.dependencies.append("PluginScanner")
+}

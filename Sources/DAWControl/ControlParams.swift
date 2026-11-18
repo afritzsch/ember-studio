@@ -489,3 +489,138 @@ public struct TestFixtureResult: Codable, Hashable, Sendable {
     /// Requests left out because they don't build the project (renders, analysis).
     public var skipped: Int
 }
+
+// MARK: plugins.* (T-098, DW-016)
+
+/// T-098 (DW-016): one plugin of the scan cache (PLUG-004), as `plugins.list`/`plugins.blocked`
+/// report it: the scanner's `PluginDescriptorPOD` fields plus its status.
+public struct ControlPlugin: Codable, Hashable, Sendable {
+    /// `au` or `vst3`.
+    public var format: String
+    /// AU: `type:subtype:manufacturer`; VST3: `path#classUID`. A blocked VST3 bundle the scanner
+    /// couldn't report on: the bundle path. `plugins.retry`/`plugins.unblock` take this as `id`.
+    public var identifier: String
+    public var name: String
+    public var vendor: String
+    public var version: String
+    public var isInstrument: Bool
+    public var hasSidechain: Bool
+    public var numParams: UInt32
+    /// `ok` or `blocked` (PLUG-001).
+    public var status: String
+    /// Why it is blocked; absent for a usable plugin.
+    public var reason: String?
+    /// Blocked because its scan ran out of time (T-094, DW-275); a retry gets a longer limit.
+    public var timedOut: Bool?
+
+    public init(format: String, identifier: String, name: String, vendor: String, version: String,
+                isInstrument: Bool, hasSidechain: Bool, numParams: UInt32, reason: String? = nil, timedOut: Bool = false) {
+        self.format = format
+        self.identifier = identifier
+        self.name = name
+        self.vendor = vendor
+        self.version = version
+        self.isInstrument = isInstrument
+        self.hasSidechain = hasSidechain
+        self.numParams = numParams
+        status = reason == nil ? "ok" : "blocked"
+        self.reason = reason
+        self.timedOut = reason != nil && timedOut ? true : nil
+    }
+
+    public var isBlocked: Bool { status == "blocked" }
+}
+
+/// T-098: what a scan or retry did (`PluginCatalog.RefreshSummary`).
+public struct ControlPluginScanSummary: Codable, Hashable, Sendable {
+    /// New or changed candidates scanned now.
+    public var scanned: Int
+    /// Those candidates: AU identifiers or VST3 bundle paths, in scan order (headless only; the
+    /// app's plugin manager keeps counts).
+    public var scannedCandidates: [String]?
+    public var unchanged: Int
+    public var removed: Int
+    /// Usable and blocked plugins in the cache afterwards.
+    public var plugins: Int
+    public var blocked: Int
+    /// The time limit each scan had, in seconds.
+    public var timeoutSeconds: Double?
+    /// Why a param was not used (attach mode scans with the app's own limit).
+    public var note: String?
+
+    public init(scanned: Int, scannedCandidates: [String]? = nil, unchanged: Int, removed: Int, plugins: Int = 0,
+                blocked: Int = 0, timeoutSeconds: Double? = nil, note: String? = nil) {
+        self.scanned = scanned
+        self.scannedCandidates = scannedCandidates
+        self.unchanged = unchanged
+        self.removed = removed
+        self.plugins = plugins
+        self.blocked = blocked
+        self.timeoutSeconds = timeoutSeconds
+        self.note = note
+    }
+}
+
+/// T-098 (DW-016): `plugins.scan {timeoutSeconds?}`.
+public struct PluginsScanParams: Codable, Hashable, Sendable {
+    /// The time limit of each plugin's scan, in seconds (default 30, PLUG-001). Headless only; the
+    /// app scans with its own limit.
+    public var timeoutSeconds: Double?
+}
+
+/// T-098: `plugins.list` → `{plugins, cachePath}` (usable plugins) and `plugins.blocked` →
+/// `{blocked, cachePath}`.
+public struct PluginsListResult: Codable, Hashable, Sendable {
+    public var plugins: [ControlPlugin]?
+    public var blocked: [ControlPlugin]?
+    /// The `plugins.json` scan cache these come from (PLUG-004).
+    public var cachePath: String
+}
+
+/// T-098 (DW-016): `plugins.retry {id?, timeoutSeconds?}`.
+public struct PluginsRetryParams: Codable, Hashable, Sendable {
+    /// A blocked plugin's `identifier` (`plugins.blocked`). Default: every blocked plugin.
+    public var id: String?
+    /// The retried scans' time limit in seconds. Default: 120 s when a retried plugin timed out
+    /// (the plugin manager's "Retry (120 s)", DW-275), else the scanner's 30 s.
+    public var timeoutSeconds: Double?
+}
+
+/// T-098 (DW-016): `plugins.unblock {id?}`.
+public struct PluginsUnblockParams: Codable, Hashable, Sendable {
+    /// A blocked plugin's `identifier`. Default: every blocked plugin.
+    public var id: String?
+}
+
+public struct PluginsRetryResult: Codable, Hashable, Sendable {
+    /// The identifiers that were blocked and were scanned again.
+    public var retried: [String]
+    public var scan: ControlPluginScanSummary
+    /// Still blocked afterwards, among the retried ones.
+    public var stillBlocked: [ControlPlugin]
+}
+
+public struct PluginsUnblockResult: Codable, Hashable, Sendable {
+    /// Forgotten from the cache; the next `plugins.scan` scans them again.
+    public var unblocked: [String]
+}
+
+// MARK: engine.paramDisplay (T-098, DW-289)
+
+/// T-098 (DW-289): `engine.paramDisplay {node, param, value?}`.
+public struct EngineParamDisplayParams: Codable, Hashable, Sendable {
+    /// The device slot hosting the plugin (as `engine.pluginInfo`'s `slot`).
+    public var node: NodeIDValue
+    /// The param's `index` in `engine.pluginInfo`'s `params`.
+    public var param: Int
+    /// VST3: normalized 0…1; AU: in the param's range. Default: the param's current value.
+    public var value: Float?
+}
+
+public struct EngineParamDisplayResult: Codable, Hashable, Sendable {
+    public var node: NodeIDValue
+    public var param: Int
+    public var value: Float
+    /// The plugin's own string, without the unit; "" when it has none (the host formats the number).
+    public var display: String
+}

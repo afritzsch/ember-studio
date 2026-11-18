@@ -26,6 +26,11 @@ let usage = """
       --launch          with --attach: start this checkout's built app if nothing listens yet; it
                         keeps running after dawctl exits (stop it with Quit or `kill`)
       --progress        print progress of long requests (render.offline, CTL-031) to stderr
+    Ctrl-C during render.offline sends render.cancel (over a side connection with --attach), so
+    the render stops and its file is deleted; dawctl then exits 1 (a second Ctrl-C exits at once).
+    plugins.* scan with PluginScanner next to dawctl into <checkout>/.build/plugins/plugins.json
+    (a copy of the app's cache at first); $DAWCTL_PLUGIN_CACHE, $DAWCTL_VST3_DIRS (colon-separated)
+    and $DAWCTL_AU=0 (no audio units) change that.
     serve runs a headless dispatcher behind a control socket (CTL-030) until it is killed or
     --parent-pid exits; the default socket is $TMPDIR/emberstudio-<pid>.sock.
     Scripts hold one request per line: {"method": …, "params": {…}} or `method {params}`;
@@ -113,6 +118,10 @@ enum Target {
     case attached(ControlSocketClient)
 
     func handle(_ request: RPCRequest) async -> RPCResponse? {
+        // DW-283 (T-098): Ctrl-C while this render runs cancels it.
+        let isRender = request.method == ControlMethod.renderOffline.rawValue && request.id != nil
+        if isRender, let id = request.id { RenderInterrupt.running = (self, id) }
+        defer { if isRender { RenderInterrupt.running = nil } }
         let printing = showProgress
         switch self {
         case .headless(let dispatcher):
@@ -128,6 +137,75 @@ enum Target {
                 return RPCResponse(id: request.id, error: error.rpcError)
             }
         }
+    }
+}
+
+/// DW-283 (T-098): Ctrl-C (SIGINT) during `render.offline` sends `render.cancel` for it, in-process
+/// headless or over a side connection when attached (the app serves one connection's requests in
+/// order, so a cancel behind the render would wait for it). The render then fails with
+/// `cancelled` and deletes its partial file, and dawctl exits 1 as for any failed request. Ctrl-C
+/// with no render running, a second Ctrl-C, or a render that hasn't ended 10 s later exit 130.
+@MainActor
+enum RenderInterrupt {
+    static var running: (target: Target, id: RPCID)? {
+        didSet { renderRunning.set(running != nil) }
+    }
+    static var interrupted = false
+    static var socketPath: String?
+    private static var source: DispatchSourceSignal?
+    /// `running != nil`, readable off the main actor: the REPL blocks the main thread in readLine,
+    /// so the signal is handled on a queue of its own and only goes to the main actor for a render
+    /// (which awaits, leaving the main actor free).
+    private nonisolated static let renderRunning = Flag()
+
+    static func install() {
+        signal(SIGINT, SIG_IGN)
+        let source = DispatchSource.makeSignalSource(signal: SIGINT, queue: DispatchQueue(label: "dawctl.sigint"))
+        // @Sendable: not main-actor isolated, since it runs on the signal queue.
+        source.setEventHandler { @Sendable in
+            guard renderRunning.get() else { exit(130) }
+            DispatchQueue.main.async { MainActor.assumeIsolated { interrupt() } }
+        }
+        source.resume()
+        self.source = source
+    }
+
+    private static func interrupt() {
+        guard let (target, id) = running, !interrupted else { exit(130) }
+        interrupted = true
+        FileHandle.standardError.write(Data("dawctl: interrupted; cancelling render.offline\n".utf8))
+        Task { @MainActor in
+            // The render may not have reached its engine job yet (graph build): ask until it has.
+            for _ in 0..<100 where running != nil {
+                if await cancel(target, id) { break }
+                try? await Task.sleep(for: .milliseconds(100))
+            }
+            try? await Task.sleep(for: .seconds(10))
+            FileHandle.standardError.write(Data("dawctl: render.offline didn't stop; exiting\n".utf8))
+            exit(130)
+        }
+    }
+
+    final class Flag: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value = false
+        func set(_ newValue: Bool) { lock.withLock { value = newValue } }
+        func get() -> Bool { lock.withLock { value } }
+    }
+
+    /// Whether the render was cancelled.
+    private static func cancel(_ target: Target, _ id: RPCID) async -> Bool {
+        let params: JSONValue = ["id": (try? JSONValue(encoding: id)) ?? .null]
+        let result: JSONValue?
+        switch target {
+        case .headless(let dispatcher):
+            result = try? await dispatcher.call(.renderCancel, params)
+        case .attached:
+            guard let socketPath, let side = try? ControlSocketClient(path: socketPath) else { return false }
+            defer { side.close() }
+            result = try? await side.call(.renderCancel, params)
+        }
+        return result?["cancelled"]?.boolValue == true
     }
 }
 
@@ -149,6 +227,7 @@ enum Target {
     guard let path = socketOverride ?? root.map({ ControlSocketPath.forCheckout($0) }) else {
         fail("--attach: not inside a checkout (no Package.swift above the current folder); pass --socket <path>")
     }
+    RenderInterrupt.socketPath = path  // DW-283
     do {
         guard launch, let root else { return try ControlSocketClient(path: path) }
         let app = try await AppLauncher.attach(
@@ -168,11 +247,12 @@ enum Target {
     var status = Exit.ok
     for line in script.lines {
         guard let response = await target.handle(line.request) else { continue }
+        defer { if RenderInterrupt.interrupted { status = .requestFailed } }
         print(response.line())
         if let error = response.error {
             status = .requestFailed
             FileHandle.standardError.write(Data("dawctl: line \(line.number): \(error.message)\n".utf8))
-            if !keepGoing { break }
+            if !keepGoing || RenderInterrupt.interrupted { break }
         }
     }
     return status
@@ -275,6 +355,8 @@ enum Target {
         _ = signalSources
     }
 }
+
+if command != "serve" { RenderInterrupt.install() }  // DW-283
 
 let status: Exit
 switch command {

@@ -287,8 +287,14 @@ public final class EngineClient: EngineProtocol {
     // MARK: Observability
 
     public func telemetry() -> EngineTelemetry {
-        // DW-049: field by field.
-        let t = facade.telemetry()
+        Self.telemetry(from: facade.telemetry())
+    }
+
+    /// DW-049: field by field. DW-240 (T-098): the one conversion of `TelemetryPOD`; `GoldenEngine`
+    /// (the golden tests' engine, through `@testable`) uses it too, so a new field mapped here
+    /// reaches both. `EngineTelemetryConversionTests` fails when an `EngineTelemetry` field is
+    /// left unmapped.
+    static func telemetry(from t: daw.TelemetryPOD) -> EngineTelemetry {
         var out = EngineTelemetry()
         out.dspLoadPercent = t.dspLoadPercent
         out.lastBlockLoadPercent = t.lastBlockLoadPercent

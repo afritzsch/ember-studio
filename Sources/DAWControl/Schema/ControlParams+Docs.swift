@@ -185,3 +185,32 @@ extension UIPerformParams: JSONSchemaDocumented {
         ]
     }
 }
+
+// T-098 (DW-016, DW-289)
+
+extension PluginsScanParams: JSONSchemaDocumented {
+    public static var jsonSchemaDocs: [String: String] {
+        ["timeoutSeconds": "Each plugin's scan time limit in seconds (default 30; a plugin over it is blocked). Headless only"]
+    }
+}
+
+extension PluginsRetryParams: JSONSchemaDocumented {
+    public static var jsonSchemaDocs: [String: String] {
+        ["id": "A blocked plugin's identifier from plugins.blocked. Default: every blocked plugin",
+         "timeoutSeconds": "The retried scans' limit in seconds. Default 120 when a retried plugin timed out, else 30"]
+    }
+}
+
+extension PluginsUnblockParams: JSONSchemaDocumented {
+    public static var jsonSchemaDocs: [String: String] {
+        ["id": "A blocked plugin's identifier from plugins.blocked. Default: every blocked plugin"]
+    }
+}
+
+extension EngineParamDisplayParams: JSONSchemaDocumented {
+    public static var jsonSchemaDocs: [String: String] {
+        ["node": "The device slot's model ID (engine.pluginInfo's slot)",
+         "param": "The param's index in engine.pluginInfo's params",
+         "value": "VST3: normalized 0…1; AU: in the param's min…max. Default: its current value"]
+    }
+}

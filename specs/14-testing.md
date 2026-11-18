@@ -68,6 +68,8 @@ When an agent finishes an audio-affecting task it must:
 
 Notes (DW-135, DW-122):
 - Fixtures with `@node` test nodes (e.g. FakeLatencyNode, SineNode) render silence through `dawctl`/`dawmcp`: only the GoldenTests harness registers the test-only nodes. Check those fixtures with `swift test --filter GoldenTests`.
+- A stale `dawmcp` (DW-147, DW-151, T-098): the MCP client starts `dawmcp` once (at worktree setup), and it keeps the build it started with, so commands, tools and engine changes made since are missing (`unknownCommandType`, old renders). Once its binary on disk is newer than the process (a rebuild by `scripts/dawmcp.sh` or `swift build`), every tool result carries an extra text item after its JSON: `stale: dawmcp binary rebuilt since launch; restart the MCP server …`. dawmcp doesn't restart itself, because the session's project would be lost. Restart the server from the client (Claude Code: `/mcp`), or verify with a freshly built `.build/debug/dawctl` (or `dawmcp` over stdio). A build that changes nothing leaves the binary's date alone (the launcher keeps a stamp file), so it doesn't raise the warning.
+- Pipelined calls (DW-163, T-098): `dawmcp` runs `tools/call` requests one at a time in the order they arrive (only `daw_render_cancel` skips the queue), so a script can send a fixture, edits and a render back to back.
 - Real-device switches: `DAW_SKIP_DEVICE_TESTS=1` skips the CoreAudio device runs; `DAW_AUDIBLE_DEVICE_TEST=1` plays IO-001's sine audibly; `DAW_DEVICE_INPUT_TESTS=1` runs the input/duplex device checks (IO-004); `DAW_DEVICE_EVENT_TESTS=1` runs the real sample-rate flip (IO-020). The opt-in ones are off by default.
 
 ## CI jobs (T-084)
