@@ -54,7 +54,7 @@ final class DawTools {
     /// Tools that only look (MCP `readOnlyHint`).
     nonisolated static let readOnly: Set<ControlMethod> = [
         .projectGet, .commandSchema, .audioAnalyze, .audioCompare, .engineTelemetry, .engineEvents, .engineParamInfo,
-        .uiState,
+        .uiState, .engineMeters,
     ]
 
     private nonisolated static func description(_ method: ControlMethod) -> String {
@@ -99,7 +99,13 @@ final class DawTools {
         if sender != nil { report = { @Sendable update in progress.yield(update) } }
         let result: JSONValue
         do {
-            if let attached {
+            if let attached, method == .renderCancel {
+                // DW-220 (T-096): the app serves one connection's requests in order, so a cancel
+                // sent behind the render it cancels would wait for it. It goes over its own.
+                let side = try ControlSocketClient(path: attached.socketPath)
+                defer { side.close() }
+                result = try await side.call(method, params)
+            } else if let attached {
                 result = try await attached.client.call(method, params, progress: report)
             } else {
                 var handler: ControlProgressHandler?

@@ -58,6 +58,13 @@ final class ExportModel {
 
     /// A render is running (started from this dialog).
     private(set) var isRunning = false
+    /// DW-220 (T-096): Cancel was pressed for the running render; it ends as cancelled (the engine
+    /// deletes the partial file) unless it finished first.
+    private(set) var isCancelling = false
+    /// The running render's engine job, once it is queued.
+    @ObservationIgnored private var job: JobID?
+    /// The last export ended because it was cancelled.
+    private(set) var lastCancelled = false
     /// 0…1 of the running render (frames so far / range + maximum tail).
     private(set) var progress: Double = 0
     /// The last finished export.
@@ -220,14 +227,17 @@ final class ExportModel {
         let spec = spec
         let includeMetronome = includeMetronome
         isRunning = true
+        isCancelling = false
+        lastCancelled = false
+        job = nil
         progress = 0
         lastError = nil
         Task { @MainActor [weak self] in
             do throws(DAWError) {
                 let render = try await Self.render(window: window, engine: engine, from: span.from, to: span.to, spec: spec,
-                                                   includeMetronome: includeMetronome, timeout: self?.renderTimeout ?? .seconds(600)) {
-                    [weak self] fraction in self?.progress = fraction
-                }
+                                                   includeMetronome: includeMetronome, timeout: self?.renderTimeout ?? .seconds(600),
+                                                   progress: { [weak self] fraction in self?.progress = fraction },
+                                                   started: { [weak self] job in self?.jobStarted(job) })
                 self?.finished(.success(Finished(path: destination.path, render: render)), window: window)
             } catch {
                 self?.finished(.failure(error), window: window)
@@ -235,8 +245,29 @@ final class ExportModel {
         }
     }
 
+    /// DW-220 (T-096): "Cancel" while exporting. The engine stops the render before its next block
+    /// and deletes the partial file; the dialog stays open with its settings.
+    func cancel() {
+        guard isRunning, !isCancelling else { return }
+        isCancelling = true
+        if let job { _ = engine?.cancelJob(job) }  // not queued yet: jobStarted cancels it
+    }
+
+    private func jobStarted(_ job: JobID) {
+        self.job = job
+        if isCancelling { _ = engine?.cancelJob(job) }
+    }
+
     private func finished(_ outcome: Result<Finished, DAWError>, window: ProjectWindowModel) {
         isRunning = false
+        job = nil
+        defer { isCancelling = false }
+        if case .failure(let error) = outcome, error == Self.cancelledError {
+            lastCancelled = true
+            progress = 0
+            window.toasts.post(.info, .info, title: "Export cancelled", message: "No file was written.")
+            return
+        }
         switch outcome {
         case .success(let done):
             progress = 1
@@ -255,9 +286,13 @@ final class ExportModel {
     /// Renders `[from, to)` with `spec` on `engine`: engine sync flushed and imported takes loaded,
     /// the graph built, the click held off unless `includeMetronome` (DW-177), then the job polled
     /// for progress. The File menu's dialog and `AppModel.export` both come here.
+    ///
+    /// DW-220 (T-096): `started` hears the engine job as soon as it is queued (for `cancelJob`); a
+    /// cancelled job throws `cancelledError`.
     static func render(window: ProjectWindowModel, engine: any EngineProtocol, from: Tick, to: Tick, spec: ExportSpec,
                        includeMetronome: Bool, timeout: Duration = .seconds(600),
-                       progress: @MainActor (Double) -> Void = { _ in }) async throws(DAWError) -> OfflineRenderResult {
+                       progress: @MainActor (Double) -> Void = { _ in },
+                       started: @MainActor (JobID) -> Void = { _ in }) async throws(DAWError) -> OfflineRenderResult {
         let sync = window.store.engineSync
         if let sync {
             await sync.settleLoads(timeout: .seconds(30))
@@ -281,6 +316,7 @@ final class ExportModel {
         defer { sync?.isMetronomeSuppressed = false }
         let job = engine.renderOffline(from: from, to: to, spec: spec)
         guard job != 0 else { throw .engine(code: .internal, detail: "the engine refused the export") }
+        started(job)
         let clock = ContinuousClock()
         let deadline = clock.now + timeout
         while true {
@@ -291,6 +327,8 @@ final class ExportModel {
                 return status.render ?? OfflineRenderResult()
             case .failed:
                 throw status.error ?? .engine(code: .internal, detail: "export failed")
+            case .cancelled:
+                throw cancelledError
             case .unknown:
                 throw .engine(code: .notFound, detail: "the engine lost the export job")
             case .queued, .running:
@@ -300,6 +338,9 @@ final class ExportModel {
             try? await Task.sleep(for: .milliseconds(20))
         }
     }
+
+    /// DW-220 (T-096): what `render` throws for a cancelled job.
+    static let cancelledError = DAWError.engine(code: .internal, detail: "export cancelled")
 
     // MARK: Text
 
@@ -358,8 +399,9 @@ final class ExportModel {
     /// `export.dialog` (always: open/close the panel, like File > Export…); while the panel is open
     /// `export.close`, `export.start`, `export.choose`, `export.range.<loop|project|selection>`,
     /// `export.format.<wav|aiff|caf>`, `export.sampleFormat.<int16|int24|float32>`, `export.dither`,
-    /// `export.normalize`, `export.tail`, `export.tailMax.<2|5|10|30>` and `export.metronome`. The
-    /// choices are toggles (the one in force is on). Settings are disabled while a render runs.
+    /// `export.normalize`, `export.tail`, `export.tailMax.<2|5|10|30>` and `export.metronome`, and
+    /// while a render runs `export.cancel` (DW-220, T-096; disabled once pressed). The choices are
+    /// toggles (the one in force is on). Settings are disabled while a render runs.
     var controls: [UIControl] {
         let hasEngine = engine != nil
         var controls: [UIControl] = [
@@ -370,6 +412,11 @@ final class ExportModel {
         controls += [
             .button("export.close", "Close Export") { [weak self] in self?.isOpen = false },
             .button("export.start", "Export", enabled: idle && hasEngine && isAvailable(range)) { [weak self] in self?.start() },
+        ]
+        if isRunning {  // DW-220 (T-096)
+            controls.append(.button("export.cancel", "Cancel Export", enabled: !isCancelling) { [weak self] in self?.cancel() })
+        }
+        controls += [
             .button("export.choose", "Choose Destination…", enabled: idle) { [weak self] in self?.choose() },
         ]
         controls += ExportRange.allCases.map { r in

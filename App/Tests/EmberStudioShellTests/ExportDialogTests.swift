@@ -149,6 +149,35 @@ struct ExportDialogTests {
         #expect(toast.message.contains("16-bit AIFF") && toast.message.contains("normalized"))
     }
 
+    @Test("DW-220 (T-096): while exporting the dialog has Cancel (export.cancel); it cancels the engine job, toasts, keeps the panel open with no error, and the next export runs")
+    func cancelExport() async throws {
+        let (window, engine, _) = try makeExportWindow()
+        let export = window.exportDialog
+        engine.holdRenders = true
+        try perform(window, "export.dialog")
+        #expect(!window.controls.map(\.id).contains("export.cancel"), "only while exporting")
+        try perform(window, "export.start")
+        for _ in 0..<500 where !engine.calls.contains(where: { if case .renderOffline = $0 { true } else { false } }) {
+            try await Task.sleep(for: .milliseconds(2))
+        }
+        #expect(export.isRunning)
+        try perform(window, "export.cancel")
+        let cancelEnabled = try window.control("export.cancel").isEnabled
+        #expect(export.isCancelling && !cancelEnabled, "pressed once")
+        await waitForExport(export)
+        #expect(!export.isRunning && export.lastCancelled && export.lastError == nil && export.lastResult == nil)
+        #expect(export.isOpen, "the panel stays open to try again")
+        #expect(engine.calls.contains { if case .cancelJob = $0 { true } else { false } })
+        let toast = try #require(window.toasts.toasts.last)
+        #expect(toast.severity == .info && toast.title == "Export cancelled")
+        #expect(!window.controls.map(\.id).contains("export.cancel"))
+
+        engine.holdRenders = false
+        try perform(window, "export.start")
+        await waitForExport(export)
+        #expect(!export.lastCancelled && export.lastResult != nil && !export.isOpen)
+    }
+
     @Test("DW-177, T-090: Include Metronome starts in the metronome's state; off, the click is left out (on slot held at 0 for the render)")
     func metronomeLeftOut() async throws {
         let (window, engine, _) = try makeExportWindow()

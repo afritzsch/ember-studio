@@ -82,6 +82,8 @@ public enum CommandRegistry {
         RestoreTakeFolder.self,
         SetCompSelection.self,
         RestoreComp.self,
+        // T-093: per-track MIDI input (MODEL-005, REC-011, DW-216)
+        SetTrackMidiInput.self,
     ]
 
     private static let table = Mutex<[String: any Command.Type]>(

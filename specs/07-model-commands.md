@@ -171,6 +171,12 @@ MODEL-005's `CreateTakeFolder` and `SetCompSelection` (types and invariants in 0
 - **`SetCompSelection {folderID, start, end, takeID}`** (REC-033): `[start, end)` inside the folder range plays `takeID`, a take of that folder; segments are cut at both ends and neighbours of the same take merge. Inverse: `RestoreComp {folderID, comp}` (the exact old comp; checked like any input, and its own inverse). Label "Select Take".
 - `RemoveAsset` and `SetSessionSampleRate` don't know take clips yet (T-080 discovered work): `validate()` rejects a removed asset a take uses (Debug), and take offsets aren't rescaled.
 
+### Contract delta (T-093), accepted (autobuild, see docs/autobuild/DECISIONS.md "T-093 model shape")
+Additive; nothing in the Interfaces above changes. Closes DW-216 (model side).
+- **`Track.midiInput: MidiInput {source, channel}`** (REC-011 per track, 09 same heading). `source` is `.all` or `.device(Int32)`, a CoreMIDI unique ID (`MidiInputInfo.uniqueID`); JSON `"all"` or the ID in decimal (`"-1234567"`). `channel` 0 is omni, 1…16 one channel. The default is all/omni (T-053's routing). It is optional in JSON: absent reads the default, and the default isn't written (a track stores nil while it is the default), so files from before T-093 open, and save, byte-identical; no format version or migration. `validate()` (and so open, DW-111) rejects a channel above 16 and a non-default input on an audio track; a malformed source fails decoding (`invalidProject`).
+- **`SetTrackMidiInput {trackID, source, channel}`** (MODEL-005): MIDI tracks only (`invalidArgument` for an audio track or a channel above 16; `notFound` for an unknown track). A normal undoable command, label "Set MIDI Input"; the inverse sets the old input. Unlike `ArmTrack` it isn't history-exempt (the input is a document setting, DECISIONS "T-093 model shape"). A source that isn't connected is accepted and kept. JSON: `{"type": "SetTrackMidiInput", "trackID": 3, "source": "all" | "<unique ID>", "channel": 0…16}`.
+- **Engine sync** (MODEL-021): not structural (no graph change). `EngineSync` pushes each MIDI track's non-default input with `EngineProtocol.setMidiInput(track:_:)` when it changes, armed or not, before arming (so an armed track never hears the wrong input), and pushes the default for a track that goes back to it or is removed, and for every pushed track on `invalidate()` (the engine outlives the sync, DW-156).
+
 ## Status
 | ID | status | test |
 |---|---|---|

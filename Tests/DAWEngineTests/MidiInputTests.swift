@@ -29,6 +29,15 @@ struct MidiInputTests {
     @Test("T-053: a full queue and a full record buffer are counted, never block, and leave no note hanging")
     func overflow() { expectPasses(daw.testing.midiOverflowIsCounted()) }
 
+    @Test("REC-011 (T-093): each armed track hears only its source and channel filter; same key from two sources sounds once; a disconnected source delivers nothing; injected source IDs")
+    func perTrackFilter() { expectPasses(daw.testing.midiPerTrackFilter()) }
+
+    @Test("T-093: changing a track's MIDI input while notes, pedal or bend are held never hangs them; the filter outlives a disarm")
+    func filterChangeNeverHangs() { expectPasses(daw.testing.midiFilterChangeNeverHangs()) }
+
+    @Test("REC-012 (T-093): each track records what its filter passed, also across a change mid-take; a track that heard nothing gets no take")
+    func recordsPerTrack() { expectPasses(daw.testing.midiRecordsPerTrack()) }
+
     @Test("REC-010..012 through a realtime facade: play-through is audible, the recording lands at sample − output latency; 0 RT violations")
     func throughFacade() { expectPasses(daw.testing.midiThroughFacade()) }
 

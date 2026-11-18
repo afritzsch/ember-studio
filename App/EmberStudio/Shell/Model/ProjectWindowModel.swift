@@ -42,8 +42,13 @@ struct TrackHeaderModel: Identifiable {
     /// REC-021 (T-054): what monitoring this track's input costs, shown read-only in its monitor
     /// menu. Audio tracks only (MIDI play-through ignores the mode, REC-011).
     var monitoringLatency: MonitoringLatency? = nil
+    /// T-093 (DW-216): a MIDI track's input picker (nil for audio tracks).
+    var midiInputMenu: TrackMidiInputMenu? = nil
 
-    var controls: [UIControl] { [selectControl, armControl, muteControl, soloControl] + monitorControls + inputControls }
+    var controls: [UIControl] {
+        [selectControl, armControl, muteControl, soloControl] + monitorControls + inputControls
+            + (midiInputMenu?.controls ?? [])  // T-093
+    }
 
     /// REC-021 (T-054): software monitoring latency, device input + output + graph latency
     /// (`EngineTelemetry.monitoringLatency`), in samples and at the session rate in ms.
@@ -106,6 +111,11 @@ final class ProjectWindowModel: Identifiable {
     private(set) var transport = TransportState()
     /// The engine's telemetry as of the last poll (the toolbar's CPU and xrun readout).
     private(set) var telemetry = EngineTelemetry()
+    /// T-093: the engine's MIDI sources (`midiInputs()`) for the MIDI input pickers, as of the last
+    /// refresh (every `midiInputRefreshPolls` polls; CoreMIDI's list itself changes every few s).
+    private(set) var midiInputs: [MidiInputInfo] = []
+    @ObservationIgnored private var midiInputPolls = 0
+    static let midiInputRefreshPolls = 30
 
     /// Play/record states asked of the engine that its transport doesn't show yet: a realtime
     /// engine applies transport commands at its next block (TIME-004), so reading it right after
@@ -267,7 +277,8 @@ final class ProjectWindowModel: Identifiable {
                         self?.perform(ArmTrack(trackID: track.id, armed: track.armed, inputPair: pair))
                     }
                 } : [],
-                monitoringLatency: track.kind == .audio ? .init(telemetry) : nil)  // REC-021 (T-054)
+                monitoringLatency: track.kind == .audio ? .init(telemetry) : nil,  // REC-021 (T-054)
+                midiInputMenu: TrackMidiInputMenu.make(for: track, inputs: midiInputs) { [weak self] in self?.perform($0) })
         }
     }
 
@@ -520,5 +531,17 @@ final class ProjectWindowModel: Identifiable {
         pluginEditors.refresh()  // T-063 (PLUG-017): removed slots, safe mode, sizes, replaced instances
         automation.transportPolled(transport)  // T-075 (AUTO-006/007)
         deviceChain.refresh()  // T-065: plugins' own values, loads
+        refreshMidiInputs()  // T-093
+    }
+
+    /// T-093: re-reads the engine's MIDI sources now and then (assigned only on a change).
+    func refreshMidiInputs(force: Bool = false) {
+        if !force, midiInputPolls % Self.midiInputRefreshPolls != 0 {
+            midiInputPolls += 1
+            return
+        }
+        midiInputPolls = 1
+        let inputs = engine?.midiInputs() ?? []
+        if inputs != midiInputs { midiInputs = inputs }
     }
 }

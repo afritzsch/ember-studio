@@ -16,6 +16,8 @@ import Foundation
 /// | -32002 | `noProject`                       | the method needs a project; call `project.new` first |
 /// | -32003 | `timeout`                         | a job, graph build or `transport.wait` ran out of time |
 /// | -32004 | `attachFailed`                    | attach mode (CTL-011/023): the app couldn't be launched or reached, or closed the connection |
+/// | -32005 | `cancelled`                       | `render.cancel` stopped this `render.offline` (T-096, DW-220) |
+/// | -32006 | `notSupported`                    | the engine can't do it in its mode, e.g. `engine.previewNote` offline (T-096, DW-189) |
 ///
 /// `remote` is an error the app returned over the socket (attach mode), passed on unchanged.
 /// `withData` adds context fields to `data` (a batch's failed `index`, a fixture's `line`).
@@ -30,6 +32,10 @@ public enum ControlError: Error, Hashable, Sendable {
     case noProject
     case timeout(String)
     case attachFailed(String)
+    /// T-096 (DW-220).
+    case cancelled(String)
+    /// T-096 (DW-189).
+    case notSupported(String)
     case remote(RPCError)
     indirect case withData(ControlError, [String: JSONValue])
 
@@ -46,6 +52,8 @@ public enum ControlError: Error, Hashable, Sendable {
         case .noProject: -32002
         case .timeout: -32003
         case .attachFailed: -32004
+        case .cancelled: -32005
+        case .notSupported: -32006
         case .remote(let error): error.code
         }
     }
@@ -64,6 +72,8 @@ public enum ControlError: Error, Hashable, Sendable {
         case .noProject: "noProject"
         case .timeout: "timeout"
         case .attachFailed: "attachFailed"
+        case .cancelled: "cancelled"
+        case .notSupported: "notSupported"
         case .remote(let error): error.dawError ?? "remote"
         }
     }
@@ -73,7 +83,7 @@ public enum ControlError: Error, Hashable, Sendable {
         switch self {
         case .withData(let error, _): error.detail
         case .parseError(let s), .invalidRequest(let s), .invalidParams(let s), .internalError(let s), .timeout(let s),
-             .attachFailed(let s):
+             .attachFailed(let s), .cancelled(let s), .notSupported(let s):
             s
         case .methodNotFound(let method): "no method \"\(method)\""
         case .remote(let error): error.data?["detail"]?.stringValue ?? error.message

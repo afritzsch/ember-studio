@@ -40,6 +40,11 @@ public final class FakeEngine: EngineProtocol {
         case setMonitorInput(Bool)
         /// T-080 (REC-034).
         case setRecordOptions(midiLoopTakes: Bool)
+        /// T-096 (DW-220).
+        case cancelJob(JobID)
+        /// T-093 (REC-011 per track).
+        case setMidiInput(track: NodeIDValue, Track.MidiInput)
+        case injectMidiFromSource(Int32, status: UInt8, data1: UInt8, data2: UInt8)
     }
 
     private struct State {
@@ -63,8 +68,11 @@ public final class FakeEngine: EngineProtocol {
         var recordingDirectory = ""
         var armedMidi: Set<NodeIDValue> = []  // T-053
         var midiInputs: [MidiInputInfo] = []
+        var midiInputFilters: [NodeIDValue: Track.MidiInput] = [:]  // T-093
         var exportSpecs: [ExportSpec] = []  // T-082
         var failNextRender: DAWError?  // T-082
+        var holdRenders = false  // T-096
+        var meters: [NodeIDValue: MeterReading] = [:]  // T-096
         var suspendedLanes: Set<ModelID> = []  // T-075 (AUTO-006)
         var suspensionLog: [(lane: ModelID, suspended: Bool)] = []  // T-075
     }
@@ -292,6 +300,26 @@ public final class FakeEngine: EngineProtocol {
         state.withLock { $0.calls.append(.injectMidi(atSample: atSample, relativeToNow: relativeToNow, status: status, data1: data1, data2: data2)) }
     }
 
+    /// T-093: recorded; `midiInputFilters` holds the non-default ones, like the router.
+    public func setMidiInput(track: NodeIDValue, _ input: Track.MidiInput) {
+        state.withLock { s in
+            s.calls.append(.setMidiInput(track: track, input))
+            s.midiInputFilters[track] = input.isDefault ? nil : input
+        }
+    }
+
+    /// T-093: the tracks' MIDI input filters the engine has (non-default ones only).
+    public var midiInputFilters: [NodeIDValue: Track.MidiInput] { state.withLock { $0.midiInputFilters } }
+
+    /// T-093: recorded like `injectMidi`.
+    public func injectMidi(atSample: Int64, relativeToNow: Bool, status: UInt8, data1: UInt8, data2: UInt8,
+                           source: Int32?) throws(DAWError) {
+        guard let source else {
+            return try injectMidi(atSample: atSample, relativeToNow: relativeToNow, status: status, data1: data1, data2: data2)
+        }
+        state.withLock { $0.calls.append(.injectMidiFromSource(source, status: status, data1: data1, data2: data2)) }
+    }
+
     /// T-052: the last `setRecordingDirectory`.
     public var recordingDirectory: String { state.withLock { $0.recordingDirectory } }
 
@@ -347,6 +375,10 @@ public final class FakeEngine: EngineProtocol {
             var render = OfflineRenderResult()
             render.sampleRate = s.telemetry.sampleRate
             s.jobs[job] = EngineJobStatus(job: job, kind: .renderOffline, state: .succeeded, progress: 1, render: render)
+            if s.holdRenders {  // T-096: running until cancelJob or finishHeldRenders
+                s.jobs[job] = EngineJobStatus(job: job, kind: .renderOffline, state: .running, progress: 0.5)
+                return job
+            }
             if let error = s.failNextRender {  // T-082
                 s.failNextRender = nil
                 s.jobs[job] = EngineJobStatus(job: job, kind: .renderOffline, state: .failed, progress: 0, error: error,
@@ -354,6 +386,37 @@ public final class FakeEngine: EngineProtocol {
             }
             s.events.append(EngineEvent(kind: .jobFinished, subject: 2, job: job))
             return job
+        }
+    }
+
+    /// T-096 (DW-220): a held render ends as cancelled; finished or unknown jobs stay as they are.
+    public func cancelJob(_ job: JobID) -> Bool {
+        state.withLock { s in
+            s.calls.append(.cancelJob(job))
+            guard var status = s.jobs[job], status.kind == .renderOffline, !status.state.isFinished else { return false }
+            status.state = .cancelled
+            s.jobs[job] = status
+            s.events.append(EngineEvent(kind: .jobFinished, subject: 2, job: job))
+            return true
+        }
+    }
+
+    /// T-096 test hook: while true, `renderOffline` jobs stay running (progress 0.5) until
+    /// `cancelJob` or `finishHeldRenders()`.
+    public var holdRenders: Bool {
+        get { state.withLock { $0.holdRenders } }
+        set { state.withLock { $0.holdRenders = newValue } }
+    }
+
+    /// T-096 test hook: every held render succeeds now.
+    public func finishHeldRenders() {
+        state.withLock { s in
+            for (job, status) in s.jobs where status.kind == .renderOffline && !status.state.isFinished {
+                var render = OfflineRenderResult()
+                render.sampleRate = s.telemetry.sampleRate
+                s.jobs[job] = EngineJobStatus(job: job, kind: .renderOffline, state: .succeeded, progress: 1, render: render)
+                s.events.append(EngineEvent(kind: .jobFinished, subject: 2, job: job))
+            }
         }
     }
 
@@ -389,7 +452,9 @@ public final class FakeEngine: EngineProtocol {
 
     public func telemetry() -> EngineTelemetry { state.withLock { $0.telemetry } }
     public func nodeLatencies() -> [NodeLatency] { [] }
-    public func meter(_ node: NodeIDValue) -> MeterReading? { nil }
+    public func meter(_ node: NodeIDValue) -> MeterReading? { state.withLock { $0.meters[node] } }
+    /// T-096 test hook: what `meter(node)` reads (nil: no meter, the default).
+    public func setMeter(_ node: NodeIDValue, _ reading: MeterReading?) { state.withLock { $0.meters[node] = reading } }
 
     public func pollEvents(max: Int) -> [EngineEvent] {
         state.withLock { s in

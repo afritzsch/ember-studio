@@ -197,15 +197,15 @@ void MidiClipPlayer::beginLive(MidiEventWriter& out) DAW_RT {
         for (uint8_t channel = 0; channel < kNumChannels; ++channel) {
             for (uint8_t pitch = 0; pitch < 128; ++pitch) {
                 uint8_t velocity = 0;
-                if (!live_->heldNote(channel, pitch, velocity) || !roomForOn(out)) continue;
+                if (!live_->heldNote(id_, channel, pitch, velocity) || !roomForOn(out)) continue;
                 if (out.push(MidiEvent{0, 3, {uint8_t(kNoteOn | channel), pitch, velocity}}))
                     setLiveOn(channel, pitch, true);
             }
         }
-        livePedal_ = live_->pedalMask();
-        liveBend_ = live_->bendMask();
+        livePedal_ = live_->pedalMask(id_);
+        liveBend_ = live_->bendMask(id_);
     }
-    liveSpan_ = live_->events();
+    liveSpan_ = live_->events(id_);  // T-093: its track's filter applied
 }
 
 void MidiClipPlayer::playLive(MidiEventWriter& out, const MidiEvent& e) DAW_RT {

@@ -628,8 +628,10 @@ public struct EngineJobStatus: Hashable, Sendable, Codable {
         /// No such job.
         case unknown
         case queued, running, succeeded, failed
+        /// DW-220 (T-096): `cancelJob` stopped it (a render's partial file is deleted).
+        case cancelled
 
-        public var isFinished: Bool { self == .succeeded || self == .failed }
+        public var isFinished: Bool { self == .succeeded || self == .failed || self == .cancelled }
     }
 
     public var job: JobID
@@ -765,6 +767,14 @@ public protocol EngineProtocol: AnyObject, Sendable {
     func midiInputs() -> [MidiInputInfo]
     /// T-053 test seam (default: unsupported).
     func injectMidi(atSample: Int64, relativeToNow: Bool, status: UInt8, data1: UInt8, data2: UInt8) throws(DAWError)
+    /// T-093 (REC-011 per track): what MIDI track `track` hears, armed or not (see the extension at
+    /// the end of this file; default: ignored).
+    func setMidiInput(track: NodeIDValue, _ input: Track.MidiInput)
+    /// T-093 test seam: `injectMidi` as if from the source with `source` as its unique ID (nil: the
+    /// plain seam, which only "all sources" tracks hear). Default: the plain seam without a source,
+    /// unsupported with one.
+    func injectMidi(atSample: Int64, relativeToNow: Bool, status: UInt8, data1: UInt8, data2: UInt8,
+                    source: Int32?) throws(DAWError)
     func instantiatePlugin(slot: NodeIDValue, _ plugin: PluginDescriptor) -> JobID
     func pluginState(slot: NodeIDValue) -> Data
     func setPluginState(slot: NodeIDValue, _ state: Data)
@@ -780,6 +790,10 @@ public protocol EngineProtocol: AnyObject, Sendable {
 
     // Offline (IO-010..013)
     func renderOffline(from: Tick, to: Tick, spec: ExportSpec) -> JobID
+    /// DW-220 (T-096): cancels a queued or running `renderOffline` job; it ends as `.cancelled`
+    /// (poll for it) and its partial file is deleted. False for other jobs, unknown or finished
+    /// ones. See the extension at the end of this file (default: false).
+    func cancelJob(_ job: JobID) -> Bool
 
     // Device (04)
     func devices() -> [AudioDeviceInfo]
@@ -800,6 +814,13 @@ public protocol EngineProtocol: AnyObject, Sendable {
     /// Drains up to `max` queued events, oldest first.
     func pollEvents(max: Int) -> [EngineEvent]
     func paramInfoJSON(_ kind: NodeKind) -> String
+}
+
+// MARK: T-096 (DW-220)
+
+extension EngineProtocol {
+    /// Engines that can't cancel (test doubles) never do.
+    public func cancelJob(_ job: JobID) -> Bool { false }
 }
 
 // MARK: T-043 (UI-021)
@@ -1050,6 +1071,16 @@ extension EngineProtocol {
 /// T-054 additions to `EngineProtocol`, with defaults so test doubles compile unchanged.
 extension EngineProtocol {
     public func setMonitorInput(_ wanted: Bool) {}
+}
+
+/// T-093 additions to `EngineProtocol`, with defaults so test doubles compile unchanged.
+extension EngineProtocol {
+    public func setMidiInput(track: NodeIDValue, _ input: Track.MidiInput) {}
+    public func injectMidi(atSample: Int64, relativeToNow: Bool, status: UInt8, data1: UInt8, data2: UInt8,
+                           source: Int32?) throws(DAWError) {
+        guard source == nil else { throw .notImplemented("this engine can't inject MIDI from a source") }
+        try injectMidi(atSample: atSample, relativeToNow: relativeToNow, status: status, data1: data1, data2: data2)
+    }
 }
 
 // MARK: T-063 (PLUG-017, DW-204): plugin editors and the plugin's own edits

@@ -1,8 +1,9 @@
 #pragma once
 // REC-010 (T-053): CoreMIDI input. Every source the system has is connected to one MIDI 1.0 input
 // port (MIDIInputPortCreateWithProtocol) and gets a MidiInputRouter slot; each event list's
-// messages go to the router with their host timestamps (REC-011: every source reaches every armed
-// MIDI track, all channels).
+// messages go to the router with their host timestamps. The slot carries the source's unique ID,
+// which a track's input filter names it by (REC-011, T-093: by default every source reaches every
+// armed MIDI track on all channels).
 //
 // Sources come and go while running: a daw.midi thread owns the client and re-reads the source
 // list on CoreMIDI's notifications (and every couple of seconds in case one is missed), connecting

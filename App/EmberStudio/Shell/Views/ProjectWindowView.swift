@@ -272,6 +272,11 @@ private struct TrackHeaderRow: View {
                     .fixedSize()
                     .accessibilityIdentifier("track.\(track.id).input.menu")
                 }
+                if let midi = track.midiInputMenu {
+                    TrackMidiInputPicker(menu: midi)  // T-093 (DW-216)
+                        .fixedSize()
+                        .accessibilityIdentifier("track.\(track.id).midiInput.menu")
+                }
                 Menu("Mon: \(TrackHeaderModel.monitoringTitle(track.monitoring))") {
                     ForEach(track.monitorControls) { control in
                         ControlToggle(control: control, face: control.label.replacingOccurrences(of: "Monitoring ", with: ""))

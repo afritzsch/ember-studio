@@ -72,11 +72,35 @@ extension RenderOfflineParams: JSONSchemaDocumented {
             "to": "End tick, exclusive",
             "path": "Output file; relative paths resolve against the server's working directory",
             "format": "Default wav",
-            "sampleFormat": "Default float32; int24/int16 are TPDF-dithered (IO-035)",
+            "sampleFormat": "Default float32; int24/int16 are TPDF-dithered unless dither is false (IO-035)",
             "tail": "Keep rendering past `to` until the output is quiet (IO-012). Default true",
             "blockSize": "1…4096. Default 512",
             "loop": "Follow the transport's loop: render the range's length of playback from `from`, wrapping at the loop end. Default false (straight through, loop off)",
             "includeMetronome": "Include the project metronome's click (when it is on, transport.setMetronome). Default false: exports leave the click out",
+            "dither": "TPDF dither for int16/int24 (IO-035). Default true for those; ignored for float32",
+        ]
+    }
+}
+
+extension RenderCancelParams: JSONSchemaDocumented {
+    public static var jsonSchemaDocs: [String: String] {
+        ["id": "The render.offline request's JSON-RPC id (as in its progress notifications). Default: the running render"]
+    }
+}
+
+extension EngineMetersParams: JSONSchemaDocumented {
+    public static var jsonSchemaDocs: [String: String] {
+        ["nodes": "Model IDs of tracks, buses, the master or compressor device slots. Default: every strip, then every built-in compressor"]
+    }
+}
+
+extension EnginePreviewNoteParams: JSONSchemaDocumented {
+    public static var jsonSchemaDocs: [String: String] {
+        [
+            "track": "A MIDI track with an instrument",
+            "pitch": "MIDI note 0…127",
+            "velocity": "1…127. Default 100",
+            "durationMs": "How long the note is held, 1…60000. Default 500; the call returns at once",
         ]
     }
 }
@@ -137,7 +161,7 @@ extension DeviceSetParams: JSONSchemaDocumented {
 
 extension MidiInjectParams: JSONSchemaDocumented {
     public static var jsonSchemaDocs: [String: String] {
-        ["events": "In order. Each: {status: 0x80…0xEF, data1?, data2?, sample? (transport sample it is struck at), framesFromNow?}"]
+        ["events": "In order. Each: {status: 0x80…0xEF, data1?, data2?, sample? (transport sample it is struck at), framesFromNow?, source? (T-093: a CoreMIDI unique ID it arrives from, for tracks' MIDI input filters; left out, only tracks hearing all sources get it)}"]
     }
 }
 

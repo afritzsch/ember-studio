@@ -9,6 +9,7 @@
 #include <bit>
 #include <chrono>
 #include <cmath>
+#include <cstring>
 #include <deque>
 #include <limits>
 #include <thread>
@@ -32,11 +33,12 @@ uint8_t messageSize(uint8_t status) { return (status & 0xF0) == 0xC0 || (status 
 } // namespace
 
 MidiInputRouter::MidiInputRouter()
-    : inputs_(new Input[kNumSlots]), recordBuffer_(new RecEvent[kMaxRecordEvents]) {
+    : inputs_(new Input[kNumSlots]), lanes_(new Lane[kMaxArmed]), recordBuffer_(new RecEvent[kMaxRecordEvents]) {
     mach_timebase_info_data_t timebase{};
     mach_timebase_info(&timebase);
     hostTicksPerSecond_ = timebase.numer != 0 ? 1e9 * double(timebase.denom) / double(timebase.numer) : 1e9;
     inputs_[kInjectedSlot].state.store(kOpen, std::memory_order_release);
+    for (uint32_t i = 0; i < kMaxArmed; ++i) armedSlots_[i].filter.store(packFilter({}), std::memory_order_relaxed);
 }
 
 // MARK: Producers
@@ -44,7 +46,24 @@ MidiInputRouter::MidiInputRouter()
 int MidiInputRouter::openInput() {
     for (uint32_t i = 0; i < kMaxInputs; ++i) {
         uint8_t expected = kFree;
-        if (inputs_[i].state.compare_exchange_strong(expected, kOpen, std::memory_order_acq_rel)) return int(i);
+        if (inputs_[i].state.compare_exchange_strong(expected, kOpen, std::memory_order_acq_rel)) {
+            inputs_[i].hasSource.store(false, std::memory_order_release);
+            return int(i);
+        }
+    }
+    return -1;
+}
+
+int MidiInputRouter::openInput(int32_t source) {
+    // The source is set before the slot opens, so the audio thread never sees an open slot with
+    // the ID of the input that had it before.
+    for (uint32_t i = 0; i < kMaxInputs; ++i) {
+        Input& input = inputs_[i];
+        if (input.state.load(std::memory_order_acquire) != kFree) continue;
+        input.source.store(source, std::memory_order_relaxed);
+        input.hasSource.store(true, std::memory_order_relaxed);
+        uint8_t expected = kFree;
+        if (input.state.compare_exchange_strong(expected, kOpen, std::memory_order_acq_rel)) return int(i);
     }
     return -1;
 }
@@ -139,35 +158,97 @@ bool MidiInputRouter::inject(int64_t atSample, bool relativeToNow, const uint8_t
     return pushEvent(kInjectedSlot, event);
 }
 
+uint32_t MidiInputRouter::bindInjected(int32_t source) {
+    if (auto it = injectedSources_.find(source); it != injectedSources_.end()) return it->second;
+    if (injectedSources_.size() >= kMaxInjectedSources) return kNumSlots;
+    const auto slot = static_cast<uint32_t>(kInjectedSlot + 1 + injectedSources_.size());
+    Input& input = inputs_[slot];
+    input.source.store(source, std::memory_order_relaxed);
+    input.hasSource.store(true, std::memory_order_relaxed);
+    input.state.store(kOpen, std::memory_order_release);  // publishes the source with it
+    injectedSources_[source] = slot;
+    return slot;
+}
+
+bool MidiInputRouter::inject(int32_t source, int64_t atSample, bool relativeToNow, const uint8_t* bytes, uint8_t size) {
+    if (size == 0 || size > 3 || !(bytes[0] & 0x80) || (bytes[0] & 0xF0) == 0xF0) return false;
+    const uint32_t slot = bindInjected(source);
+    if (slot >= kNumSlots) return false;
+    Anchor anchor;
+    (void)readAnchor(anchor);
+    MidiInEvent event;
+    int64_t offset = 0;
+    if (relativeToNow) offset = atSample;
+    else if (anchor.playing) offset = atSample - anchor.transportSample;
+    event.sampleTime = anchor.renderSample + offset;
+    event.hostTime = 0;
+    event.size = size;
+    for (uint8_t i = 0; i < size; ++i) event.data[i] = bytes[i];
+    return pushEvent(slot, event);
+}
+
 // MARK: Control
+
+// T-093: the filter in one word, so the audio thread reads it whole. Bits 0…31 the source ID,
+// 32…36 the channel, 40 "all sources".
+uint64_t MidiInputRouter::packFilter(const MidiInputFilter& f) {
+    const uint64_t channel = f.channel <= 16 ? f.channel : 0;
+    return uint64_t(static_cast<uint32_t>(f.source)) | (channel << 32) | (f.allSources ? uint64_t(1) << 40 : 0);
+}
+
+MidiInputFilter MidiInputRouter::unpackFilter(uint64_t packed) {
+    MidiInputFilter f;
+    f.allSources = (packed >> 40) & 1;
+    f.source = static_cast<int32_t>(static_cast<uint32_t>(packed & 0xFFFFFFFFu));
+    f.channel = static_cast<uint8_t>((packed >> 32) & 0x1F);
+    return f;
+}
 
 void MidiInputRouter::setArmed(NodeID track, NodeID player, bool armed) {
     if (armed) {
-        auto existing = armed_.find(track);
-        if (existing != armed_.end() && existing->second != player) {
-            // The track's player changed: forget the old one.
-            if (auto it = armedIndex_.find(existing->second); it != armedIndex_.end()) {
-                armedPlayers_[it->second].store(0, std::memory_order_release);
-                armedIndex_.erase(it);
-            }
+        auto index = armedIndex_.find(track);
+        if (index == armedIndex_.end()) {
+            uint32_t free = kMaxArmed;
+            for (uint32_t i = 0; i < kMaxArmed && free == kMaxArmed; ++i)
+                if (armedSlots_[i].track.load(std::memory_order_relaxed) == 0) free = i;
+            if (free == kMaxArmed) return;  // the table is full: the track doesn't hear MIDI
+            index = armedIndex_.emplace(track, free).first;
+        } else if (armed_[track] == player) {
+            return;  // unchanged
         }
+        // A new occupant or a new player: the audio thread counts its lane afresh.
+        ArmedSlot& slot = armedSlots_[index->second];
+        slot.filter.store(packFilter(inputFilter(track)), std::memory_order_relaxed);
+        slot.player.store(player, std::memory_order_relaxed);
+        slot.track.store(track, std::memory_order_relaxed);
+        slot.generation.store(++nextGeneration_, std::memory_order_release);
         armed_[track] = player;
-        if (player != 0 && armedIndex_.count(player) == 0) {
-            for (uint32_t i = 0; i < kMaxArmed; ++i) {
-                if (armedPlayers_[i].load(std::memory_order_relaxed) == 0) {
-                    armedPlayers_[i].store(player, std::memory_order_release);
-                    armedIndex_[player] = i;
-                    break;
-                }
-            }
-        }
     } else if (auto existing = armed_.find(track); existing != armed_.end()) {
-        if (auto it = armedIndex_.find(existing->second); it != armedIndex_.end()) {
-            armedPlayers_[it->second].store(0, std::memory_order_release);
+        if (auto it = armedIndex_.find(track); it != armedIndex_.end()) {
+            ArmedSlot& slot = armedSlots_[it->second];
+            slot.player.store(0, std::memory_order_relaxed);
+            slot.track.store(0, std::memory_order_relaxed);
+            slot.generation.store(++nextGeneration_, std::memory_order_release);
             armedIndex_.erase(it);
         }
         armed_.erase(existing);
     }
+}
+
+void MidiInputRouter::setInputFilter(NodeID track, const MidiInputFilter& filter) {
+    MidiInputFilter f = filter;
+    if (f.channel > 16) f.channel = 0;
+    if (f.allSources) f.source = 0;
+    if (f == MidiInputFilter{}) filters_.erase(track);
+    else filters_[track] = f;
+    // An armed track is retargeted from the next block (its generation stays, see syncLanes).
+    if (auto it = armedIndex_.find(track); it != armedIndex_.end())
+        armedSlots_[it->second].filter.store(packFilter(f), std::memory_order_release);
+}
+
+MidiInputFilter MidiInputRouter::inputFilter(NodeID track) const {
+    auto it = filters_.find(track);
+    return it == filters_.end() ? MidiInputFilter{} : it->second;
 }
 
 void MidiInputRouter::deactivate() {
@@ -180,7 +261,8 @@ void MidiInputRouter::deactivate() {
 std::vector<FinalizedMidiTake> MidiInputRouter::prepare(double sampleRate) {
     std::vector<NodeID> wanted;
     wanted.reserve(armed_.size());
-    for (const auto& [track, player] : armed_) wanted.push_back(track);
+    for (const auto& [track, player] : armed_)
+        if (armedIndex_.count(track) != 0) wanted.push_back(track);
 
     std::vector<FinalizedMidiTake> late;
     if (sessionActive_.load(std::memory_order_seq_cst)) {
@@ -197,6 +279,8 @@ std::vector<FinalizedMidiTake> MidiInputRouter::prepare(double sampleRate) {
     pass_ = 0;
     havePrev_ = false;
     sessionTracks_ = std::move(wanted);
+    sessionSlots_.clear();
+    for (const NodeID track : sessionTracks_) sessionSlots_.push_back(armedIndex_.at(track));
     sessionRate_ = sampleRate;
     sessionActive_.store(true, std::memory_order_seq_cst);
     return late;
@@ -217,6 +301,30 @@ std::vector<FinalizedMidiTake> MidiInputRouter::collect() {
     if (!recStarted_.exchange(false, std::memory_order_acq_rel)) return {};
     const uint32_t count = recCount_.load(std::memory_order_acquire);
 
+    std::vector<FinalizedMidiTake> takes;
+    takes.reserve(sessionTracks_.size());
+    for (std::size_t t = 0; t < sessionTracks_.size(); ++t) {
+        // T-093: each track gets the notes its filter passed when they were played.
+        std::vector<RecordedMidiNote> notes = pairNotes(count, uint64_t(1) << sessionSlots_[t]);
+        if (notes.empty()) continue;  // nothing played on this track: no clip, no undo entry
+        FinalizedMidiTake take;
+        take.track = sessionTracks_[t];
+        take.startSample = recStartHeard_;
+        take.endSample = recEndHeard_;
+        take.sampleRate = sessionRate_;
+        take.droppedEvents = recDropped_.load(std::memory_order_relaxed);
+        take.notes = std::move(notes);
+        if (recLastPass_ > 0) {  // REC-034 (T-080)
+            take.passes = static_cast<uint32_t>(recLastPass_) + 1;
+            take.loopStart = recLoopStart_;
+            take.loopEnd = recLoopEnd_;
+        }
+        takes.push_back(std::move(take));
+    }
+    return takes;
+}
+
+std::vector<RecordedMidiNote> MidiInputRouter::pairNotes(uint32_t count, uint64_t laneBit) const {
     std::vector<RecordedMidiNote> notes;
     std::vector<int32_t> passes;  // of each note's on
     // The notes still open per channel and key, oldest first: an off ends the oldest (DSP-023).
@@ -232,6 +340,7 @@ std::vector<FinalizedMidiTake> MidiInputRouter::collect() {
 
     for (uint32_t i = 0; i < count; ++i) {
         const RecEvent& e = recordBuffer_[i];
+        if (!(e.lanes & laneBit)) continue;
         std::deque<size_t>& held = open[e.channel][e.pitch];
         if (e.on) {
             held.push_back(notes.size());
@@ -250,36 +359,16 @@ std::vector<FinalizedMidiTake> MidiInputRouter::collect() {
             for (const size_t note : held)
                 notes[note].end = noteEnd(notes[note].start, passes[note], recEndHeard_, recLastPass_);
 
-    if (notes.empty()) return {};  // nothing played: no clip, no undo entry
     std::stable_sort(notes.begin(), notes.end(),
                      [](const RecordedMidiNote& a, const RecordedMidiNote& b) { return a.start < b.start; });
-
-    std::vector<FinalizedMidiTake> takes;
-    takes.reserve(sessionTracks_.size());
-    for (const NodeID track : sessionTracks_) {
-        FinalizedMidiTake take;
-        take.track = track;
-        take.startSample = recStartHeard_;
-        take.endSample = recEndHeard_;
-        take.sampleRate = sessionRate_;
-        take.droppedEvents = recDropped_.load(std::memory_order_relaxed);
-        take.notes = notes;
-        if (recLastPass_ > 0) {  // REC-034 (T-080)
-            take.passes = static_cast<uint32_t>(recLastPass_) + 1;
-            take.loopStart = recLoopStart_;
-            take.loopEnd = recLoopEnd_;
-        }
-        takes.push_back(std::move(take));
-    }
-    return takes;
+    return notes;
 }
 
 // MARK: RT
 
 void MidiInputRouter::beginBlock(const Transport& transport, uint32_t numFrames, double sampleRate,
                                  uint64_t cycleHostTicks) DAW_RT {
-    numLive_ = 0;
-    lastLiveFrame_ = 0;
+    clearLive();
     if (numFrames == 0) return;  // a 0-frame block has no frame to put an event on
     blockActive_ = true;
     if (!liveEnabled_.load(std::memory_order_acquire)) return;  // an export: players release (isArmed)
@@ -336,6 +425,7 @@ void MidiInputRouter::beginBlock(const Transport& transport, uint32_t numFrames,
         recStarted_.store(true, std::memory_order_release);
     }
 
+    syncLanes(info);  // T-093
     drain(info);
 
     if (info.recording) {
@@ -357,8 +447,7 @@ void MidiInputRouter::beginBlock(const Transport& transport, uint32_t numFrames,
 }
 
 void MidiInputRouter::idleBlock(uint32_t numFrames, uint64_t cycleHostTicks) DAW_RT {
-    numLive_ = 0;
-    lastLiveFrame_ = 0;
+    clearLive();
     if (numFrames == 0 || !liveEnabled_.load(std::memory_order_acquire)) return;
     const int64_t blockStart = renderSample_;
     if (cycleHostTicks != 0) {
@@ -369,8 +458,118 @@ void MidiInputRouter::idleBlock(uint32_t numFrames, uint64_t cycleHostTicks) DAW
     info.blockStart = blockStart;
     info.numFrames = numFrames;
     info.hostNow = lastCycleHost_;
+    syncLanes(info);  // T-093
     drain(info);
     renderSample_ += numFrames;
+}
+
+void MidiInputRouter::clearLive() DAW_RT {
+    for (uint32_t i = 0; i < kMaxArmed; ++i) {  // bounded (CONV-RT-04)
+        lanes_[i].numLive = 0;
+        lanes_[i].lastFrame = 0;
+    }
+    maxLive_ = 0;
+}
+
+// MARK: RT, per-track lanes (T-093)
+
+uint16_t MidiInputRouter::channelMask(uint64_t filter) DAW_RT {
+    const auto channel = static_cast<uint8_t>((filter >> 32) & 0x1F);
+    return channel == 0 || channel > 16 ? uint16_t(0xFFFF) : static_cast<uint16_t>(1u << (channel - 1));
+}
+
+bool MidiInputRouter::passes(uint64_t filter, const Input& input, uint8_t channel) const DAW_RT {
+    if (!(channelMask(filter) & (1u << channel))) return false;
+    if ((filter >> 40) & 1) return true;  // all sources
+    return input.hasSource.load(std::memory_order_relaxed) &&
+           input.source.load(std::memory_order_relaxed) == static_cast<int32_t>(static_cast<uint32_t>(filter));
+}
+
+void MidiInputRouter::countLane(const Lane& lane, uint8_t (&holders)[16][128], uint16_t& pedal,
+                                uint16_t& bend) const DAW_RT {
+    std::memset(holders, 0, sizeof(holders));
+    pedal = bend = 0;
+    for (uint32_t i = 0; i < kNumSlots; ++i) {  // bounded: inputs × channels × 128 keys
+        const Input& input = inputs_[i];
+        if (input.state.load(std::memory_order_acquire) == kFree) continue;
+        for (uint8_t channel = 0; channel < 16; ++channel) {
+            if (!passes(lane.filter, input, channel)) continue;
+            const auto bit = static_cast<uint16_t>(1u << channel);
+            pedal |= input.pedal & bit;
+            bend |= input.bend & bit;
+            for (uint8_t w = 0; w < 2; ++w) {
+                uint64_t bits = input.held[channel][w];
+                while (bits != 0) {  // bounded: 64 bits per word
+                    const auto index = std::countr_zero(bits);
+                    bits &= bits - 1;
+                    ++holders[channel][w * 64 + index];
+                }
+            }
+        }
+    }
+}
+
+void MidiInputRouter::syncLanes(const BlockInfo& info) DAW_RT {
+    for (uint32_t i = 0; i < kMaxArmed; ++i) {  // bounded (CONV-RT-04)
+        ArmedSlot& slot = armedSlots_[i];
+        Lane& lane = lanes_[i];
+        const uint32_t generation = slot.generation.load(std::memory_order_acquire);
+        const NodeID track = slot.track.load(std::memory_order_relaxed);
+        const uint64_t filter = slot.filter.load(std::memory_order_acquire);
+        if (track == 0) {
+            lane.active = false;  // disarmed: the player releases what it sent (MidiClipPlayer)
+            continue;
+        }
+        if (!lane.active || lane.generation != generation) {
+            // A track just armed, or given a new player: it hears what is held from now on, and a
+            // new player sounds those keys itself (heldNote).
+            lane.active = true;
+            lane.generation = generation;
+            lane.player = slot.player.load(std::memory_order_relaxed);
+            lane.filter = filter;
+            countLane(lane, lane.holders, lane.pedal, lane.bend);
+            continue;
+        }
+        if (lane.filter == filter) continue;
+
+        // Retarget: what the old filter heard and the new one doesn't ends now, and keys held
+        // through inputs the new filter passes sound (a filter change never hangs a note).
+        lane.filter = filter;
+        uint8_t holders[16][128];
+        uint16_t pedal = 0, bend = 0;
+        countLane(lane, holders, pedal, bend);
+        for (uint8_t channel = 0; channel < 16; ++channel) {
+            for (uint8_t pitch = 0; pitch < 128; ++pitch) {  // bounded: 2048 keys
+                const bool before = lane.holders[channel][pitch] != 0, after = holders[channel][pitch] != 0;
+                if (before == after) continue;
+                const uint8_t velocity = after ? velocities_[channel][pitch] : 0;
+                const uint8_t message[3] = {uint8_t((after ? kNoteOn : kNoteOff) | channel), pitch,
+                                            after ? velocity : uint8_t(64)};
+                emitLane(lane, message, 3, 0, info);
+                // The take records what the track heard: the note ends (or starts) at the switch.
+                recordEvent(uint64_t(1) << i, after, channel, pitch, velocity, 0, info);
+            }
+            const auto bit = static_cast<uint16_t>(1u << channel);
+            if ((lane.pedal ^ pedal) & bit) {
+                const uint8_t message[3] = {uint8_t(kControlChange | channel), kSustain, uint8_t(pedal & bit ? 127 : 0)};
+                emitLane(lane, message, 3, 0, info);
+            }
+            if ((lane.bend & bit) && !(bend & bit)) {
+                const uint8_t message[3] = {uint8_t(kPitchBend | channel), 0, 64};
+                emitLane(lane, message, 3, 0, info);
+            }
+        }
+        std::memcpy(lane.holders, holders, sizeof(holders));
+        lane.pedal = pedal;
+        lane.bend &= bend;  // a bend it was never sent can't be restored; the next one arrives
+    }
+}
+
+int MidiInputRouter::laneOf(NodeID player) const DAW_RT {
+    if (player == 0) return -1;
+    for (uint32_t i = 0; i < kMaxArmed; ++i)  // bounded (CONV-RT-04)
+        if (lanes_[i].active && lanes_[i].player == player) return int(i);
+    return -1;
 }
 
 void MidiInputRouter::drain(const BlockInfo& info) DAW_RT {
@@ -397,7 +596,7 @@ void MidiInputRouter::drain(const BlockInfo& info) DAW_RT {
 
     // REC-011: merge in time order. Each pass consumes one event (CONV-RT-04: bounded by the cap
     // times the input count); room for a CC 123's offs stays free.
-    for (uint32_t merged = 0; merged < kMaxMergedPerBlock && numLive_ + 128 <= kMaxLiveEvents; ++merged) {
+    for (uint32_t merged = 0; merged < kMaxMergedPerBlock && maxLive_ + 128 <= kMaxLiveEvents; ++merged) {
         int best = -1;
         int64_t bestTime = std::numeric_limits<int64_t>::max();
         for (uint32_t i = 0; i < kNumSlots; ++i) {
@@ -410,7 +609,7 @@ void MidiInputRouter::drain(const BlockInfo& info) DAW_RT {
             int64_t time = input.pending.sampleTime;
             // A real input can't be ahead of the block being rendered; it looks that way only
             // after a stale anchor (a device that was stopped). Due now.
-            if (i != kInjectedSlot && time >= blockEnd) {
+            if (i < kInjectedSlot && time >= blockEnd) {
                 time = info.blockStart;
                 input.pending.sampleTime = time;
             }
@@ -447,10 +646,17 @@ void MidiInputRouter::handleEvent(Input& input, const MidiInEvent& e, const Bloc
     } else {
         if (kind == kPitchBend) {
             const auto bit = static_cast<uint16_t>(1u << channel);
-            if (d1 == 0 && d2 == 64) bendMask_ &= static_cast<uint16_t>(~bit);
-            else bendMask_ |= bit;
+            const bool centre = d1 == 0 && d2 == 64;
+            if (centre) input.bend &= static_cast<uint16_t>(~bit);
+            else input.bend |= bit;
+            for (uint32_t i = 0; i < kMaxArmed; ++i) {  // bounded (CONV-RT-04)
+                Lane& lane = lanes_[i];
+                if (!lane.active || !passes(lane.filter, input, channel)) continue;
+                if (centre) lane.bend &= static_cast<uint16_t>(~bit);
+                else lane.bend |= bit;
+            }
         }
-        emitLive(e.data, messageSize(e.data[0]), frame, info);
+        emitLive(input, e.data, messageSize(e.data[0]), frame, info);
     }
 }
 
@@ -461,11 +667,13 @@ void MidiInputRouter::noteOn(Input& input, uint8_t channel, uint8_t pitch, uint8
     if (word & bit) return;  // already held on this input: not a new note
     word |= bit;
     velocities_[channel][pitch] = velocity;
-    if (holders_[channel][pitch]++ == 0) {
-        const uint8_t message[3] = {uint8_t(kNoteOn | channel), pitch, velocity};
-        emitLive(message, 3, frame, info);
+    const uint8_t message[3] = {uint8_t(kNoteOn | channel), pitch, velocity};
+    for (uint32_t i = 0; i < kMaxArmed; ++i) {  // bounded (CONV-RT-04)
+        Lane& lane = lanes_[i];
+        if (!lane.active || !passes(lane.filter, input, channel)) continue;
+        if (lane.holders[channel][pitch]++ == 0) emitLane(lane, message, 3, frame, info);
     }
-    recordNote(true, channel, pitch, velocity, frame, info);
+    recordNote(input, true, channel, pitch, velocity, frame, info);
 }
 
 void MidiInputRouter::noteOff(Input& input, uint8_t channel, uint8_t pitch, int64_t frame,
@@ -474,11 +682,13 @@ void MidiInputRouter::noteOff(Input& input, uint8_t channel, uint8_t pitch, int6
     const uint64_t bit = uint64_t(1) << (pitch & 63);
     if (!(word & bit)) return;  // not held on this input
     word &= ~bit;
-    if (--holders_[channel][pitch] == 0) {
-        const uint8_t message[3] = {uint8_t(kNoteOff | channel), pitch, 64};
-        emitLive(message, 3, frame, info);
+    const uint8_t message[3] = {uint8_t(kNoteOff | channel), pitch, 64};
+    for (uint32_t i = 0; i < kMaxArmed; ++i) {  // bounded (CONV-RT-04)
+        Lane& lane = lanes_[i];
+        if (!lane.active || !passes(lane.filter, input, channel) || lane.holders[channel][pitch] == 0) continue;
+        if (--lane.holders[channel][pitch] == 0) emitLane(lane, message, 3, frame, info);
     }
-    recordNote(false, channel, pitch, 0, frame, info);
+    recordNote(input, false, channel, pitch, 0, frame, info);
 }
 
 void MidiInputRouter::releaseChannel(Input& input, uint8_t channel, int64_t frame, const BlockInfo& info,
@@ -497,22 +707,45 @@ void MidiInputRouter::releaseChannel(Input& input, uint8_t channel, int64_t fram
 void MidiInputRouter::setPedal(Input& input, uint8_t channel, bool down, int64_t frame, const BlockInfo& info) DAW_RT {
     const auto bit = static_cast<uint16_t>(1u << channel);
     if (((input.pedal & bit) != 0) == down) return;
-    const uint16_t before = pedalMask();
     if (down) input.pedal |= bit;
     else input.pedal &= static_cast<uint16_t>(~bit);
-    if ((before ^ pedalMask()) & bit) {
-        const uint8_t message[3] = {uint8_t(kControlChange | channel), kSustain, uint8_t(down ? 127 : 0)};
-        emitLive(message, 3, frame, info);
+    const uint8_t message[3] = {uint8_t(kControlChange | channel), kSustain, uint8_t(down ? 127 : 0)};
+    for (uint32_t i = 0; i < kMaxArmed; ++i) {  // bounded (CONV-RT-04)
+        Lane& lane = lanes_[i];
+        if (!lane.active || !passes(lane.filter, input, channel)) continue;
+        // The track's pedal is down while any input it hears holds it down.
+        bool anyDown = false;
+        for (uint32_t j = 0; j < kNumSlots && !anyDown; ++j) {  // bounded: the inputs
+            const Input& other = inputs_[j];
+            anyDown = (other.pedal & bit) && other.state.load(std::memory_order_relaxed) != kFree &&
+                      passes(lane.filter, other, channel);
+        }
+        if (((lane.pedal & bit) != 0) == anyDown) continue;
+        if (anyDown) lane.pedal |= bit;
+        else lane.pedal &= static_cast<uint16_t>(~bit);
+        emitLane(lane, message, 3, frame, info);
     }
 }
 
-void MidiInputRouter::emitLive(const uint8_t* data, uint8_t size, int64_t frame, const BlockInfo& info) DAW_RT {
-    if (numLive_ >= kMaxLiveEvents || info.numFrames == 0) return;
+void MidiInputRouter::emitLive(const Input& input, const uint8_t* data, uint8_t size, int64_t frame,
+                               const BlockInfo& info) DAW_RT {
+    const uint8_t channel = data[0] & 0x0F;
+    for (uint32_t i = 0; i < kMaxArmed; ++i) {  // bounded (CONV-RT-04)
+        Lane& lane = lanes_[i];
+        if (lane.active && passes(lane.filter, input, channel)) emitLane(lane, data, size, frame, info);
+    }
+}
+
+void MidiInputRouter::emitLane(Lane& lane, const uint8_t* data, uint8_t size, int64_t frame,
+                               const BlockInfo& info) DAW_RT {
+    // A track without a player (no instrument) records but has nobody to play to.
+    if (lane.player == 0 || lane.numLive >= kMaxLiveEvents || info.numFrames == 0) return;
     const auto last = int64_t{info.numFrames} - 1;
     auto f = static_cast<uint32_t>(std::clamp<int64_t>(frame, 0, last));
-    f = std::max(f, lastLiveFrame_);  // frame order, even for out-of-order injected events
-    lastLiveFrame_ = f;
-    MidiEvent& out = live_[numLive_++];
+    f = std::max(f, lane.lastFrame);  // frame order, even for out-of-order injected events
+    lane.lastFrame = f;
+    MidiEvent& out = lane.live[lane.numLive++];
+    maxLive_ = std::max(maxLive_, lane.numLive);
     out.frameOffset = f;
     out.size = size;
     out.data[0] = data[0];
@@ -545,9 +778,19 @@ bool MidiInputRouter::heardPosition(int64_t frame, const BlockInfo& info, int64_
     return true;
 }
 
-void MidiInputRouter::recordNote(bool on, uint8_t channel, uint8_t pitch, uint8_t velocity, int64_t frame,
-                                 const BlockInfo& info) DAW_RT {
+void MidiInputRouter::recordNote(const Input& input, bool on, uint8_t channel, uint8_t pitch, uint8_t velocity,
+                                 int64_t frame, const BlockInfo& info) DAW_RT {
     if (!info.recording) return;
+    // T-093: the tracks whose filter passes it (a track records what it hears).
+    uint64_t heardBy = 0;
+    for (uint32_t i = 0; i < kMaxArmed; ++i)  // bounded (CONV-RT-04)
+        if (lanes_[i].active && passes(lanes_[i].filter, input, channel)) heardBy |= uint64_t(1) << i;
+    recordEvent(heardBy, on, channel, pitch, velocity, frame, info);
+}
+
+void MidiInputRouter::recordEvent(uint64_t heardBy, bool on, uint8_t channel, uint8_t pitch, uint8_t velocity,
+                                  int64_t frame, const BlockInfo& info) DAW_RT {
+    if (!info.recording || heardBy == 0) return;
     const uint32_t index = recCount_.load(std::memory_order_relaxed);
     if (index >= kMaxRecordEvents) {
         recDropped_.fetch_add(1, std::memory_order_relaxed);
@@ -557,27 +800,36 @@ void MidiInputRouter::recordNote(bool on, uint8_t channel, uint8_t pitch, uint8_
     int64_t heard = 0;
     int32_t pass = 0;
     if (!heardPosition(frame, info, heard, pass)) return;
-    recordBuffer_[index] = RecEvent{heard, pass, on, pitch, velocity, channel};
+    recordBuffer_[index] = RecEvent{heard, pass, on, pitch, velocity, channel, heardBy};
     recCount_.store(index + 1, std::memory_order_release);
 }
 
 bool MidiInputRouter::isArmed(NodeID player) const DAW_RT {
-    if (player == 0 || !liveEnabled_.load(std::memory_order_acquire)) return false;
-    for (uint32_t i = 0; i < kMaxArmed; ++i)  // bounded (CONV-RT-04)
-        if (armedPlayers_[i].load(std::memory_order_acquire) == player) return true;
-    return false;
+    if (!liveEnabled_.load(std::memory_order_acquire)) return false;
+    return laneOf(player) >= 0;
 }
 
-bool MidiInputRouter::heldNote(uint8_t channel, uint8_t pitch, uint8_t& velocity) const DAW_RT {
-    if (holders_[channel][pitch] == 0) return false;
+MidiEventSpan MidiInputRouter::events(NodeID player) const DAW_RT {
+    const int lane = laneOf(player);
+    if (lane < 0) return {};
+    return MidiEventSpan(lanes_[lane].live, lanes_[lane].numLive);
+}
+
+bool MidiInputRouter::heldNote(NodeID player, uint8_t channel, uint8_t pitch, uint8_t& velocity) const DAW_RT {
+    const int lane = laneOf(player);
+    if (lane < 0 || lanes_[lane].holders[channel][pitch] == 0) return false;
     velocity = velocities_[channel][pitch];
     return true;
 }
 
-uint16_t MidiInputRouter::pedalMask() const DAW_RT {
-    uint16_t mask = 0;
-    for (uint32_t i = 0; i < kNumSlots; ++i) mask |= inputs_[i].pedal;
-    return mask;
+uint16_t MidiInputRouter::pedalMask(NodeID player) const DAW_RT {
+    const int lane = laneOf(player);
+    return lane < 0 ? 0 : lanes_[lane].pedal;
+}
+
+uint16_t MidiInputRouter::bendMask(NodeID player) const DAW_RT {
+    const int lane = laneOf(player);
+    return lane < 0 ? 0 : lanes_[lane].bend;
 }
 
 } // namespace daw

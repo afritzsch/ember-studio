@@ -91,7 +91,9 @@ std::mutex liveMutex;
 std::set<uint64_t> liveFacades;
 uint64_t nextInstanceID = 1;
 
-bool isFinished(JobState state) { return state == JobState::succeeded || state == JobState::failed; }
+bool isFinished(JobState state) {
+    return state == JobState::succeeded || state == JobState::failed || state == JobState::cancelled;
+}
 
 AudioFileType toFileType(ExportFileType type) {
     switch (type) {
@@ -208,6 +210,7 @@ struct EngineFacade::Impl {
     void applyTransportCommands();
     JobID addJob(JobKind kind, JobState state);
     void finishJob(JobStatus& job, FacadeError error);
+    void finishCancelled(JobStatus& job);  // DW-220 (T-096)
     void pruneJobs();
     GraphStatusPOD graphStatusLocked() const;
 
@@ -323,6 +326,10 @@ struct EngineFacade::Impl {
         ExportSpecPOD spec;
     };
     std::deque<ExportRequest> exportQueue;
+    // DW-220 (T-096): the render job daw.export has taken (0: none), and its cancel flag, which
+    // OfflineDriver reads between blocks on daw.export (cancelJob sets it from any thread).
+    JobID exportJob = 0;
+    std::atomic<bool> exportCancel{false};
     bool stopping = false;
     std::condition_variable exportWake;
     std::condition_variable deviceWake;  // daw.device: stopping
@@ -1014,6 +1021,17 @@ void EngineFacade::Impl::finishJob(JobStatus& job, FacadeError error) {
     pushEvent(std::move(event));
 }
 
+// DW-220 (T-096): like finishJob, as cancelled; the jobFinished event carries no error.
+void EngineFacade::Impl::finishCancelled(JobStatus& job) {
+    job.state = JobState::cancelled;
+    job.error = {};
+    EngineEventPOD event;
+    event.type = EngineEventType::jobFinished;
+    event.subject = static_cast<uint64_t>(job.kind);
+    event.job = job.job;
+    pushEvent(std::move(event));
+}
+
 // Finished jobs are kept for polling, the oldest dropped beyond kMaxFinishedJobs.
 void EngineFacade::Impl::pruneJobs() {
     std::size_t finished = 0;
@@ -1042,10 +1060,13 @@ void EngineFacade::Impl::exportLoop() {
             request = std::move(exportQueue.front());
             exportQueue.pop_front();
             exportActive = true;  // no session-rate change until it's done
+            exportJob = request.job;  // DW-220: cancelJob reaches it through exportCancel now
+            exportCancel.store(false, std::memory_order_relaxed);
         }
         runExport(request.job, request.from, request.to, request.spec);
         std::lock_guard lock(mutex);
         exportActive = false;
+        exportJob = 0;
     }
 }
 
@@ -1084,7 +1105,9 @@ void EngineFacade::Impl::runExport(JobID jobID, Tick from, Tick to, const Export
         pump();
         const GraphCompiler::Status status = compilerStatus();
         auto tempo = versions.find(status.publishedVersion);
-        if (!built) {
+        if (exportCancel.load(std::memory_order_acquire)) {
+            // DW-220: cancelled while it waited for the graph; nothing rendered, no file made.
+        } else if (!built) {
             error = facadeError(FacadeErrorCode::internal, "offline render: graph build timed out");
         } else if (reloader.active()) {
             error = facadeError(FacadeErrorCode::internal, "offline render: assets are still being re-converted (IO-033)");
@@ -1116,7 +1139,7 @@ void EngineFacade::Impl::runExport(JobID jobID, Tick from, Tick to, const Export
             if (auto it = jobs.find(jobID); it != jobs.end() && p.maxFrames > 0)
                 it->second.progress = double(p.framesRendered) / double(p.maxFrames);
         };
-        auto rendered = offline.render(engine, from, to, spec, progress);
+        auto rendered = offline.render(engine, from, to, spec, progress, &exportCancel);  // DW-220
         stats = offline.lastRender();
         if (!rendered) error = toFacadeError(rendered.error());
     }
@@ -1136,7 +1159,12 @@ void EngineFacade::Impl::runExport(JobID jobID, Tick from, Tick to, const Export
     }
     if (auto it = jobs.find(jobID); it != jobs.end()) {
         it->second.render = toResult(stats, spec.tempo.sampleRate());
-        finishJob(it->second, std::move(error));
+        // DW-220: a cancel that came before the render finished (or before it started) wins; one
+        // that came after leaves the job succeeded.
+        if (stats.cancelled || (!render && error.ok() && exportCancel.load(std::memory_order_acquire)))
+            finishCancelled(it->second);
+        else
+            finishJob(it->second, std::move(error));
     }
 }
 
@@ -1537,6 +1565,26 @@ FacadeError EngineFacade::injectMidi(int64_t atSample, bool relativeToNow, uint8
     return {};
 }
 
+// T-093: the router keeps the filter per track; no take ends (the recorded events carry who heard
+// them).
+void EngineFacade::setMidiInputFilter(NodeID track, bool allSources, int32_t source, uint8_t channel) {
+    std::lock_guard lock(impl_->mutex);
+    impl_->midi.setInputFilter(track, MidiInputFilter{allSources, allSources ? 0 : source, channel <= 16 ? channel : uint8_t(0)});
+}
+
+FacadeError EngineFacade::injectMidiFromSource(int32_t source, int64_t atSample, bool relativeToNow, uint8_t status,
+                                               uint8_t data1, uint8_t data2, uint8_t size) {
+    std::lock_guard lock(impl_->mutex);
+    if (impl_->mode != EngineMode::realtime)
+        return facadeError(FacadeErrorCode::unsupported, "MIDI can only be injected into a realtime engine");
+    const uint8_t bytes[3] = {status, data1, data2};
+    if (status < 0x80 || status >= 0xF0 || size == 0 || size > 3)
+        return facadeError(FacadeErrorCode::invalidArgument, "not a MIDI channel message");
+    if (!impl_->midi.inject(source, atSample, relativeToNow, bytes, size))
+        return facadeError(FacadeErrorCode::io, "the MIDI input queue is full, or too many injected source IDs");
+    return {};
+}
+
 // PLUG-012 (T-061, T-062): an AU or VST3 plugin is instantiated right here, on the caller's
 // (non-RT) thread, and parked for `slot`; the graph build that brings the slot's node adopts it.
 // The job is finished when this returns.
@@ -1627,6 +1675,25 @@ JobID EngineFacade::renderOffline(Tick from, Tick to, const ExportSpecPOD& spec)
     impl_->exportQueue.push_back({job, from, to, spec});
     impl_->exportWake.notify_one();
     return job;
+}
+
+// DW-220 (T-096): see the header. A queued job leaves the queue; the running one is flagged and
+// ends at OfflineDriver's next block check (runExport finishes it as cancelled).
+bool EngineFacade::cancelJob(JobID job) {
+    std::lock_guard lock(impl_->mutex);
+    Impl& impl = *impl_;
+    auto it = impl.jobs.find(job);
+    if (it == impl.jobs.end() || it->second.kind != JobKind::renderOffline || isFinished(it->second.state)) return false;
+    if (impl.exportJob == job) {
+        impl.exportCancel.store(true, std::memory_order_release);
+        return true;
+    }
+    auto queued = std::find_if(impl.exportQueue.begin(), impl.exportQueue.end(),
+                               [job](const Impl::ExportRequest& r) { return r.job == job; });
+    if (queued == impl.exportQueue.end()) return false;
+    impl.exportQueue.erase(queued);
+    impl.finishCancelled(it->second);
+    return true;
 }
 
 // MARK: Device

@@ -239,6 +239,25 @@ public struct RenderOfflineParams: Codable, Hashable, Sendable {
     /// T-082 (UI-042): scale the export so its sample peak is −0.1 dBFS, before dither and
     /// quantization. Default false.
     public var normalize: Bool?
+    /// T-096 (DW-219, IO-035): TPDF dither for int16/int24. Default true for those formats;
+    /// ignored for float32 (never dithered).
+    public var dither: Bool?
+}
+
+/// T-096 (DW-220): `render.cancel {id?}` stops the running `render.offline` (the one with JSON-RPC
+/// request id `id`, if given). That request then fails with `cancelled`, and its partial file is
+/// deleted.
+public struct RenderCancelParams: Codable, Hashable, Sendable {
+    /// The `render.offline` request's JSON-RPC id (as in its `progress` notifications). Default:
+    /// whichever render is running.
+    public var id: RPCID?
+}
+
+public struct RenderCancelResult: Codable, Hashable, Sendable {
+    /// False: no render was running (or none with that id); nothing changed.
+    public var cancelled: Bool
+    /// The cancelled `render.offline`'s request id (absent for in-process calls, which have none).
+    public var id: RPCID?
 }
 
 public struct RenderOfflineResult: Codable, Hashable, Sendable {
@@ -317,6 +336,53 @@ public struct EnginePluginInfoParams: Codable, Hashable, Sendable {
     public var slot: NodeIDValue
 }
 
+// MARK: engine.meters, engine.previewNote (T-096)
+
+/// T-096 (DW-174): `engine.meters {nodes?}`.
+public struct EngineMetersParams: Codable, Hashable, Sendable {
+    /// Model IDs of tracks, buses, the master or compressor device slots. Default: every track,
+    /// bus and the master, then every built-in compressor slot.
+    public var nodes: [NodeIDValue]?
+}
+
+public struct EngineMetersResult: Codable, Hashable, Sendable {
+    public struct Meter: Codable, Hashable, Sendable {
+        /// The model ID.
+        public var node: NodeIDValue
+        /// track, bus, master (post-fader strip meters, MIX-005) or compressor (DSP-031).
+        public var kind: String
+        /// The strip's peak and 300 ms RMS in dBFS (-240: silence). One value: the engine's strip
+        /// meter reads L and R together. Empty for a compressor.
+        public var peakDb: [Double]
+        public var rmsDb: [Double]
+        /// Compressors only: the deepest gain reduction of the last block, ≤ 0 dB (makeup not
+        /// included); 0 before it has processed audio.
+        public var gainReductionDb: Double?
+    }
+
+    public var meters: [Meter]
+}
+
+/// T-096 (DW-189): `engine.previewNote {track, pitch, velocity?, durationMs?}` auditions a note on
+/// a MIDI track's instrument (UI-021's piano-roll keys), realtime engines only.
+public struct EnginePreviewNoteParams: Codable, Hashable, Sendable {
+    /// A MIDI track's ID.
+    public var track: ModelID
+    /// 0…127.
+    public var pitch: Int
+    /// 1…127. Default 100.
+    public var velocity: Int?
+    /// How long the note is held, 1…60000 ms. Default 500.
+    public var durationMs: Int?
+}
+
+public struct EnginePreviewNoteResult: Codable, Hashable, Sendable {
+    public var track: ModelID
+    public var pitch: Int
+    public var velocity: Int
+    public var durationMs: Int
+}
+
 // MARK: device.* (DW-115)
 
 public struct DeviceListResult: Codable, Hashable, Sendable {
@@ -367,6 +433,10 @@ public struct MidiInjectParams: Codable, Hashable, Sendable {
         public var status: UInt8
         public var data1: UInt8?
         public var data2: UInt8?
+        /// T-093 (additive): the CoreMIDI unique ID it arrives from, as `midi.inputs` reports it,
+        /// so a track's MIDI input filter can be tested. Left out: the plain seam, which only
+        /// tracks hearing all sources hear. At most 4 distinct IDs per engine.
+        public var source: Int32? = nil
     }
     public var events: [Event]
 }
