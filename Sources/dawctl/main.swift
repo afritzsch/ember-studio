@@ -147,15 +147,25 @@ enum Target {
 /// with no render running, a second Ctrl-C, or a render that hasn't ended 10 s later exit 130.
 @MainActor
 enum RenderInterrupt {
-    static var running: (target: Target, id: RPCID)?
+    static var running: (target: Target, id: RPCID)? {
+        didSet { renderRunning.set(running != nil) }
+    }
     static var interrupted = false
     static var socketPath: String?
     private static var source: DispatchSourceSignal?
+    /// `running != nil`, readable off the main actor: the REPL blocks the main thread in readLine,
+    /// so the signal is handled on a queue of its own and only goes to the main actor for a render
+    /// (which awaits, leaving the main actor free).
+    private nonisolated static let renderRunning = Flag()
 
     static func install() {
         signal(SIGINT, SIG_IGN)
-        let source = DispatchSource.makeSignalSource(signal: SIGINT, queue: .main)
-        source.setEventHandler { MainActor.assumeIsolated { interrupt() } }
+        let source = DispatchSource.makeSignalSource(signal: SIGINT, queue: DispatchQueue(label: "dawctl.sigint"))
+        // @Sendable: not main-actor isolated, since it runs on the signal queue.
+        source.setEventHandler { @Sendable in
+            guard renderRunning.get() else { exit(130) }
+            DispatchQueue.main.async { MainActor.assumeIsolated { interrupt() } }
+        }
         source.resume()
         self.source = source
     }
@@ -174,6 +184,13 @@ enum RenderInterrupt {
             FileHandle.standardError.write(Data("dawctl: render.offline didn't stop; exiting\n".utf8))
             exit(130)
         }
+    }
+
+    final class Flag: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value = false
+        func set(_ newValue: Bool) { lock.withLock { value = newValue } }
+        func get() -> Bool { lock.withLock { value } }
     }
 
     /// Whether the render was cancelled.

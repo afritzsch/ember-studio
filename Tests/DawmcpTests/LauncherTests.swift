@@ -70,6 +70,8 @@ private struct ScratchCheckout {
             echo "fake build output"
             [ -e '\(dir.file("fail").path)' ] && exit 1
             mkdir -p .build/debug
+            if [ "$3" = PluginScanner ]; then touch .build/debug/PluginScanner; chmod +x .build/debug/PluginScanner; exit 0; fi
+            [ -e '\(dir.file("noop").path)' ] && [ -e .build/debug/dawmcp ] && exit 0
             printf '#!/bin/sh\\necho "server cwd=$PWD args=$*"\\n' > .build/debug/dawmcp
             chmod +x .build/debug/dawmcp
             """
@@ -124,6 +126,36 @@ struct LauncherTests {
         let buildOnly = try repo.launch(["--build-only"])
         #expect(buildOnly.status == 0 && buildOnly.stdout.isEmpty)
         #expect(repo.builds.count == 5)
+    }
+
+    @Test("DW-147 (T-098): a build that changes nothing leaves the binary's date alone, so a running dawmcp isn't told it is stale; the stamp still prevents a second build")
+    func noOpBuildKeepsBinaryDate() throws {
+        let repo = try ScratchCheckout()
+        #expect(try repo.launch(["--build-only"]).status == 0)
+        let binary = repo.root.appending(path: ".build/debug/dawmcp").path
+        let built = try #require(FileManager.default.attributesOfItem(atPath: binary)[.modificationDate] as? Date)
+        try "".write(to: repo.dir.file("noop"), atomically: true, encoding: .utf8)
+        // Newer than the stamp, but not in the future (the stamp written after this build must be newer).
+        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(1)],
+                                              ofItemAtPath: repo.root.appending(path: "Sources/dawmcp/DawMCP.swift").path)
+        Thread.sleep(forTimeInterval: 1.5)
+        #expect(try repo.launch(["--build-only"]).status == 0)
+        #expect(repo.builds.count == 2)
+        #expect(try FileManager.default.attributesOfItem(atPath: binary)[.modificationDate] as? Date == built)
+        #expect(try repo.launch(["--build-only"]).status == 0)
+        #expect(repo.builds.count == 2)
+    }
+
+    @Test("DW-016 (T-098): a checkout with the scanner's sources also builds PluginScanner (daw_plugins_scan runs it); --help explains the stale warning")
+    func buildsScannerAndHelp() throws {
+        let repo = try ScratchCheckout()
+        try FileManager.default.createDirectory(at: repo.root.appending(path: "Sources/PluginScanner"), withIntermediateDirectories: true)
+        let root = realPath(repo.root)
+        #expect(try repo.launch(["--build-only"]).status == 0)
+        #expect(repo.builds == ["\(root) build --product dawmcp", "\(root) build --product PluginScanner"])
+        let help = try repo.launch(["--help"])
+        #expect(help.status == 0 && help.stdout.contains("stale: dawmcp binary rebuilt since") && help.stdout.contains("--build-only"))
+        #expect(repo.builds.count == 2)
     }
 
     @Test("CTL-025: a failed build exits 1 without starting a server or writing to stdout")
