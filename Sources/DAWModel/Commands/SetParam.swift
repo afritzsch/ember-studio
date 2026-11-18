@@ -47,7 +47,8 @@ public struct SetParam: Command {
                 throw .invalidArgument("param index \(index) is outside 0…\(DeviceSlot.maxParamIndex)")
             }
             if let value, !value.isFinite { throw .invalidArgument("param value \(value) is not finite") }
-            let old = try project.updateDeviceSlot(slot) { slot in
+            let old = try project.updateDeviceSlot(slot) { (slot: inout DeviceSlot) throws(DAWError) -> Float? in
+                try Self.checkPublishedIndex(index, of: slot)
                 let at = slot.params.firstIndex { $0.index >= index }
                 let old = at.flatMap { slot.params[$0].index == index ? slot.params[$0].value : nil }
                 if old != nil { slot.params.remove(at: at!) }
@@ -57,6 +58,21 @@ public struct SetParam: Command {
             }
             return SetParam(target: target, value: old)
         }
+    }
+
+    /// DW-112 (T-102): a built-in kind's params are its published ParamInfo rows
+    /// (`ParamCatalog.builtin`, as DW-236 consults it). An index past them would grow the slot's
+    /// param range, a structural rebuild instead of a slot write, so it is refused, removing a
+    /// value included (the inverse of an accepted command is always in range). Hosted plugins
+    /// (AU, VST3) and kinds without published ParamInfo (no engine read yet, FakeEngine) are
+    /// taken as before.
+    static func checkPublishedIndex(
+        _ index: Int, of slot: DeviceSlot, catalog: ParamCatalog = .builtin
+    ) throws(DAWError) {
+        guard case .builtin(let kind) = slot.kind, let published = catalog.defaults[kind]?.count,
+              index >= published
+        else { return }
+        throw .invalidArgument("\(kind.rawValue) has params 0…\(published - 1); index \(index) is not one")
     }
 
     /// Returns the old value.

@@ -32,3 +32,30 @@ public struct VST3Descriptor: Hashable, Sendable, Codable {
         self.version = version
     }
 }
+
+// DW-296 (T-102): `vendor` and `version` are optional in JSON, as `command.schema` describes them
+// (and as the memberwise inits default them). A missing key reads "". Encoding is synthesized and
+// unchanged, so files stay byte-identical; JSON that has both keys decodes as before.
+private enum PluginDescriptorKeys: String, CodingKey { case identifier, name, vendor, version }
+
+extension AUDescriptor {
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: PluginDescriptorKeys.self)
+        self.init(
+            identifier: try c.decode(String.self, forKey: .identifier),
+            name: try c.decode(String.self, forKey: .name),
+            vendor: try c.decodeIfPresent(String.self, forKey: .vendor) ?? "",
+            version: try c.decodeIfPresent(String.self, forKey: .version) ?? "")
+    }
+}
+
+extension VST3Descriptor {
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: PluginDescriptorKeys.self)
+        self.init(
+            identifier: try c.decode(String.self, forKey: .identifier),
+            name: try c.decode(String.self, forKey: .name),
+            vendor: try c.decodeIfPresent(String.self, forKey: .vendor) ?? "",
+            version: try c.decodeIfPresent(String.self, forKey: .version) ?? "")
+    }
+}
