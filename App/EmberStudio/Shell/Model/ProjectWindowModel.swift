@@ -96,6 +96,8 @@ final class ProjectWindowModel: Identifiable {
     // Selection
     var selectedTracks: Set<NodeIDValue> = []
     var selectedClips: Set<ModelID> = []
+    /// UI-017 (T-122): the track whose header name is being edited (the menu's Rename…).
+    var renamingTrack: NodeIDValue?
 
     // Zoom and scroll of the arrange area
     static let zoomRange = 4.0...512.0
@@ -401,6 +403,7 @@ final class ProjectWindowModel: Identifiable {
             }
         }
         controls += trackHeaders.flatMap(\.controls)
+        controls += trackListMenuControls + renameControls  // T-122 (UI-017)
         controls += arrange.controls
         controls += automation.controls  // T-075 (UI-015)
         controls += deviceChain.controls  // T-065 (UI-032)
@@ -496,12 +499,13 @@ final class ProjectWindowModel: Identifiable {
         }
     }
 
-    /// ⌘T / ⇧⌘T: appends an empty track ("Audio 2", "MIDI 1", …) and selects it.
-    func addTrack(_ kind: Track.Kind) {
+    /// ⌘T / ⇧⌘T: appends an empty track ("Audio 2", "MIDI 1", …) and selects it. UI-017 (T-122):
+    /// the track list menu inserts it at `index` instead (below the clicked track).
+    func addTrack(_ kind: Track.Kind, at index: Int? = nil) {
         let prefix = kind == .midi ? "MIDI" : "Audio"
         let count = store.project.tracks.filter { $0.kind == kind }.count
         let before = Set(store.project.tracks.map(\.id))
-        perform(AddTrack(name: "\(prefix) \(count + 1)", kind: kind))
+        perform(AddTrack(name: "\(prefix) \(count + 1)", kind: kind, index: index))
         if let added = store.project.tracks.first(where: { !before.contains($0.id) }) { selectedTracks = [added.id] }
     }
 
@@ -563,5 +567,109 @@ final class ProjectWindowModel: Identifiable {
         midiInputPolls = 1
         let inputs = engine?.midiInputs() ?? []
         if inputs != midiInputs { midiInputs = inputs }
+    }
+}
+
+// MARK: Track list menu (UI-017, T-122)
+
+extension ProjectWindowModel {
+    /// The track list menu's items on track `trackID` (New Audio Track, New MIDI Track, inserting
+    /// below it; Rename…; Delete), or on empty space (`nil`: the two New items, appending). The
+    /// header column and the canvas build their `NSMenu` from these; `ui.perform` runs the same
+    /// actions by id. `separatorBefore` marks where the menu has a separator.
+    func trackListMenu(for trackID: NodeIDValue?) -> [(control: UIControl, separatorBefore: Bool)] {
+        guard let trackID, store.project.trackIndex(trackID) != nil else {
+            return [
+                (.button("tracks.menu.addAudio", "New Audio Track") { [weak self] in self?.addTrack(.audio) }, false),
+                (.button("tracks.menu.addMidi", "New MIDI Track") { [weak self] in self?.addTrack(.midi) }, false),
+            ]
+        }
+        return [
+            (.button("track.\(trackID).menu.addAudio", "New Audio Track") { [weak self] in self?.addTrack(.audio, below: trackID) }, false),
+            (.button("track.\(trackID).menu.addMidi", "New MIDI Track") { [weak self] in self?.addTrack(.midi, below: trackID) }, false),
+            (.button("track.\(trackID).menu.rename", "Rename…") { [weak self] in self?.beginRenaming(trackID) }, true),
+            (.button("track.\(trackID).menu.delete", "Delete") { [weak self] in self?.deleteTrack(trackID) }, false),
+        ]
+    }
+
+    /// UI-052: the track list menu's ids, per track and for empty space, always listed.
+    var trackListMenuControls: [UIControl] {
+        (store.project.tracks.map(\.id).map(Optional.some) + [nil]).flatMap { trackListMenu(for: $0).map(\.control) }
+    }
+
+    /// UI-017: the track a secondary click at `y` in the header column lands on (column and canvas
+    /// share the arrange geometry: the ruler's height on top, rows of `trackHeight`, the vertical
+    /// scroll). An automation lane or take row header counts as its track's. Nil for the ruler and
+    /// the empty space under the last track.
+    func trackListTarget(atY y: Double) -> NodeIDValue? {
+        let g = arrange.geometry
+        guard y >= TimelineGeometry.rulerHeight else { return nil }
+        let slot = g.slot(atY: y)
+        guard slot >= 0, slot < g.slotCount(tracks: store.project.tracks.count) else { return nil }
+        let index = g.owningTrack(ofRow: g.rowAndTake(ofSlot: slot).row)
+        guard index >= 0, index < store.project.tracks.count else { return nil }
+        return store.project.tracks[index].id
+    }
+
+    /// UI-017: what a secondary click on the track list (or the empty canvas under the tracks)
+    /// does before its menu shows: it selects the clicked track, as a primary click does.
+    func trackListMenuOpened(on trackID: NodeIDValue?) {
+        if let trackID { selectedTracks = [trackID] }
+    }
+
+    /// UI-017: a new track (⌘T/⇧⌘T's name and colour) right below `trackID`, selected. One undo entry.
+    func addTrack(_ kind: Track.Kind, below trackID: NodeIDValue) {
+        addTrack(kind, at: store.project.trackIndex(trackID).map { $0 + 1 })
+    }
+
+    /// UI-017: Rename… puts the header's name field into editing.
+    func beginRenaming(_ trackID: NodeIDValue) {
+        guard store.project.track(trackID) != nil else { return }
+        selectedTracks = [trackID]
+        renamingTrack = trackID
+    }
+
+    /// UI-017: the name field's commit: `RenameTrack` (one undo entry), none when the name is empty
+    /// (after trimming) or unchanged. False when it refuses the name. Editing ends either way; a
+    /// commit for a track that isn't being renamed (a field that ends editing as it goes away)
+    /// does nothing.
+    @discardableResult
+    func commitRename(_ trackID: NodeIDValue, to text: String) -> Bool {
+        guard renamingTrack == trackID else { return false }
+        renamingTrack = nil
+        let name = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let track = store.project.track(trackID), !name.isEmpty else { return false }
+        guard name != track.name else { return true }
+        do {
+            try store.perform(RenameTrack(trackID: trackID, name: name))
+            return true
+        } catch {
+            toasts.post(.error, .error, title: "Rename Track failed", message: error.description)
+            return false
+        }
+    }
+
+    /// UI-017: Escape in the name field.
+    func cancelRenaming() { renamingTrack = nil }
+
+    /// UI-052 (T-122): the name field while a header is being renamed, `track.<id>.name`, so
+    /// `ui.perform setText` commits a name as typing it and Return do.
+    var renameControls: [UIControl] {
+        guard let id = renamingTrack, let track = store.project.track(id) else { return [] }
+        return [.textField("track.\(id).name", "Name of \(track.name)", text: track.name) { [weak self] text in
+            self?.commitRename(id, to: text) ?? false
+        }]
+    }
+
+    /// UI-017: Delete: `RemoveTrack` (one undo entry; its cascades are part of it, MODEL-004). The
+    /// track and its clips leave the selection.
+    func deleteTrack(_ trackID: NodeIDValue) {
+        guard let track = store.project.track(trackID) else { return }
+        let clips = Set(track.clips.map(\.id))
+        perform(RemoveTrack(trackID: trackID))
+        guard store.project.track(trackID) == nil else { return }
+        selectedTracks.remove(trackID)
+        selectedClips.subtract(clips)
+        if renamingTrack == trackID { renamingTrack = nil }
     }
 }

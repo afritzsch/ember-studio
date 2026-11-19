@@ -221,11 +221,13 @@ private struct ArrangeBar: View {
 }
 
 /// Track headers in rows of `trackHeight`, below a spacer as tall as the canvas's ruler, offset by
-/// the canvas's vertical scroll.
+/// the canvas's vertical scroll. UI-017 (T-122): a secondary click anywhere in the column shows
+/// the track list menu (`TrackListMenuOverlay`).
 private struct TrackHeaderColumn: View {
     let model: ProjectWindowModel
 
     var body: some View {
+        let rename = model.renameControls.first
         GeometryReader { _ in
             VStack(spacing: 0) {
                 Color.clear.frame(height: TimelineGeometry.rulerHeight)
@@ -236,7 +238,9 @@ private struct TrackHeaderColumn: View {
                 }
                 ForEach(model.trackHeaders) { track in
                     // DW-271 (T-095): "A" and "+ Lane" sit in the header's first line, not over its second.
-                    TrackHeaderRow(track: track, automation: AutomationTrackAccessory(model: model.automation, trackID: track.id))
+                    TrackHeaderRow(track: track, automation: AutomationTrackAccessory(model: model.automation, trackID: track.id),
+                                   rename: rename?.id == "track.\(track.id).name" ? rename : nil,
+                                   cancelRename: { model.cancelRenaming() })
                         .frame(height: ProjectWindowModel.trackHeight - 1)
                     Divider()
                     TakeRowHeaders(model: model.takes, trackID: track.id)  // UI-016 (T-081): take rows come first
@@ -246,6 +250,127 @@ private struct TrackHeaderColumn: View {
             .offset(y: -model.scrollY)
         }
         .clipped()
+        .overlay { TrackListMenuOverlay(model: model) }
+    }
+}
+
+/// UI-017 (T-122): the track list menu over the header column, as an AppKit view so the menu is
+/// an `NSMenu` and a two-finger tap works with the system's secondary-click setting. It takes
+/// only secondary clicks (right-click, two-finger tap, ⌃-click); every other event passes through
+/// to the headers under it.
+private struct TrackListMenuOverlay: NSViewRepresentable {
+    let model: ProjectWindowModel
+
+    func makeNSView(context: Context) -> TrackListMenuView { TrackListMenuView(model: model) }
+    func updateNSView(_ view: TrackListMenuView, context: Context) { view.model = model }
+}
+
+/// UI-017: see `TrackListMenuOverlay`. Its y is the canvas's (the column starts with the ruler's
+/// height), so `ProjectWindowModel.trackListTarget(atY:)` finds the header under the click.
+final class TrackListMenuView: NSView {
+    var model: ProjectWindowModel
+
+    init(model: ProjectWindowModel) {
+        self.model = model
+        super.init(frame: .zero)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    override var isFlipped: Bool { true }
+
+    /// A secondary click: right button (a two-finger tap arrives as one), or ⌃ with the left.
+    static func isSecondaryClick(_ event: NSEvent) -> Bool {
+        switch event.type {
+        case .rightMouseDown, .rightMouseUp: true
+        case .leftMouseDown, .leftMouseUp: event.modifierFlags.contains(.control)
+        default: false
+        }
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard let event = NSApp.currentEvent, Self.isSecondaryClick(event) else { return nil }
+        return super.hitTest(point)
+    }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let trackID = model.trackListTarget(atY: convert(event.locationInWindow, from: nil).y)
+        model.trackListMenuOpened(on: trackID)
+        return TimelineCanvasView.trackListMenu(model, for: trackID)
+    }
+
+    /// ⌃-click, should AppKit hand it over as a plain press.
+    override func mouseDown(with event: NSEvent) {
+        guard let menu = menu(for: event) else { return }
+        NSMenu.popUpContextMenu(menu, with: event, for: self)
+    }
+}
+
+/// UI-017 (T-122): the header's name while Rename… edits it: an AppKit field that takes focus when
+/// it appears. Return or leaving the field commits (`rename`'s commit, one `RenameTrack`), Escape
+/// cancels. The field carries the control's id (`track.<id>.name`, UI-052).
+private struct TrackNameEditor: NSViewRepresentable {
+    let control: UIControl
+    let cancel: () -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(control: control, cancel: cancel) }
+
+    func makeNSView(context: Context) -> NSTextField {
+        let field = FocusingTextField(string: control.text ?? "")
+        field.font = .preferredFont(forTextStyle: .headline)
+        field.isBordered = true
+        field.bezelStyle = .roundedBezel
+        field.focusRingType = .default
+        field.delegate = context.coordinator
+        field.setAccessibilityIdentifier(control.id)
+        field.setAccessibilityLabel(control.label)
+        return field
+    }
+
+    func updateNSView(_ field: NSTextField, context: Context) {
+        context.coordinator.control = control
+        context.coordinator.cancel = cancel
+    }
+
+    @MainActor
+    final class Coordinator: NSObject, NSTextFieldDelegate {
+        var control: UIControl
+        var cancel: () -> Void
+        private var done = false
+
+        init(control: UIControl, cancel: @escaping () -> Void) {
+            self.control = control
+            self.cancel = cancel
+        }
+
+        func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+            guard selector == #selector(NSResponder.cancelOperation(_:)) else { return false }
+            done = true
+            cancel()
+            return true
+        }
+
+        func controlTextDidEndEditing(_ notification: Notification) {
+            guard !done, let field = notification.object as? NSTextField else { return }
+            done = true
+            _ = control.commitText?(field.stringValue)
+        }
+    }
+}
+
+/// A text field that becomes first responder (all text selected) once it is in a window.
+private final class FocusingTextField: NSTextField {
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard let window else { return }
+        DispatchQueue.main.async { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, self.window === window else { return }
+                window.makeFirstResponder(self)
+                self.currentEditor()?.selectAll(nil)
+            }
+        }
     }
 }
 
@@ -264,14 +389,22 @@ private struct TrackHeaderRow: View {
     let track: TrackHeaderModel
     /// UI-015: the automation "A" toggle and "+ Lane" menu, in the first line (DW-271).
     let automation: AutomationTrackAccessory
+    /// UI-017 (T-122): the name field's control while Rename… edits this header.
+    var rename: UIControl? = nil
+    var cancelRename: () -> Void = {}
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 4) {
-                ControlButton(control: track.selectControl, face: track.name)
-                    .buttonStyle(.plain)
-                    .font(.headline)
-                    .lineLimit(1)
+                if let rename {
+                    TrackNameEditor(control: rename, cancel: cancelRename)
+                        .frame(minWidth: 60)
+                } else {
+                    ControlButton(control: track.selectControl, face: track.name)
+                        .buttonStyle(.plain)
+                        .font(.headline)
+                        .lineLimit(1)
+                }
                 // DW-271 (T-095): the kind as an icon, so the name keeps room beside A, +, M and S.
                 Image(systemName: track.kind == .midi ? "pianokeys" : "waveform")
                     .font(.caption)
