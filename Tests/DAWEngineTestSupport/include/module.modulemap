@@ -54,6 +54,7 @@ module DAWEngineTestSupport {
   header "OfflineResetChecks.h"
   header "PluginEditorChecks.h"
   header "WrapJumpChecks.h"
+  header "EngineCorrectnessChecks.h"
   requires cplusplus
   export *
 }
