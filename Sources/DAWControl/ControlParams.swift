@@ -475,6 +475,11 @@ public struct UIPerformParams: Codable, Hashable, Sendable {
     /// DW-297 (T-100, additive): action `setText` on a text-field control (the toolbar's
     /// `transport.tempo`, `transport.signature`): the text to commit, as if typed and Return pressed.
     public var text: String? = nil
+    /// UI-063/UI-067 (T-124, additive): action `drop` on a browser item (`browser.item.<id>`):
+    /// the track to drop it on (absent: the empty area under the tracks, a new track) and the
+    /// tick (snapped to the arrange grid, as a drop is).
+    public var track: UInt64? = nil
+    public var tick: Int64? = nil
 }
 
 // MARK: test.fixture

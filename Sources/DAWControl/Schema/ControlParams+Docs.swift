@@ -179,10 +179,12 @@ extension UIPerformParams: JSONSchemaDocumented {
     public static var jsonSchemaDocs: [String: String] {
         [
             "accessibilityId": "A control id from ui.state (windows[].controls), e.g. track.<id>.mute",
-            "action": "click|press (buttons, toggles), toggle|on|off (toggles); swipe: a take row, with start and end; setText: a text field (transport.tempo, transport.signature), with text",
+            "action": "click|press (buttons, toggles), toggle|on|off (toggles); swipe: a take row, with start and end; setText: a text field (transport.tempo, transport.signature), with text; drop: a browser item (browser.item.<id>), with tick and optional track",
             "start": "UI-016, action swipe: first tick of the range the take plays (clamped to the take and its folder)",
             "end": "UI-016, action swipe: tick after the range",
             "text": "DW-297, action setText: what to type into the field (committed as with Return), e.g. \"128\" or \"7/8\"",
+            "track": "UI-063, action drop on a browser item (browser.item.<id>): the track ID to drop it on; absent: the empty area under the tracks (a new track)",
+            "tick": "UI-063, action drop: where the clip starts, snapped to the arrange grid as a drop is (set snap.off for an exact tick)",
         ]
     }
 }
