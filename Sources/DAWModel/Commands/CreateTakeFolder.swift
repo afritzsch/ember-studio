@@ -42,6 +42,17 @@ public struct CreateTakeFolder: Command {
 
     public var label: String { "Create Take Folder" }
 
+    /// DW-334: audio takes' explicit offsets follow a session-rate change.
+    public func rescaled(from: Double, to: Double) -> any Command {
+        var command = self
+        for k in command.takes.indices {
+            command.takes[k].sourceOffsetSamples = takes[k].sourceOffsetSamples.map {
+                Project.rescaleSamples($0, from: from, to: to)
+            }
+        }
+        return command
+    }
+
     public func apply(to project: inout Project) throws(DAWError) -> any Command {
         guard let track = project.track(trackID) else { throw .notFound(kind: "track", id: trackID) }
         guard !takes.isEmpty else { throw .invalidArgument("a take folder needs at least one take") }

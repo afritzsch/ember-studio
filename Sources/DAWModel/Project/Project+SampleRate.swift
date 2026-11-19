@@ -40,29 +40,13 @@ extension Project {
         let old = sessionSampleRate
         guard rate != old else { return }
         try setSessionSampleRate(rate)
+        // DW-334 (T-112): the same per-value rescale `Command.rescaled(from:to:)` gives the history.
         for t in tracks.indices {
-            for c in tracks[t].clips.indices {
-                guard case .audio(var clip) = tracks[t].clips[c] else { continue }
-                clip.sourceOffsetSamples = Self.rescaleSamples(clip.sourceOffsetSamples, from: old, to: rate)
-                tracks[t].clips[c] = .audio(clip)
-            }
+            tracks[t].clips = tracks[t].clips.map { $0.rescaled(from: old, to: rate) }
             // DW-259 (T-099): an audio take's clip views its recording by sourceOffsetSamples too.
-            for f in tracks[t].takeFolders.indices {
-                for k in tracks[t].takeFolders[f].takes.indices {
-                    guard case .audio(var clip) = tracks[t].takeFolders[f].takes[k].clip else { continue }
-                    clip.sourceOffsetSamples = Self.rescaleSamples(clip.sourceOffsetSamples, from: old, to: rate)
-                    tracks[t].takeFolders[f].takes[k].clip = .audio(clip)
-                }
-            }
+            tracks[t].takeFolders = tracks[t].takeFolders.map { $0.rescaled(from: old, to: rate) }
         }
-        updateEachDeviceSlot { slot in
-            for z in slot.zones.indices {
-                guard let start = slot.zones[z].loopStart, let end = slot.zones[z].loopEnd else { continue }
-                let newStart = min(Self.rescaleSamples(start, from: old, to: rate), AudioClip.maxSourceOffset - 1)
-                slot.zones[z].loopStart = newStart
-                slot.zones[z].loopEnd = max(Self.rescaleSamples(end, from: old, to: rate), newStart + 1)
-            }
-        }
+        updateEachDeviceSlot { slot in slot = slot.rescaled(from: old, to: rate) }
     }
 
     private static func gcd(_ a: Int64, _ b: Int64) -> Int64 {

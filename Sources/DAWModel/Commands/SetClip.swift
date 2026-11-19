@@ -11,6 +11,11 @@ public struct SetClip: Command {
 
     public var label: String { "Edit Clip" }
 
+    /// DW-334: the clip snapshot's offset follows a session-rate change.
+    public func rescaled(from: Double, to: Double) -> any Command {
+        SetClip(clip: clip.rescaled(from: from, to: to))
+    }
+
     public func apply(to project: inout Project) throws(DAWError) -> any Command {
         guard let (track, index) = project.clipLocation(clip.id) else { throw .notFound(kind: "clip", id: clip.id) }
         let old = try project.updateTrack(track) { $0.clips.remove(at: index) }

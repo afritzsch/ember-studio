@@ -210,7 +210,12 @@ public final class AutomationRecorder {
     /// point at the playhead if there is one; otherwise tells the caller to perform its `SetParam`
     /// (and remembers it, so the control shows that value until the playhead changes).
     @discardableResult
-    public func stoppedEdit(_ target: ParamTarget, value: Float, at tick: Tick? = nil) throws(DAWError) -> StoppedEdit {
+    ///
+    /// DW-336 (T-112): `owner` is whose gesture the edit belongs to: the UI's (default), or the plugin
+    /// editor's for `pluginEdited`, so it joins that owner's gesture and no other.
+    public func stoppedEdit(
+        _ target: ParamTarget, value: Float, at tick: Tick? = nil, owner: GestureOwner = .ui
+    ) throws(DAWError) -> StoppedEdit {
         let n = now()
         guard !(n.playing && tick == nil), let (channel, lane) = project.automationLane(for: target),
               lane.isEnabled, !lane.points.isEmpty else { return .none }
@@ -221,7 +226,7 @@ public final class AutomationRecorder {
         }
         var edited = lane
         edited.points[i].value = normalized(target, value)
-        if edited != lane { try store.perform(SetAutomationLane(channel: channel, target: target, lane: edited)) }
+        if edited != lane { try store.perform(SetAutomationLane(channel: channel, target: target, lane: edited), as: owner) }
         return .editedPoint(tick)
     }
 
@@ -258,7 +263,9 @@ public final class AutomationRecorder {
                 return true
             }
             guard !now().playing, isAutomated(target) else { return false }
-            if case .editedPoint = (try? stoppedEdit(target, value: edit.value, at: tick)) ?? .none { return true }
+            if case .editedPoint = (try? stoppedEdit(target, value: edit.value, at: tick, owner: PluginEditRecorder.owner)) ?? .none {
+                return true
+            }
             return false
         case .end:
             guard held else { return false }
@@ -337,7 +344,9 @@ public final class AutomationRecorder {
         let command = RecordAutomation(target: target, from: pass.from, to: to,
                                        points: AutomationThinning.thin(pass.points, epsilon: epsilon), mode: pass.mode)
         do {
-            try store.perform(command)
+            // DW-336 (T-112): a pass is its own entry, never part of a gesture that happens to be
+            // open when it ends (the transport stopping during a clip drag).
+            try store.perform(command, as: .automation)
             committed.append(command)
         } catch {
             // The target or lane went away mid-pass (undo, a removed send): nothing to record.

@@ -16,14 +16,16 @@ public final class ProjectStore {
     private var history: UndoStack
     /// `history.stateMarker` at the last save.
     private var cleanMarker: UInt64 = 0
+    /// A `cleanMarker` no state of the history has: the saved file matches no undo position
+    /// (a recovered autosave, dropped history, a save mid-gesture).
+    private static let matchesNoState = UInt64.max
     /// T-026: counts edits that leave no undo entry (`HistoryExemptCommand`), so they make the
     /// project dirty too; `cleanUnrecorded` is its value at the last save. Undo can't take them
     /// back, so only a save makes them clean.
     private var unrecordedEdits: UInt64 = 0
     private var cleanUnrecorded: UInt64 = 0
-    /// The project when the open gesture began, and everything its updates touched so far.
-    private var gestureStart: Project?
-    private var gestureChange: ProjectChange?
+    /// DW-336: per owner with an open gesture, everything its updates touched so far.
+    private var gestureChanges: [GestureOwner: ProjectChange] = [:]
 
     /// MODEL-021: the engine this store keeps in step, if any (`attachEngine`).
     @ObservationIgnored public private(set) var engineSync: EngineSync?
@@ -77,6 +79,13 @@ public final class ProjectStore {
     /// autosave write or removal, before the store's own continuation resumes on the main actor.
     /// A test parks it to act inside that window. Nil, as always outside tests, changes nothing.
     @ObservationIgnored var afterAutosaveIO: (@Sendable () async -> Void)?
+    /// Test-only seam (DW-335): awaited on the file-operation queue right after a save's files are
+    /// written, before the next queued operation and before the save resumes on the main actor. A
+    /// test parks it to make a slow save.
+    @ObservationIgnored var afterSaveIO: (@Sendable () async -> Void)?
+    /// DW-335: `folderURL` as the file-operation queue sees it (set by a save on the queue, read by
+    /// an autosave when it runs).
+    @ObservationIgnored private let autosaveDestination = AutosaveDestination(nil)
 
     @ObservationIgnored private var subscribers: [Int: AsyncStream<ProjectChange>.Continuation] = [:]
     @ObservationIgnored private var nextSubscriber = 0
@@ -93,20 +102,24 @@ public final class ProjectStore {
     /// For "Undo <label>" menu items and the control protocol's `undo` result (CTL-002).
     public var undoLabel: String? { history.undoLabel }
     public var redoLabel: String? { history.redoLabel }
+    /// Whether any owner has a gesture open (autosave waits for none, MODEL-044).
     public var isGestureActive: Bool { history.isGestureActive }
+    /// DW-336: whether `owner` has a gesture open.
+    public func hasOpenGesture(owner: GestureOwner) -> Bool { history.hasOpenGesture(owner: owner) }
 
-    /// Applies `command` and pushes it onto the undo stack, or, inside a gesture, applies it
-    /// without pushing (MODEL-003). Throws without changing anything if the command is invalid.
-    /// A `HistoryExemptCommand` (T-026) is never pushed, not even as part of a gesture; it still
-    /// publishes a `.perform` change and makes the project dirty.
-    public func perform(_ command: any Command) throws(DAWError) {
+    /// Applies `command` and pushes it onto the undo stack, or, inside a gesture of `owner`, applies
+    /// it without pushing (MODEL-003). A gesture of another owner doesn't take it: it is its own
+    /// entry, published as `.perform`, and the gesture stays open (DW-336). Throws without changing
+    /// anything if the command is invalid. A `HistoryExemptCommand` (T-026) is never pushed, not
+    /// even as part of a gesture; it still publishes a `.perform` change and makes the project dirty.
+    public func perform(_ command: any Command, as owner: GestureOwner = .ui) throws(DAWError) {
         let before = project
         var working = project
         // T-056: a session-rate change goes to the engine first, so a rate it refuses (the device
         // can't run it) leaves the document as it is; if the command then fails, the engine goes back.
         let engineRateBefore = try changeEngineSampleRate(for: command)
         do {
-            try history.perform(command, on: &working)
+            try history.perform(command, on: &working, as: owner)
         } catch {
             if let engineRateBefore { try? engineSync?.setSessionSampleRate(engineRateBefore) }
             throw error
@@ -115,9 +128,9 @@ public final class ProjectStore {
         if command.isHistoryExempt {
             unrecordedEdits &+= 1
             publish(ProjectChange(cause: .perform, label: command.label, from: before, to: working))
-        } else if gestureStart != nil {
+        } else if gestureChanges[owner] != nil {
             let change = ProjectChange(cause: .gestureUpdate, label: command.label, from: before, to: working)
-            gestureChange?.formUnion(change)
+            gestureChanges[owner]?.formUnion(change)
             publish(change)
         } else {
             publish(ProjectChange(cause: .perform, label: command.label, from: before, to: working))
@@ -139,27 +152,39 @@ public final class ProjectStore {
         }
     }
 
+    // MARK: IDs (DW-339)
+
+    /// DW-339 (T-112, 07 "Contract delta (T-112)"): takes the next model ID for a caller that needs
+    /// it before its command exists, typically an asset the engine loads under its ID first and
+    /// `ImportAsset` claims afterwards, across an `await`. Every later allocation (any command,
+    /// another reservation) skips it, so an edit in between can't take the same ID. Not an edit:
+    /// no undo entry, no change event, the dirty flag stays. IDs are never reused, so a reservation
+    /// that is never claimed (the load failed) only leaves a gap.
+    public func reserveID() -> ModelID {
+        project.ids.allocate()
+    }
+
     // MARK: Gestures (MODEL-003)
 
     /// Starts a continuous edit (fader drag, clip drag). Commands performed until `endGesture`
     /// apply immediately, each publishing a `.gestureUpdate`, and become one undo entry. Engine sync
     /// (MODEL-021) can send param-only updates straight to param slots instead of rebuilding.
-    /// Gestures nest; only the outermost counts.
-    public func beginGesture(_ label: String) {
-        if !history.isGestureActive {
-            gestureStart = project
-            gestureChange = ProjectChange(cause: .gestureEnd, label: label)
+    /// An owner's gestures nest; only its outermost counts. DW-336: only commands performed `as`
+    /// the same owner join it; the App's controls use `.ui`, the default.
+    public func beginGesture(_ label: String, owner: GestureOwner = .ui) {
+        if !history.hasOpenGesture(owner: owner) {
+            gestureChanges[owner] = ProjectChange(cause: .gestureEnd, label: label)
         }
-        history.beginGesture(label)
+        history.beginGesture(label, owner: owner)
     }
 
-    /// Ends the gesture: pushes its single undo entry and publishes a `.gestureEnd` covering all of
-    /// its updates.
-    public func endGesture() {
-        guard history.isGestureActive else { return }
-        history.endGesture()
-        guard !history.isGestureActive else { return }
-        finishGesture()
+    /// Ends `owner`'s gesture: pushes its single undo entry and publishes a `.gestureEnd` covering
+    /// all of its updates. Another owner's gesture is left open (DW-336).
+    public func endGesture(owner: GestureOwner = .ui) {
+        guard history.hasOpenGesture(owner: owner) else { return }
+        history.endGesture(owner: owner)
+        guard !history.hasOpenGesture(owner: owner) else { return }
+        finishGesture(owner)
     }
 
     // MARK: Changes
@@ -243,25 +268,31 @@ public final class ProjectStore {
             throw .invalidArgument("the project has no folder yet; save needs a path")
         }
         let snapshot = project
-        let marker = history.stateMarker
+        // DW-338: mid-gesture, the file gets the gesture's values so far, which no undo position
+        // holds (the gesture's entry is pushed at its end), so the store stays dirty.
+        let marker = history.gestureHasChanges ? Self.matchesNoState : history.stateMarker
         let unrecorded = unrecordedEdits
         let serial = editSerial
         let states = capturePluginStates(snapshot)
         let source = folderURL
+        // DW-335: Save As to another folder removes the old folder's autosave (this store's) on the
+        // queue, after the save and before any autosave queued behind it, which writes into `target`.
+        let removeOldAutosave = wroteAutosave && source.map { $0.standardizedFileURL != target.standardizedFileURL } ?? false
+        let destination = autosaveDestination
         autosaveTicket &+= 1
         let ticket = autosaveTicket
-        let moved = try await serialized { () throws(DAWError) in
-            try ProjectFolder(url: target).save(snapshot, pluginStates: states, sourceFolder: source)
-        }
+        let moved = try await serialized({ () throws(DAWError) in
+            let moved = try ProjectFolder(url: target).save(snapshot, pluginStates: states, sourceFolder: source)
+            destination.url = target
+            if removeOldAutosave, let source { ProjectFolder(url: source).removeAutosave() }
+            return moved
+        }, after: afterSaveIO)
         // DW-124: the copied assets' new paths. Not an edit (no undo entry, no change event): the
         // file is the same, only where the project finds it changed.
         let oldPaths = Dictionary(snapshot.assets.map { ($0.id, $0.path) }, uniquingKeysWith: { a, _ in a })
         for i in project.assets.indices {
             let asset = project.assets[i]
             if let path = moved[asset.id], oldPaths[asset.id] == asset.path { project.assets[i].path = path }
-        }
-        if let source, source.standardizedFileURL != target.standardizedFileURL, wroteAutosave {
-            ProjectFolder(url: source).removeAutosave()
         }
         folderURL = target
         // DW-148: an autosave started while saving was queued after the save and describes the
@@ -304,11 +335,12 @@ public final class ProjectStore {
         }.value.get()
         let store = ProjectStore(project: project)
         store.folderURL = url
+        store.autosaveDestination.url = url
         store.loadReport = report
         store.isSafeMode = safeMode
         if report.recovered {
             // The project differs from project.json until it is saved.
-            store.cleanMarker = .max
+            store.cleanMarker = Self.matchesNoState
             store.updateDirty()
             store.autosavedSerial = store.editSerial
         }
@@ -361,15 +393,20 @@ public final class ProjectStore {
     /// continuations after them may resume on the main actor after later edits and autosaves.
     /// Recording state there let an edit made in between count as autosaved (never written), or
     /// let a removal be skipped because the write before it hadn't resumed yet.
+    ///
+    /// DW-335: the folder is the one the queue holds when the operation runs (`autosaveDestination`),
+    /// not `folderURL` now: an autosave queued behind a Save As writes into the new folder.
     public func autosave() async throws(DAWError) {
-        guard let folderURL, !history.isGestureActive else { return }
-        let folder = ProjectFolder(url: folderURL)
+        guard folderURL != nil, !history.isGestureActive else { return }
+        let destination = autosaveDestination
         let serial = editSerial
         if !isDirty {
             autosavedSerial = serial
             guard wroteAutosave else { return }
             wroteAutosave = false
-            try await autosaveIO(onFailure: { $0.wroteAutosave = true }) { () throws(DAWError) in folder.removeAutosave() }
+            try await autosaveIO(onFailure: { $0.wroteAutosave = true }) { () throws(DAWError) in
+                if let url = destination.url { ProjectFolder(url: url).removeAutosave() }
+            }
             return
         }
         guard serial != autosavedSerial else { return }
@@ -378,7 +415,8 @@ public final class ProjectStore {
         wroteAutosave = true
         autosavedSerial = serial
         try await autosaveIO(onFailure: { $0.autosavedSerial = nil }) { () throws(DAWError) in
-            try folder.autosave(snapshot, pluginStates: states)
+            guard let url = destination.url else { return }
+            try ProjectFolder(url: url).autosave(snapshot, pluginStates: states)
         }
     }
 
@@ -502,22 +540,21 @@ public final class ProjectStore {
             // the project as it is and drop the history rather than leave undo half-working.
             Self.log.fault("\(String(describing: cause)) failed, clearing undo history: \(error)")
             history.removeAll()
-            cleanMarker = .max
+            gestureChanges.removeAll()
+            cleanMarker = Self.matchesNoState
             updateDirty()
         }
     }
 
     private func endGestureForHistoryStep() {
         guard history.isGestureActive else { return }
+        let owners = history.openGestureOwners
         history.endAllGestures()
-        finishGesture()
+        for owner in owners { finishGesture(owner) }
     }
 
-    private func finishGesture() {
-        let change = gestureChange
-        gestureStart = nil
-        gestureChange = nil
-        if let change, !change.isEmpty {
+    private func finishGesture(_ owner: GestureOwner) {
+        if let change = gestureChanges.removeValue(forKey: owner), !change.isEmpty {
             publish(change)
         }
     }

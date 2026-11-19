@@ -14,6 +14,11 @@ public struct SetSamplerZones: Command {
 
     public var label: String { "Edit Sampler Zones" }
 
+    /// DW-334: the zones' loop points follow a session-rate change.
+    public func rescaled(from: Double, to: Double) -> any Command {
+        SetSamplerZones(slotID: slotID, zones: zones.map { $0.rescaled(from: from, to: to) })
+    }
+
     public func apply(to project: inout Project) throws(DAWError) -> any Command {
         try project.checkZoneAssets(zones)
         let old = try project.updateDeviceSlot(slotID) { (slot: inout DeviceSlot) throws(DAWError) -> [SamplerZone] in

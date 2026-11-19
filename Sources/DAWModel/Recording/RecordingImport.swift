@@ -173,7 +173,9 @@ extension ProjectStore {
         guard let track = project.track(take.track) else { throw .notFound(kind: "track", id: take.track) }
         guard track.kind == .audio else { throw .invalidArgument("track \(take.track) isn't an audio track") }
         let file = URL(fileURLWithPath: take.file)
-        let id = project.ids.next  // ImportAsset claims it (MODEL-005, DW-105)
+        // ImportAsset claims it (MODEL-005, DW-105). DW-339: reserved, so nothing performed while
+        // the engine loads it (an attach-mode asset.import) can take the same ID.
+        let id = reserveID()
         let path = folderURL.flatMap { ProjectFolder.relativePath(of: file, inside: $0) } ?? file.path
         let asset = AssetRef(id: id, path: path, channels: Int(take.channels), originalSampleRate: take.sampleRate,
                              frames: take.frames)
@@ -183,7 +185,7 @@ extension ProjectStore {
         if let sync = engineSync {
             for load in sync.loadAssets([asset], folder: folderURL) { load.job.map(sync.trackLoad) }
         }
-        try perform(command)
+        try perform(command, as: .recording)  // DW-336: never joins an open UI gesture
         return id
     }
 
@@ -197,12 +199,12 @@ extension ProjectStore {
         guard track.kind == .midi else { throw .invalidArgument("track \(take.track) isn't a MIDI track") }
         if let folder = RecordingImport.midiTakeFolderCommand(for: take, in: project) {
             let folderID = project.ids.next  // CreateTakeFolder allocates it first
-            try perform(folder)
+            try perform(folder, as: .recording)  // DW-336
             return folderID
         }
         guard let command = RecordingImport.midiCommand(for: take, in: project) else { return nil }
         let clipID = project.ids.next
-        try perform(command)
+        try perform(command, as: .recording)  // DW-336
         return clipID
     }
 

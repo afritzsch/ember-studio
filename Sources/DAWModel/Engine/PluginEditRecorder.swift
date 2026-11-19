@@ -16,6 +16,8 @@ import os
 /// - Undo of a first edit (docs/autobuild/DECISIONS.md "T-063 first-edit undo"): a `begin` on a param
 ///   the document doesn't set hands its value (the plugin's before the gesture) to
 ///   `EngineSync.rememberPluginBaseline`, so an undo back to "unset" reverts the plugin too.
+/// - DW-336 (T-112): its gestures and commands are owned by `.pluginEditor`, so an open UI gesture
+///   never takes a plugin's edit, and this recorder never adopts or closes a gesture it didn't open.
 /// - Edits of a slot that isn't a hosted plugin in the project are dropped. Gestures of a slot that
 ///   left the project, or whose editor closed (`endGestures(slot:)`), end; an undo/redo ends the
 ///   store's gesture, and a later value of the same plugin gesture opens a new one.
@@ -27,6 +29,8 @@ public final class PluginEditRecorder {
     }
 
     public static let label = "Set Parameter"
+    /// DW-336 (T-112): the gesture owner of the plugin editors' edits.
+    public static let owner = GestureOwner.pluginEditor
 
     weak var store: ProjectStore?
     /// The params whose plugin gesture is open.
@@ -89,9 +93,9 @@ public final class PluginEditRecorder {
             ensureGesture(store)
             for (key, value) in pending { apply(key, value, store) }
         } else {
-            store.beginGesture(Self.label)
+            store.beginGesture(Self.label, owner: Self.owner)
             for (key, value) in pending { apply(key, value, store) }
-            store.endGesture()
+            store.endGesture(owner: Self.owner)
         }
     }
 
@@ -106,22 +110,25 @@ public final class PluginEditRecorder {
 
     // MARK: Private
 
+    /// DW-336: opens this recorder's own gesture; a UI gesture that is open is neither adopted nor
+    /// joined (it has another owner).
     private func ensureGesture(_ store: ProjectStore) {
-        if ownsStoreGesture && store.isGestureActive { return }
-        store.beginGesture(Self.label)
+        if ownsStoreGesture && store.hasOpenGesture(owner: Self.owner) { return }
+        store.beginGesture(Self.label, owner: Self.owner)
         ownsStoreGesture = true
     }
 
+    /// DW-336: closes only the gesture this recorder opened, never the UI's.
     private func closeGesture(_ store: ProjectStore) {
         guard ownsStoreGesture else { return }
         ownsStoreGesture = false
-        if store.isGestureActive { store.endGesture() }
+        if store.hasOpenGesture(owner: Self.owner) { store.endGesture(owner: Self.owner) }
     }
 
     private func apply(_ key: Key, _ value: Float, _ store: ProjectStore) {
         guard value.isFinite, !Self.holds(store.project, key, value) else { return }
         do {
-            try store.perform(SetParam(target: .device(slot: key.slot, index: key.index), value: value))
+            try store.perform(SetParam(target: .device(slot: key.slot, index: key.index), value: value), as: Self.owner)
         } catch {
             Self.log.error("plugin edit of slot \(key.slot) param \(key.index): \(error)")
         }

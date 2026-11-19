@@ -14,6 +14,11 @@ public struct RestoreClip: Command {
 
     public var label: String { "Restore Clip" }
 
+    /// DW-334: the clip snapshot's offset follows a session-rate change.
+    public func rescaled(from: Double, to: Double) -> any Command {
+        RestoreClip(trackID: trackID, clip: clip.rescaled(from: from, to: to))
+    }
+
     public func apply(to project: inout Project) throws(DAWError) -> any Command {
         try project.insertClip(clip, into: trackID)
         return RemoveClip(clipID: clip.id)

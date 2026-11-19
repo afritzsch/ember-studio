@@ -20,6 +20,11 @@ public struct SetInstrument: Command {
 
     public var label: String { "Set Instrument" }
 
+    /// DW-334: the zones' loop points follow a session-rate change.
+    public func rescaled(from: Double, to: Double) -> any Command {
+        SetInstrument(trackID: trackID, device: device, zones: zones?.map { $0.rescaled(from: from, to: to) })
+    }
+
     public func apply(to project: inout Project) throws(DAWError) -> any Command {
         let slot = DeviceSlot(id: project.ids.allocate(), kind: device, zones: zones ?? [])
         var working = project
