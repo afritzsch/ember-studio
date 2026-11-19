@@ -88,8 +88,11 @@ void GraphCompiler::run() {
             } else {
                 desc = *last_;
             }
-            // Any build re-reads every node's latency, so it answers the reports so far.
+            // Any build re-reads every node's latency, so it answers the reports so far, and those
+            // a failed latency rebuild carried over (DW-311).
             reports = std::exchange(latencyReports_, {});
+            for (NodeID node : std::exchange(carriedReports_, {}))
+                if (std::find(reports.begin(), reports.end(), node) == reports.end()) reports.push_back(node);
         }
 
         auto graph = builder_.build(desc, engine_.nodes(), engine_.params());
@@ -112,9 +115,19 @@ void GraphCompiler::run() {
             else ++status_.latencyRebuilds;
             if (graph) {
                 status_.publishedVersion = desc.version;
-                status_.lastError.reset();
+                // DW-311: a latency rebuild doesn't clear the error of a rejected submission, so
+                // the rejection is still there for the poll that sees its ticket completed.
+                if (ticket != 0) status_.lastError.reset();
             } else {
                 status_.lastError = graph.error();
+                // DW-311 (T-111), MIX-024: the reports this build drained are still unanswered and
+                // PDC still has the old latency. After a rejected submission they go back to the
+                // queue, so the last good description is rebuilt with the new latency at once.
+                // After a failed latency rebuild (of that same description) they wait for the
+                // next build instead, so a description that keeps failing doesn't spin.
+                std::vector<NodeID>& into = ticket != 0 ? latencyReports_ : carriedReports_;
+                for (NodeID node : reports)
+                    if (std::find(into.begin(), into.end(), node) == into.end()) into.push_back(node);
             }
             for (const LatencyEvent& event : events) {
                 if (events_.size() < kMaxEvents) events_.push_back(event);

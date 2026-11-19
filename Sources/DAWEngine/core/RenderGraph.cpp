@@ -135,15 +135,20 @@ bool MidiDelayLine::admit(const MidiEvent& e) DAW_RT {
         const uint8_t channel = e.data[0] & 0x0F;
         const uint32_t key = uint32_t{channel} * 128 + (e.data[1] & 0x7Fu);
         if (status == kNoteOnStatus && e.data[2] > 0) {
+            // DW-318 (T-111): the reserve counts held keys, not note-ons: a repeated on for a key
+            // already held (a source that never sends the off) reuses its key's reserved release,
+            // so unpaired ons can't grow the reserve until every later on is dropped. It needs
+            // room for itself only; a new key needs room for its own off too.
+            if (held_[key] != 0) return free >= reserve + 1;
             // Room for this on, its off, and every held note's and pedal's release.
             if (free < reserve + 2) return false;
-            ++held_[key];
+            held_[key] = 1;
             ++numHeld_;
             return true;
         }
         if (status == kNoteOffStatus || status == kNoteOnStatus) {  // velocity 0: an off
-            if (held_[key] > 0) {  // its slot was reserved when the on went in
-                --held_[key];
+            if (held_[key] != 0) {  // its slot was reserved when the key's first on went in
+                held_[key] = 0;
                 --numHeld_;
                 return free > 0;
             }

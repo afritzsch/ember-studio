@@ -113,8 +113,10 @@ private:
 // wait behind them, so a shrinking delay plays a few late, never reordered or lost).
 //
 // Overflow policy (05 "MIDI routing"): the queue never drops a note-off or a pedal-up for a note
-// or pedal it let through. It counts the notes (per channel and key) and sustain pedals (CC 64)
-// whose on/down it queued and whose off/up it hasn't seen yet, and keeps that many slots free:
+// or pedal it let through. It counts the held keys (distinct channel and key pairs, DW-318) and
+// sustain pedals (CC 64) whose on/down it queued and whose off/up it hasn't seen yet, and keeps
+// that many slots free (the first off for a held key releases it; a repeated on for a held key
+// reuses its slot, so unpaired note-ons never grow the reserve):
 // a note-on or pedal-down is queued only if room stays for itself and its own release, and any
 // other event only if it leaves the reserve intact. Dropped events are counted (dropped()). CC
 // 120/123 (All Sound/Notes Off) clear the channel's held notes; CC 121 clears its pedal.
@@ -174,7 +176,7 @@ private:
     int64_t lastDue_ = 0;  // due frame of the last event queued
     uint32_t lastOutFrame_ = 0;
     uint32_t numHeld_ = 0, numPedals_ = 0;
-    std::unique_ptr<uint16_t[]> held_;  // [channel × 128 + key]
+    std::unique_ptr<uint16_t[]> held_;  // [channel × 128 + key]: 1 while the key is held (DW-318)
     bool pedal_[16] = {};
     std::atomic<uint64_t> dropped_{0};
     uint64_t reported_ = 0;  // DW-170: audio thread only (takeNewDrops)

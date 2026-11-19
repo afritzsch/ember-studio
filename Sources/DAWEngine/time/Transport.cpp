@@ -88,9 +88,23 @@ void Transport::beginBlock(const TempoMap& tempo) DAW_RT {
     // the map changed), so commands below and the playhead see the re-anchored position.
     reanchor(tempo);
 
-    // TIME-004: everything queued so far applies from this block's first frame. Bounded by the
-    // queue's capacity (CONV-RT-04); anything pushed meanwhile waits for the next block.
+    // TIME-004: everything queued so far applies from this block's first frame.
     locatedWhilePlaying_ = false;
+    applyCommands(&tempo);
+
+    // Before the layout: the playhead shows this block's first frame, judged by the run it
+    // belongs to, not by a wrap later in the block.
+    publishPlayhead(tempo);
+}
+
+void Transport::applyCommands(const TempoMap* tempo) DAW_RT {
+    // DW-313: a locate from a block without a map comes first; it was queued before the rest.
+    if (pendingLocate_ && tempo != nullptr) {
+        pendingLocate_ = false;
+        apply({TransportCmdType::locate, false, pendingLocateTick_}, tempo);
+    }
+    // Bounded by the queue's capacity (CONV-RT-04); anything pushed meanwhile waits for the next
+    // block.
     uint64_t applied = 0;
     TransportCmd cmd;
     for (std::size_t i = 0; i < kCommandCapacity && commands_.pop(cmd); ++i) {
@@ -98,10 +112,26 @@ void Transport::beginBlock(const TempoMap& tempo) DAW_RT {
         ++applied;
     }
     if (applied != 0) commandsApplied_.fetch_add(applied, std::memory_order_relaxed);
+}
 
-    // Before the layout: the playhead shows this block's first frame, judged by the run it
-    // belongs to, not by a wrap later in the block.
-    publishPlayhead(tempo);
+void Transport::silentBlock(const TempoMap* tempo) DAW_RT {
+    if (tempo != nullptr) {
+        beginBlock(*tempo);
+        anchor(*tempo);  // DW-061: the next block re-anchors from here (a locate just applied)
+        block_.seg[0] = makeSegment(*tempo, pos_, 0, 0, false);
+    } else {
+        locatedWhilePlaying_ = false;
+        applyCommands(nullptr);
+        block_.seg[0].numFrames = 0;
+        block_.seg[0].frameOffset = 0;
+    }
+    // DW-313: nothing played; no map to read (03 TIME-004 clarification).
+    block_.playing = playing_;
+    block_.recording = recording_;
+    block_.numSegments = 0;
+    block_.seg[1] = block_.seg[0];
+    block_.tempo = nullptr;
+    passFrames_ = 0;
 }
 
 void Transport::reanchor(const TempoMap& tempo) DAW_RT {
@@ -142,7 +172,7 @@ void Transport::offsetLastPass(uint32_t offset) DAW_RT {
     for (uint8_t i = 0; i < block_.numSegments && i < 2; ++i) block_.seg[i].frameOffset += offset;
 }
 
-void Transport::apply(const TransportCmd& cmd, const TempoMap& tempo) DAW_RT {
+void Transport::apply(const TransportCmd& cmd, const TempoMap* tempo) DAW_RT {
     switch (cmd.type) {
     case TransportCmdType::play:
         if (!playing_) {
@@ -156,7 +186,13 @@ void Transport::apply(const TransportCmd& cmd, const TempoMap& tempo) DAW_RT {
         wrapPending_ = false;
         break;
     case TransportCmdType::locate:
-        pos_ = tempo.tickToSample(cmd.tick);
+        if (tempo == nullptr) {  // DW-313: no map to put the tick on yet
+            pendingLocate_ = true;
+            pendingLocateTick_ = cmd.tick;
+            break;
+        }
+        pendingLocate_ = false;
+        pos_ = tempo->tickToSample(cmd.tick);
         wrapPending_ = false;
         runStart_ = pos_;
         runFromWrap_ = false;

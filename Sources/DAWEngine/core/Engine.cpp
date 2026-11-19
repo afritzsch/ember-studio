@@ -140,6 +140,14 @@ void Engine::render(RenderTarget& target, uint32_t numFrames) DAW_RT {
 
     if (graph == nullptr || n > graph->maxBlock()) {
         silence(out, n);  // ENG-015
+        // DW-313 (T-111): commands still apply (the queue never fills up), the playhead follows
+        // the graph's map if there is one, and block() has no map: nothing rendered with it, and
+        // the graph before may already be reclaimed. The position stands still. The next block
+        // that renders starts a new run (MIX-023 pre-roll), and resets the timeline nodes for a
+        // locate applied here while playing (TIME-008).
+        transport_.silentBlock(graph != nullptr ? &graph->tempoMap() : nullptr);
+        if (transport_.locatedWhilePlaying()) locateResetPending_ = true;
+        runPrerolled_ = false;
         if (liveMidi_ != nullptr) liveMidi_->idleBlock(n, cycleHostTicks);  // inputs keep draining
     } else {
         renderGraph(*graph, target, n, cycleHostTicks);
@@ -191,7 +199,8 @@ void Engine::renderGraph(const RenderGraph& graph, RenderTarget& target, uint32_
     // DW-063 (T-089): an offline render resets every node (and the graph's PDC lines) before
     // its first block instead, so renders on one engine don't depend on what played before.
     // Each node is reset once either way.
-    const bool located = transport_.locatedWhilePlaying();
+    const bool located = transport_.locatedWhilePlaying() || locateResetPending_;
+    locateResetPending_ = false;
     if (resetAllPending_.exchange(false, std::memory_order_acq_rel)) graph.resetAllNodes();
     else if (located) graph.resetTimelineNodes();
 
@@ -277,6 +286,9 @@ void Engine::preRoll(const RenderGraph& graph, const TransportBlock& block, bool
     const Loop straight;
     const uint32_t latency = graph.latency();
     const SamplePos start = blockStartSample(block);
+    // DW-312 (T-111): the pre-roll's audio is thrown away, so its clipped samples, meter peaks
+    // and NaN blocks don't reach telemetry either.
+    telemetry_.setDiscardingAudio(true);
     for (uint32_t done = 0; done < latency;) {
         const uint32_t remaining = latency - done;
         uint32_t n = remaining < graph.maxBlock() ? remaining : graph.maxBlock();
@@ -293,6 +305,7 @@ void Engine::preRoll(const RenderGraph& graph, const TransportBlock& block, bool
         graph.process(ctx, timeline, MonitorInput{monitorEnabled, nullptr});
         done += n;
     }
+    telemetry_.setDiscardingAudio(false);
 }
 
 } // namespace daw

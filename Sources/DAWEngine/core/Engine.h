@@ -41,6 +41,11 @@
 // pre-roll, telemetry and the epoch. After the block, Transport::block() describes its last pass
 // in the block's frame numbering (the recorder reads it after render).
 //
+// Blocks that render no graph (DW-313, T-111): no graph published, or numFrames above the graph's
+// maxBlock. They output silence, still apply transport commands (Transport::silentBlock) and leave
+// the position where it was; Transport::block() then has no tempo map, so nothing after render
+// reads a map that belongs to no rendered graph.
+//
 // Offline renders reset everything first (DW-063, T-089): resetAllNodesBeforeNextBlock() makes
 // the next block call reset() on every node of the graph and clear its PDC lines
 // (RenderGraph::resetAllNodes), so two renders on one engine are bit-identical whatever played
@@ -143,6 +148,9 @@ private:
     // (0: none, or no graph); and whether the current run of playback has been pre-rolled.
     uint64_t latencySerial_ = 0;
     bool runPrerolled_ = false;
+    // DW-313: a locate while playing was applied in a block that rendered no graph; the next one
+    // that does resets the timeline nodes (TIME-008).
+    bool locateResetPending_ = false;
     void preRoll(const RenderGraph& graph, const TransportBlock& block, bool monitorEnabled) DAW_RT;
     // ENG-041 from "advance transport" to "write master", pass by pass (DW-125).
     void renderGraph(const RenderGraph& graph, RenderTarget& target, uint32_t n, uint64_t cycleHostTicks) DAW_RT;

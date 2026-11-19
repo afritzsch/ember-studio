@@ -111,6 +111,17 @@ public:
     // would wrap a second time, so it has at most two segments, and it covers at least one frame
     // when maxFrames > 0. Stopped, it covers all maxFrames (with no segments).
     const TransportBlock& layOutPass(const TempoMap& tempo, uint32_t maxFrames) DAW_RT;
+    // RT, audio thread. DW-313 (T-111): a block that renders no graph (Engine::render with none
+    // published, or a block longer than the graph's maxBlock), in place of beginBlock() +
+    // layOutPass(). Queued commands still apply, so the queue never fills up meanwhile. With the
+    // graph's map (`tempo`, an oversize block) this is beginBlock(): re-anchor, commands, playhead.
+    // Without one (no graph) a locate waits for the next block with a map (its tick has no sample
+    // yet; a later locate replaces it), and the playhead isn't published (it needs a map). Either
+    // way the position doesn't move (nothing played, so an export's per-block check still sees the
+    // block missing), and block() then has no segments and no tempo map (null): nothing rendered,
+    // and the map of the graph before may already be reclaimed when the recorder reads it.
+    void silentBlock(const TempoMap* tempo) DAW_RT;
+
     // RT, audio thread: the frames the last layOutPass()/advance() covered.
     uint32_t passFrames() const DAW_RT { return passFrames_; }
     // RT, audio thread: shifts the last pass's frame offsets by `offset`, so that after a block
@@ -135,7 +146,9 @@ public:
 
 private:
     bool push(const TransportCmd& cmd);
-    void apply(const TransportCmd& cmd, const TempoMap& tempo) DAW_RT;
+    // `tempo` null (DW-313): a locate is kept in pendingLocate_ for the next block with a map.
+    void apply(const TransportCmd& cmd, const TempoMap* tempo) DAW_RT;
+    void applyCommands(const TempoMap* tempo) DAW_RT;
     void reanchor(const TempoMap& tempo) DAW_RT;
     void anchor(const TempoMap& tempo) DAW_RT;
     void publishPlayhead(const TempoMap& tempo) DAW_RT;
@@ -157,6 +170,9 @@ private:
     bool wrapPending_ = false;
     Tick wrapTick_ = 0;  // loop start tick of the last wrap
     bool locatedWhilePlaying_ = false;
+    // DW-313: a locate applied while no map was there, applied at the next block with one.
+    bool pendingLocate_ = false;
+    Tick pendingLocateTick_ = 0;
     TransportBlock block_{};
     uint32_t passFrames_ = 0;
 
