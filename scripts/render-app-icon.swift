@@ -5,7 +5,7 @@ import AppKit
 let args = Array(CommandLine.arguments.dropFirst())
 let svg = args.count > 0 ? args[0] : "App/Branding/AppIcon.svg"
 let outDir = args.count > 1 ? args[1] : "App/EmberStudio/Assets.xcassets/AppIcon.appiconset"
-let sizes = args.count > 2 ? args[2...].compactMap { Int($0) } : [16, 32, 128, 256, 512, 1024]
+let sizes = args.count > 2 ? args[2...].compactMap { Int($0) } : [16, 32, 64, 128, 256, 512, 1024]
 
 guard let image = NSImage(contentsOf: URL(fileURLWithPath: svg)) else {
     FileHandle.standardError.write("cannot load \(svg)\n".data(using: .utf8)!)
