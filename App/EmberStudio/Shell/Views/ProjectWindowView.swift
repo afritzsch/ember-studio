@@ -40,7 +40,7 @@ struct ProjectWindowView: View {
                 if model.showsBrowser {
                     // UI-060 (T-124): sidebar and content list side by side.
                     BrowserPane(model: model.browser)
-                        .frame(minWidth: 260, idealWidth: 320, maxWidth: 480)
+                        .frame(minWidth: 200, idealWidth: 260, maxWidth: 280)
                 }
                 ArrangeArea(model: model, controls: controls)
                     .frame(minWidth: 320, maxWidth: .infinity)

@@ -49,7 +49,7 @@ struct BrowserLoadTests {
         #expect(clip.start == Tick(3840) && clip.length == Tick(fileTicks))
         #expect(window.project.tracks[0].clips.map(\.id) == result.clips)
         #expect(window.store.undoLabel == "Load kick.wav")
-        #expect(window.selectedClips == Set(result.clips) && window.selectedTracks == [track])
+        #expect(window.selectedClips.isEmpty && window.selectedTracks == [track], "arrows in the browser mustn't nudge the new clip")
         window.store.undo()
         #expect(window.project == before, "one undo entry removes the clip and the asset")
         window.store.redo()

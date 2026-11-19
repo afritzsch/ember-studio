@@ -16,7 +16,7 @@ struct BrowserPane: View {
             Divider()
             HStack(spacing: 0) {
                 BrowserSidebar(model: model, controls: controls)
-                    .frame(width: 118)
+                    .frame(width: 100)
                 Divider()
                 BrowserContent(model: model, controls: controls)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)

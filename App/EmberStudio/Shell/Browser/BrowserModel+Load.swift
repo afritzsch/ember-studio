@@ -151,8 +151,11 @@ extension BrowserModel {
         } catch {
             throw .refused(error.description)
         }
+        // The track is selected (the next double-click loads onto it). The clip selection is
+        // cleared rather than set to the new clips: with clips selected, plain arrows nudge them
+        // (DW-179) even while the browser list has focus, so browsing on would move them.
         window.selectedTracks = [result.track]
-        window.selectedClips = Set(result.clips)
+        window.selectedClips = []
         return result
     }
 
