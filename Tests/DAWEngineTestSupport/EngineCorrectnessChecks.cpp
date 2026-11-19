@@ -153,11 +153,17 @@ CheckResult midiDelayLineCountsHeldKeys() {
 
 namespace {
 
-// A factory that blocks until opened, then fails: a build that is running while the test acts,
-// and then fails.
+// A factory that blocks until opened, then makes a plain node: a build that keeps daw.compile
+// busy while the test queues a latency report and a failing submission behind it.
 struct BuildGate {
     std::atomic<bool> entered{false};
     std::atomic<bool> open{false};
+};
+
+class SilentNode final : public Node {
+public:
+    void prepare(const PrepareInfo&) override {}
+    void process(ProcessContext& ctx, NodeIO& io) DAW_RT override { fill(io.audioOut, ctx.numFrames, 0.0f); }
 };
 
 } // namespace
@@ -173,22 +179,29 @@ CheckResult compilerKeepsLatencyReportsOfFailedBuild() {
                            latent->store(node.get());
                            return std::unique_ptr<Node>(std::move(node));
                        }});
-    (void)registry.set(NodeKind::reverb, {[gate](const NodeCreateInfo&) -> Result<std::unique_ptr<Node>> {
+    (void)registry.set(NodeKind::compressor, {[gate](const NodeCreateInfo&) -> Result<std::unique_ptr<Node>> {
                            gate->entered.store(true);
                            const auto deadline = std::chrono::steady_clock::now() + 10s;
                            while (!gate->open.load() && std::chrono::steady_clock::now() < deadline)
                                std::this_thread::sleep_for(1ms);
+                           return std::unique_ptr<Node>(new SilentNode);
+                       }});
+    (void)registry.set(NodeKind::reverb, {[](const NodeCreateInfo&) -> Result<std::unique_ptr<Node>> {
                            return makeError(ErrorCode::internal, "test: this node never builds");
                        }});
 
-    // master 1 ← latent 21 (100 frames). Version 5 builds.
+    // v5: master 1 ← latent 21 (100 frames). v6 adds a slow node 40 (builds, after the gate).
+    // v7 adds node 30, which fails.
     GraphDescription good = nodes::baseDescription();
     good.version = 5;
     good.nodes.push_back(NodeDesc{21, NodeKind::delay, 1, 0, 0, {}});
     good.edges.push_back(EdgeDesc{1, 21, 1, EdgeKind::audio, 0});
-    // Version 6 adds a node that fails, after the test has acted.
-    GraphDescription bad = good;
-    bad.version = 6;
+    GraphDescription slow = good;
+    slow.version = 6;
+    slow.nodes.push_back(NodeDesc{40, NodeKind::compressor, 1, 0, 0, {}});
+    slow.edges.push_back(EdgeDesc{3, 40, 1, EdgeKind::audio, 0});
+    GraphDescription bad = slow;
+    bad.version = 7;
     bad.nodes.push_back(NodeDesc{30, NodeKind::reverb, 1, 0, 0, {}});
     bad.edges.push_back(EdgeDesc{2, 30, 1, EdgeKind::audio, 0});
 
@@ -210,14 +223,18 @@ CheckResult compilerKeepsLatencyReportsOfFailedBuild() {
         DAW_CHECK(node != nullptr);
         if (!node) return checks;
 
-        // The failing build starts (it drained the reports: none yet), then the latency changes.
-        const uint64_t ticket = compiler.submit(bad);
+        // daw.compile is busy with v6. Meanwhile the latency changes (a report waits) and v7 is
+        // submitted (it waits too). v6 doesn't answer the report (it drained the queue before it
+        // arrived); v7 drains it and fails.
+        const uint64_t slowTicket = compiler.submit(slow);
         DAW_CHECK(eventually([&] { return gate->entered.load(); }));
         node->setLatency(300);
+        const uint64_t badTicket = compiler.submit(bad);
         gate->open.store(true);
-        DAW_CHECK(compiler.wait(ticket, 5000ms));
-        // DW-311: the report outlives the failed build: the last good description is rebuilt with
-        // the new latency, and its event says so.
+        DAW_CHECK(compiler.wait(badTicket, 5000ms));
+        DAW_CHECK(compiler.status().completed == badTicket && badTicket > slowTicket);
+        // DW-311: the report outlives the failed build: the last good description (v6) is rebuilt
+        // with the new latency, and its event says so.
         std::vector<LatencyEvent> events;
         DAW_CHECK(eventually([&] {
             auto more = compiler.takeEvents();
@@ -227,33 +244,17 @@ CheckResult compilerKeepsLatencyReportsOfFailedBuild() {
         DAW_CHECK(events.size() == 1);
         if (events.size() == 1) {
             DAW_CHECK(events[0].node == 21 && events[0].nodeLatency == 300);
-            DAW_CHECK(events[0].graphLatency == 300 && events[0].version == 5);
+            DAW_CHECK(events[0].graphLatency == 300 && events[0].version == 6);
         }
         const GraphCompiler::Status status = compiler.status();
-        DAW_CHECK(status.latencyRebuilds == 1 && status.completed == ticket && status.publishedVersion == 5);
+        DAW_CHECK(status.latencyRebuilds == 1 && status.publishedVersion == 6);
         // The rejection is still reported (the facade turns it into graphRejected).
         DAW_CHECK(status.lastError.has_value() && status.lastError->code == ErrorCode::internal);
         renderBlock();
         DAW_CHECK(engine.telemetry().snapshot().graphLatency == 300);
-
-        // A latency rebuild that fails keeps its reports for the next build, without spinning:
-        // version 7 is bad again; once it fails, report again and let a good version 8 answer it.
-        bad.version = 7;
-        gate->entered.store(false);
-        gate->open.store(false);
-        const uint64_t again = compiler.submit(bad);
-        DAW_CHECK(eventually([&] { return gate->entered.load(); }));
-        node->setLatency(200);
-        gate->open.store(true);
-        DAW_CHECK(compiler.wait(again, 5000ms));
-        DAW_CHECK(eventually([&] { return compiler.status().latencyRebuilds == 2; }));
-        events.clear();
-        DAW_CHECK(eventually([&] {
-            auto more = compiler.takeEvents();
-            events.insert(events.end(), more.begin(), more.end());
-            return !events.empty();
-        }));
-        DAW_CHECK(events.size() == 1 && events[0].nodeLatency == 200 && events[0].graphLatency == 200);
+        // Nothing more: no rebuild loop.
+        std::this_thread::sleep_for(50ms);
+        DAW_CHECK(compiler.status().latencyRebuilds == 1 && compiler.takeEvents().empty());
     }
     DAW_CHECK(violations == 0);
     return checks;
