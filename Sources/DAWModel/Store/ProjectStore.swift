@@ -71,7 +71,7 @@ public final class ProjectStore {
     @ObservationIgnored private var wroteAutosave = false
     /// DW-148: counts operations on the autosave (writes, removals, saves), so one finishing after
     /// a later one has started knows it no longer has the last word.
-    @ObservationIgnored private var autosaveTicket: UInt64 = 0
+    @ObservationIgnored private(set) var autosaveTicket: UInt64 = 0
     @ObservationIgnored private var lastWrite: Task<Void, Never>?
     @ObservationIgnored private var autosaveTimer: Task<Void, Never>?
     @ObservationIgnored private var autosaveDebounce: Task<Void, Never>?
