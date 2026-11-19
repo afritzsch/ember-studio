@@ -19,4 +19,8 @@ CheckResult offlineResetsEveryNode();
 // gives the same bits as a freshly prepared node, whatever it processed before.
 CheckResult builtinResetMatchesFreshNode();
 
+// DW-310 (T-111): a bypassed latent insert's delay line and toggle state are reset too, so two
+// exports of one range on one engine are bit-identical with it upstream of a reverb.
+CheckResult offlineResetClearsBypassState();
+
 } // namespace daw::testing

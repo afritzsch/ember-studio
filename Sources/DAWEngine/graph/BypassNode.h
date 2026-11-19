@@ -59,7 +59,10 @@ public:
 
     // The wrapped node is prepared by the NodePool before it is wrapped; nothing to do here.
     void prepare(const PrepareInfo&) override {}
-    void reset() DAW_RT override { inner_->reset(); }
+    // DW-063, DW-310 (T-111): the wrapped node and the wrapper's own state, the delay line and the
+    // toggle (the next block takes the slot as it is, like a new graph's first block), so an
+    // offline render after reset() doesn't hear the previous render's last `latency` frames.
+    void reset() DAW_RT override;
     void process(ProcessContext& ctx, NodeIO& io) DAW_RT override;
     uint32_t latencySamples() const override { return latency_; }
 

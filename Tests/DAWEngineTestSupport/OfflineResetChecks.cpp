@@ -14,10 +14,12 @@
 #include <vector>
 
 #include "NodeTestHarness.h"
+#include "TestNodes.h"
 #include "core/Node.h"
 #include "core/NodeIO.h"
 #include "core/ProcessContext.h"
 #include "core/RtTrap.h"
+#include "graph/BypassNode.h"
 #include "dsp/ParamInfo.h"
 #include "io/OfflineDriver.h"
 #include "nodes/ChannelStrip.h"
@@ -267,6 +269,69 @@ CheckResult builtinResetMatchesFreshNode() {
         }
         DAW_CHECK(used.violations == 0 && fresh.violations == 0);
     }
+    return checks;
+}
+
+// MARK: DW-310 (T-111)
+
+CheckResult offlineResetClearsBypassState() {
+    CheckResult checks;
+    // player 10 (a 0.1 s noise burst from tick 0) → a latent insert 20 (1000 frames, bypassed) →
+    // reverb 30 → master 1. The gain kind stands in for the latent insert (FakeLatencyNode).
+    Rig rig([](NodeRegistry& registry) {
+        (void)registry.set(NodeKind::gain, {[](const NodeCreateInfo&) -> Result<std::unique_ptr<Node>> {
+                               return std::unique_ptr<Node>(new FakeLatencyNode(1000));
+                           }});
+    });
+    rig.addAsset(makeAsset(1, 2, 4800, [](uint32_t c, int64_t i) {
+        static const std::vector<float> l = noise(4800, 0.5f, 11), r = noise(4800, 0.5f, 12);
+        return c == 0 ? l[static_cast<size_t>(i)] : r[static_cast<size_t>(i)];
+    }));
+    ParamSlotTable& params = rig.engine().params();
+    const ParamID reverb = defaults(params, Reverb::kParamInfo);
+    params.set(reverb + Reverb::kDecay, 3.0f);
+    params.set(reverb + Reverb::kMix, 0.5f);
+    auto bypass = params.allocate(1, 1.0f);  // PLUG-018: >= 0.5 is bypassed
+    DAW_CHECK(bypass.ok());
+    if (!bypass) return checks;
+    GraphDescription d = baseDescription();
+    d.nodes.push_back(NodeDesc{10, NodeKind::audioClipPlayer, 1, 0, 0, {}});
+    d.nodes.push_back(NodeDesc{20, NodeKind::gain, 1, 0, 0, {}, bypass.value()});
+    d.nodes.push_back(NodeDesc{30, NodeKind::reverb, 1, reverb, Reverb::kNumParams, {}});
+    const NodeID chain[] = {10, 20, 30, 1};
+    for (uint64_t i = 0; i + 1 < std::size(chain); ++i)
+        d.edges.push_back(EdgeDesc{100 + i, chain[i], chain[i + 1], EdgeKind::audio, 0});
+    d.audioClips.push_back(clip(10, 1, 0, 192, 1));  // 4800 frames
+    DAW_CHECK(rig.publish(d));
+
+    uint64_t violations = 0;
+    auto exportRange = [&](Tick from, Tick to) {
+        ExportSpec spec;
+        spec.tail.enabled = false;
+        spec.blockSize = 512;
+        Channels out(2);
+        spec.sink = [&](const AudioBufferView& block) {
+            for (uint32_t c = 0; c < 2 && c < block.numChannels; ++c)
+                out[c].insert(out[c].end(), block.channels[c], block.channels[c] + block.numFrames);
+        };
+        OfflineDriver driver;
+        if (!driver.render(rig.engine(), from, to, spec, nullptr).ok()) return Channels{};
+        violations += driver.lastRender().rtViolations;
+        return out;
+    };
+    // Ticks 0..100 (2500 frames) end while the burst still plays, so the bypass line holds its
+    // last 1000 frames when the first export ends. DW-310: the second export doesn't hear them.
+    const Channels first = exportRange(0, 100);
+    DAW_CHECK(first.size() == 2 && first[0].size() == 2500);
+    DAW_CHECK(first.size() == 2 && anyAbove(first[0], 1000, 2500, 1e-3f));  // the bypassed burst
+    const Channels second = exportRange(0, 100);
+    DAW_CHECK(sameBits(first, second));
+    // Bypass off: the same holds for the toggle state (the wrapped node now runs).
+    params.set(bypass.value(), 0.0f);
+    const Channels on1 = exportRange(0, 100);
+    const Channels on2 = exportRange(0, 100);
+    DAW_CHECK(on1.size() == 2 && sameBits(on1, on2));
+    DAW_CHECK(violations == 0 && rig.violations() == 0);
     return checks;
 }
 

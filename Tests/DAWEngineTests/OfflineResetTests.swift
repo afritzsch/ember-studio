@@ -12,4 +12,7 @@ struct OfflineResetTests {
 
     @Test("DW-063: each built-in effect's reset() returns it to its freshly prepared state")
     func builtinReset() { expectPasses(daw.testing.builtinResetMatchesFreshNode()) }
+
+    @Test("DW-310, DW-063: a bypassed latent insert's delay line is reset too; two exports of one range upstream of a reverb are bit-identical")
+    func resetsBypassState() { expectPasses(daw.testing.offlineResetClearsBypassState()) }
 }
