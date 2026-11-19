@@ -732,10 +732,12 @@ CheckResult offlineTransportMismatch() {
         DAW_CHECK(fails(engine, spec, 2));
     }
     // Blocks larger than the graph's maxBlock: the engine renders silence, the transport stays.
+    // DW-313 (T-111): block 0 still applies the export's play and locate (the playhead shows the
+    // range start), so it is block 1 whose start is wrong.
     {
         Engine engine;
         DAW_CHECK(publishOne(engine, std::make_unique<SineSource>(440, 0.1), {.maxBlock = 256}));
-        DAW_CHECK(fails(engine, base, 1));
+        DAW_CHECK(fails(engine, base, 2));
     }
     // Nothing published.
     {

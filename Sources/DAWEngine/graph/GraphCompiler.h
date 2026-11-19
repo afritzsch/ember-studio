@@ -11,6 +11,9 @@
 // change it rebuilds the description it last built successfully (unless a newer one is waiting,
 // which picks the change up anyway), so PDC is re-planned with every node's current latency, and
 // once that graph is published it queues a LatencyEvent per reporting node for takeEvents().
+// DW-311 (T-111): reports drained by a build that fails aren't lost. After a rejected submission
+// the last good description is rebuilt for them at once; after a failed latency rebuild they wait
+// for the next build.
 //
 // Threads: submit(), wait(), status() and takeEvents() from any non-RT thread. Destroy the
 // compiler before the Engine it publishes to.
@@ -44,7 +47,7 @@ public:
     struct Status {
         uint64_t completed = 0;         // highest ticket built, failed or dropped as superseded
         uint64_t publishedVersion = 0;  // GraphDescription::version of the last published graph
-        std::optional<Error> lastError; // from the most recent build; cleared by a success
+        std::optional<Error> lastError; // from the most recent build; cleared by a submission's success (DW-311)
         uint64_t latencyRebuilds = 0;   // MIX-024: builds done for latency reports
         uint64_t eventsDropped = 0;     // events beyond kMaxEvents nobody took
     };
@@ -87,6 +90,9 @@ private:
     Status status_;
     // MIX-024: nodes that reported since the last build started; events for takeEvents().
     std::vector<NodeID> latencyReports_;
+    // DW-311 (T-111): reports a failed latency rebuild drained; the next build answers them (they
+    // don't wake daw.compile by themselves).
+    std::vector<NodeID> carriedReports_;
     std::vector<LatencyEvent> events_;
     // daw.compile only: the last description built successfully, for latency rebuilds.
     std::optional<GraphDescription> last_;

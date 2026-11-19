@@ -18,6 +18,8 @@
 //                                    with the MidiDelayLine overflows of the block (DW-170)
 //   channel strips, meters (T-013/T-020)  writeMeter() from process() for the MeterID the node was
 //                                    configured with (MIX-005); one node per MeterID
+// The node-side producers (NaN blocks, clipped samples, meters) are ignored while Engine::render
+// pre-rolls (MIX-023): that audio is discarded (setDiscardingAudio, DW-312).
 //
 // Consistency (what a reader gets). Scalars are separate relaxed atomics: each value is one a
 // producer actually wrote, but snapshot() may combine fields from adjacent blocks (say, the load
@@ -139,6 +141,16 @@ public:
     // One writer per MeterID. Out-of-range IDs are ignored.
     void writeMeter(MeterID meter, float peak, float rms) DAW_RT;
 
+    // DW-312 (T-111), Engine::render only: while set, the render is thrown away (the MIX-023
+    // pre-roll), so what nodes report about the audio they make (countNanBlock,
+    // countClippedSamples, writeMeter) is ignored: it describes nothing anyone hears.
+    void setDiscardingAudio(bool discarding) DAW_RT {
+        discardingAudio_.store(discarding, std::memory_order_relaxed);
+    }
+    // DW-312, render thread: whether the audio being rendered now is discarded. A node that keeps
+    // its own meter history (ChannelStrip's 300 ms MeterWindow) can skip adding it there.
+    bool discardingAudio() const DAW_RT { return discardingAudio_.load(std::memory_order_relaxed); }
+
     // MARK: Readers (any thread)
 
     TelemetrySnapshot snapshot() const;
@@ -197,6 +209,9 @@ private:
     LatencyTable latencies_;
     // MeterReading packed as two floats in one word, so a reading is never torn.
     std::unique_ptr<std::atomic<uint64_t>[]> meters_;
+    // DW-312: see setDiscardingAudio. Written and read on the render thread; atomic because the
+    // producers it gates are callable from any thread.
+    std::atomic<bool> discardingAudio_{false};
 };
 
 } // namespace daw

@@ -88,10 +88,12 @@ void Telemetry::countXrun() DAW_RT {
 }
 
 void Telemetry::countNanBlock() DAW_RT {
+    if (discardingAudio_.load(std::memory_order_relaxed)) return;  // DW-312
     block_.nanBlocks.fetch_add(1, std::memory_order_relaxed);
 }
 
 void Telemetry::countClippedSamples(uint64_t samples) DAW_RT {
+    if (discardingAudio_.load(std::memory_order_relaxed)) return;  // DW-312
     if (samples > 0) block_.clippedSamples.fetch_add(samples, std::memory_order_relaxed);
 }
 
@@ -122,7 +124,7 @@ void Telemetry::publishNodeLatencies(const NodeLatency* entries, uint32_t count,
 }
 
 void Telemetry::writeMeter(MeterID meter, float peak, float rms) DAW_RT {
-    if (meter >= kMaxMeters) return;
+    if (meter >= kMaxMeters || discardingAudio_.load(std::memory_order_relaxed)) return;  // DW-312
     meters_[meter].store(packMeter(peak, rms), std::memory_order_relaxed);
 }
 

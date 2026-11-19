@@ -13,6 +13,13 @@ BypassNode::BypassNode(std::shared_ptr<Node> inner, ParamID bypassParam, uint32_
                        std::shared_ptr<BypassState> state)
     : inner_(std::move(inner)), bypassParam_(bypassParam), latency_(latency), state_(std::move(state)) {}
 
+void BypassNode::reset() DAW_RT {
+    inner_->reset();
+    state_->line_.clear();
+    state_->primed_ = false;
+    state_->bypassed_ = false;
+}
+
 void BypassNode::process(ProcessContext& ctx, NodeIO& io) DAW_RT {
     BypassState& s = *state_;
     const uint32_t n = ctx.numFrames;

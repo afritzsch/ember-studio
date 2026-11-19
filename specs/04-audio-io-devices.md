@@ -21,6 +21,8 @@
 | IO-012 | Offline render applies a tail: after the range end it continues until output < −90 dBFS for 1 s or 10 s max (configurable). | — |
 | IO-013 | The RT trap remains active in offline mode, so offline tests catch RT violations. | — |
 
+*Transport calls during an export (Clarification (T-111), DW-320, DW-321).* An export plays the transport through its range and restores it at its end (IO-010), so while the facade's `exportBusy()` (an export queued, waiting for its graph or rendering) the export owns the transport: `play` and `setRecording` are ignored (logged, `dev.emberstudio`/`facade`); `locate` and `setLoop` leave the live transport alone and are applied once the export job has ended and restored it, so they take effect after it, as if made just before it; `stop` cancels the running export and every queued one (each ends as `cancelled`, DW-220: the partial file is deleted). The facade's transport calls are `void`, so nothing is refused visibly. Destroying the facade (closing a project, quitting) mid-export cancels the export the same way instead of waiting for it to render to its end (DW-321).
+
 ## Hot-swap, rate changes, overload (D-12, D-26)
 
 | ID | Requirement | Acceptance |

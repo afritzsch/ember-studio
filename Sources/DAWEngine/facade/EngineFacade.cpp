@@ -18,6 +18,7 @@
 
 #include "daw/EngineFacade.h"
 
+#include <os/log.h>
 #include <pthread.h>
 #include <pthread/qos.h>
 
@@ -241,6 +242,20 @@ struct EngineFacade::Impl {
     void finishAssetReload();
     void pushReload(AssetsReloadPhase phase, uint64_t assetID, FacadeError error);
     bool exportBusy() const { return exportRunning || exportActive || !exportQueue.empty(); }
+    // DW-320 (T-111), with `mutex` held. While exportBusy() the export owns the transport (it
+    // plays the range and restores the transport when it ends): play and setRecording are ignored,
+    // locate and setLoop are kept in deferredTransport and applied once an export job has ended
+    // (applyDeferredTransport), and stop cancels the running export and the queued ones
+    // (cancelExports).
+    struct DeferredTransport {
+        std::optional<Tick> locate;
+        bool setLoop = false;
+        bool loopEnabled = false;
+        Tick loopStart = 0, loopEnd = 0;
+    };
+    DeferredTransport deferredTransport;
+    void applyDeferredTransport();
+    void cancelExports();
     // 09 (T-052). With `mutex` held. syncRecordLatency: REC-003's D from the running device, after
     // every driver start. prepareRecording: a session for the armed tracks (realtime with a
     // driver only; offline engines have no input). finalizeRecording: ends the take and queues
@@ -519,11 +534,16 @@ EngineFacade::Impl::~Impl() {
     {
         std::lock_guard lock(mutex);
         stopping = true;
+        // DW-321 (T-111): a running export is cancelled, not rendered to its end (tail and
+        // normalize pass included): it stops before its next block and deletes its partial file,
+        // as for cancelJob. Queued ones never start (exportLoop sees `stopping`).
+        exportCancel.store(true, std::memory_order_release);
         if (driver) driver->stop();
         (void)recorder.finalize();  // the files are closed; nobody hears of them any more
     }
     exportWake.notify_all();
     deviceWake.notify_all();
+    reloadDone.notify_all();  // an export waiting for a re-conversion pass gives up
     exportThread.join();
     if (deviceThread.joinable()) deviceThread.join();
     // The loader and compiler join in their destructors, then the engine frees what's left.
@@ -1050,6 +1070,35 @@ void EngineFacade::Impl::pruneJobs() {
 
 // MARK: Offline export (DW-057, DW-064, DW-056)
 
+namespace {
+
+os_log_t facadeLog() {
+    static os_log_t log = os_log_create("dev.emberstudio", "facade");  // CONV §4
+    return log;
+}
+
+} // namespace
+
+// DW-320 (T-111): after an export job; the transport is as the export found it (OfflineDriver
+// restores it), so a locate or loop asked for meanwhile lands as if made just before the export.
+void EngineFacade::Impl::applyDeferredTransport() {
+    DeferredTransport deferred = std::exchange(deferredTransport, {});
+    if (!deferred.locate && !deferred.setLoop) return;
+    Transport& transport = engine.transport();
+    if (deferred.locate) (void)transport.locate(*deferred.locate);
+    if (deferred.setLoop) (void)transport.setLoop(deferred.loopEnabled, deferred.loopStart, deferred.loopEnd);
+    applyTransportCommands();
+}
+
+// DW-320: stop during an export. The running one ends at OfflineDriver's next block check
+// (runExport finishes it as cancelled, its file deleted); queued ones end as cancelled now.
+void EngineFacade::Impl::cancelExports() {
+    if (exportJob != 0) exportCancel.store(true, std::memory_order_release);
+    for (const ExportRequest& request : exportQueue)
+        if (auto it = jobs.find(request.job); it != jobs.end()) finishCancelled(it->second);
+    exportQueue.clear();
+}
+
 void EngineFacade::Impl::exportLoop() {
     pthread_setname_np("daw.export");
     pthread_set_qos_class_self_np(QOS_CLASS_USER_INITIATED, 0);
@@ -1175,6 +1224,8 @@ void EngineFacade::Impl::runExport(JobID jobID, Tick from, Tick to, const Export
             syncRecordLatency();
         }
     }
+    // DW-320: the transport is the export's no more; locates and loops made meanwhile apply now.
+    if (!stopping) applyDeferredTransport();
     if (auto it = jobs.find(jobID); it != jobs.end()) {
         it->second.render = toResult(stats, spec.tempo.sampleRate());
         // DW-220: a cancel that came before the render finished (or before it started) wins; one
@@ -1317,6 +1368,11 @@ bool EngineFacade::setAutomationSuspended(uint64_t laneID, bool suspended) {
 
 void EngineFacade::play() {
     std::lock_guard lock(impl_->mutex);
+    // DW-320 (T-111): the export plays the transport itself; a play would make it fail.
+    if (impl_->exportBusy()) {
+        os_log_info(facadeLog(), "play ignored: an export is running (DW-320)");
+        return;
+    }
     // IO-033 (T-089, a change of T-056): while assets re-convert, play is queued, not refused.
     // The transport starts when the pass finishes (finishAssetReload); stop() cancels it.
     if (impl_->reloader.active()) {
@@ -1332,6 +1388,12 @@ void EngineFacade::stop() {
     std::lock_guard lock(impl_->mutex);
     impl_->previewInbox.releaseAll();  // UI-021: no preview note outlives a stop
     impl_->playPending = false;  // IO-033 (T-089): a stop cancels a queued play
+    // DW-320 (T-111): stop means stop the export, and the ones queued behind it. One that is
+    // rendering restores the transport (stopped) itself and records nothing, so the transport is
+    // left alone: a stop command could reach its next block before the cancel and fail it.
+    const bool rendering = impl_->exportRunning;
+    if (impl_->exportBusy()) impl_->cancelExports();
+    if (rendering) return;
     (void)impl_->engine.transport().stop();
     impl_->applyTransportCommands();
     impl_->finalizeRecording();  // REC-004
@@ -1341,6 +1403,11 @@ void EngineFacade::stop() {
 void EngineFacade::locate(Tick tick) {
     std::lock_guard lock(impl_->mutex);
     impl_->previewInbox.releaseAll();  // UI-021: nor a locate
+    // DW-320 (T-111): applied once the export has restored the transport.
+    if (impl_->exportBusy()) {
+        impl_->deferredTransport.locate = tick;
+        return;
+    }
     // T-052: a take is one continuous stretch of the timeline, so a jump ends it (the next one
     // starts at the new position if the transport still records).
     if (impl_->recorder.capturing()) {
@@ -1357,12 +1424,28 @@ void EngineFacade::locate(Tick tick) {
 
 void EngineFacade::setLoop(bool enabled, Tick start, Tick end) {
     std::lock_guard lock(impl_->mutex);
+    // DW-320 (T-111): applied once the export has restored the transport (Transport::setLoop's
+    // own check first: an enabled loop needs start < end).
+    if (impl_->exportBusy()) {
+        if (enabled && !(start < end)) return;
+        Impl::DeferredTransport& deferred = impl_->deferredTransport;
+        deferred.setLoop = true;
+        deferred.loopEnabled = enabled;
+        deferred.loopStart = start;
+        deferred.loopEnd = end;
+        return;
+    }
     (void)impl_->engine.transport().setLoop(enabled, start, end);
     impl_->applyTransportCommands();
 }
 
 void EngineFacade::setRecording(bool recording) {
     std::lock_guard lock(impl_->mutex);
+    // DW-320 (T-111): an export never records (DW-064), and it leaves the transport not recording.
+    if (impl_->exportBusy()) {
+        os_log_info(facadeLog(), "setRecording ignored: an export is running (DW-320)");
+        return;
+    }
     if (recording) impl_->prepareRecording();  // REC-001
     (void)impl_->engine.transport().setRecording(recording);
     impl_->applyTransportCommands();
@@ -1776,12 +1859,19 @@ FacadeError EngineFacade::setDevice(const DriverConfigPOD& config) {
     if (rate != 0) impl.config.sampleRate = rate;  // later restarts keep the session rate
     // During an export the device is paused; it restarts with the new config afterwards.
     if (impl.exportRunning) return {};
+    // DW-319 (T-111), REC-003: another device or buffer size has another latency, and a take is
+    // placed with one. So takes running end here, as in IO-021 (2) (stopForDeviceChange), and a
+    // transport still recording records on into new takes, prepared after the restart with the
+    // new device's latency (as after a locate, T-052).
+    impl.finalizeRecording();
+    impl.finalizeMidiRecording();  // REC-012 (T-053)
     if (auto started = impl.restartDriver(); !started) return toFacadeError(started.error());
     if (impl.driver->sampleRate() != impl.sampleRate) {
         impl.driver->stop();
         impl.driverStarted = false;
         return facadeError(FacadeErrorCode::unsupported, "the device runs at another rate than the session");
     }
+    impl.prepareRecording();
     return {};
 }
 
