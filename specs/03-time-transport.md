@@ -28,6 +28,11 @@
 - **Automation with several wraps in a block.** Automation is evaluated per pass, so the after-wrap side channel (`ParamSlotTable::setAfterWrap`, AUTO-003) always holds the value after *that pass's* single wrap: the lane at the loop start. A node therefore ramps to the lane's value at the pass's first segment and jumps to the loop start's value at the wrap frame, in every pass; within a loop shorter than a block every pass after the first starts at the loop start, so the lane's loop-start value holds from the first wrap on (block-rate evaluation, D-13). MIDI clip players end hanging notes and chase notes spanning the loop start at every wrap (DW-101/103).
 - **Cost.** A pass covers up to two loop lengths, so a block needs about `blockFrames / (2 · loopFrames)` graph passes; a loop of one sample costs one graph pass per frame (bounded by the block size, CONV-RT-04, nothing allocated).
 
+### Blocks without a graph (Clarification (T-111), DW-313)
+- A block that renders no graph (none published, or `numFrames` above the graph's `maxBlock`: ENG-015 silence) still applies the queued commands (TIME-004), so the queue never fills up and nothing is refused after 256 commands (`Transport::silentBlock`). With the graph's map (an oversize block) the block is a normal block start for the transport: re-anchor (DW-061), commands, playhead (TIME-009). Without one (no graph) a `locate` waits for the next block with a map (its tick has no sample yet; a later locate replaces it), and the playhead isn't republished.
+- Either way the position doesn't move: nothing was played, so an export's per-block playhead check still finds the missing block (IO-010). `Transport::block()` then has no segments and **no tempo map** (`tempo == nullptr`): the graph it would point into may already be reclaimed when the recorder reads it after render. Readers skip tempo-dependent work on a null map (the Recorder's DW-243 `wholeLoops` path, MIDI recording).
+- The next block that renders a graph starts a new run of playback (MIX-023 pre-roll) and, for a locate applied in a silent block while playing, resets the timeline nodes (TIME-008).
+
 ## Requirements
 
 | ID | Requirement | Acceptance |
