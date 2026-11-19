@@ -1,36 +1,42 @@
-You are AUTOBUILD phase lead 14. Read CLAUDE.md, then `.claude/skills/autobuild/SKILL.md`, then follow "Orchestrating with Patchbay" in specs/90-tasks.md. Use the Patchbay MCP tools for workers, never the Agent tool. The run log is `docs/autobuild/RUN.md`; the decisions taken without the user are in `docs/autobuild/DECISIONS.md`.
+You are AUTOBUILD phase lead 15. Read CLAUDE.md, then `.claude/skills/autobuild/SKILL.md`, then follow "Orchestrating with Patchbay" in specs/90-tasks.md. Use the Patchbay MCP tools for workers, never the Agent tool. The run log is `docs/autobuild/RUN.md`; the decisions taken without the user are in `docs/autobuild/DECISIONS.md`.
 
-**User overrides for this run (given to phase lead 13, still in force):** WEEK_STOP = **100**, not 50 (the user wants the whole weekly budget; a free reset follows on Mon 2026-11-23 22:00). "No ready tasks" is not a stop condition while open DW items can be grouped into tasks. Keep waves small enough to finish, merge each finished, green task as soon as it is reviewed, and **push main after every merge** so nothing is lost when the limit hits.
-
+**User overrides for this run (given to phase lead 13, still in force):** WEEK_STOP = **100**, not 50 (the user wants the whole weekly budget). "No ready tasks" is not a stop condition while open DW items can be grouped into tasks. Keep waves small enough to finish, merge each finished, green task as soon as it is reviewed, and **push main after every merge** so nothing is lost when the limit hits. (The weekly budget reset early, on 2026-11-18; the next reset is Mon 2026-11-23 22:00.)
 
 ## New user requests (2026-11-19), read before picking work
 - The user asked for an Ableton-style browser, a track-list context menu and MIDI clip creation by double-click. Spec'd by the lead with the user's answers (docs/requests/2026-11-19.md): 12 UI-017, UI-018, UI-060..UI-067; 07 MODEL-047; 08 *Contract delta (T-123), PROPOSED*.
 - **Priority (user):** T-111 + T-112 first, then M9 (T-122..T-128 in 90-tasks.md, with its wave plan), then everything else.
 - T-123 stays blocked until the user accepts the 08 preview delta. Don't accept it on the user's behalf.
-## State at handoff (2026-11-18, end of autobuild phase 13; main @ the "Autobuild phase 13: handover" commit, pushed; clean; no worker sessions running)
-- Phase 13 (a new run) first grouped open DW items into T-100..T-104 (DECISIONS "Phase 13 follow-up tasks"), then ran a small 3-worker wave. All three merged and were pushed one by one:
-  - **T-100** app follow-ups 3 (DW-295, 298, 299, 227, 155, 221, 297): `ui.perform {action: "setText", text}` for text fields (toolbar tempo/signature; 13 delta accepted); audio panel shows device buffer and input latency; compact MIDI picker titles ("All", "Ch 3"); attach-mode `plugins.unblock` and scan `timeoutSeconds`; mixer strip monitor menu shows the monitoring latency (and the strip now redraws on picker/latency changes); `project.open` over the socket toasts the load report; `AppModel.export(_:to:)` removed.
-  - **T-102** model follow-ups 3 (DW-296, 113, 112): AU/VST3 descriptors decode without `vendor`/`version`; `RenameBus {busID, name}` / `MoveBus {busID, index}` (07 delta accepted); `SetParam` refuses an index past a built-in kind's published params (via `ParamCatalog.builtin`).
-  - **T-101** control/tooling follow-ups 3 (DW-300, 262, 238, 231, 306): dawctl keeps fd-1 writes (chatty plugins) out of its JSONL stdout; test.sh has a `swift-build-tests` warning stage; CTL-031 ProgressTests, REC-005 punch and the T-096 DW-220 cancelJob test wait on conditions instead of wall-clock.
-- Done & merged (83): T-001..T-026, T-030..T-036, T-040..T-045, T-050..T-056, T-060..T-065, T-070..T-077, T-080..T-102. M1–M8 are complete.
-- **Ready:** T-103 (E+P: app exports re-prepare hosted plugins offline, DW-301; EmberTest per-instance knobs, DW-302) and T-104 (E: engine test cleanups DW-009, 002, 138, 136, 161). No `wip` tasks, no WIP branches.
-- Discovered work runs DW-001..DW-307. New this phase: DW-303..305 (T-100), DW-306 (lead; fixed by T-101), DW-307 (T-101). DW-307 (T-101): warning checks only see files compiled in that build (SwiftPM doesn't replay warnings of up-to-date files).
-- Phase 13 week usage: 86% → ~92%. No 5-hour pause (the window went 38% → ~78%).
 
-## Your first job (phase lead 14)
-1. Run `usage.sh`. With the user's override, stop only at `week ≥ 100` (or the other *Stop the run* conditions).
-2. `list_sessions`: there should be no phase-13 workers.
-3. Wave 14 = T-103 and T-104 (lanes E+P and E; they overlap in `Sources/DAWEngine` and test support, so give T-104 only test files + Package.swift's DAWEngineTestSupport setting + GraphBuilder's `resetsOnLocate` line, and T-103 the facade/hosting code). A 3-task wave of small tasks cost ~6 week-%; T-103 is larger. If budget is left after them, group more DW items (candidates: DW-303 + DW-304 (B), DW-305 (spec, lead can do it), DW-286 (U+E), DW-245 (U), DW-145 (M), DW-203 (M), DW-263 (P+M)).
-4. Items that need the user, not a task: DW-274 (JIT entitlements), DW-294 (expose the master limiter?), DW-293 (inverse shape of Restore commands for orphan lanes), DW-207 (stereo meters), DW-153, DW-215.
+## State at handoff (2026-11-19, end of autobuild phase 14; main @ the "Autobuild phase 14: handover" commit, pushed; clean)
+- Wave 14 merged all three tasks (by the first lead 14):
+  - **T-103** (15f20df): app exports from a realtime engine re-prepare hosted plugins offline (DW-301); EmberTest tests use per-instance probes (DW-302).
+  - **T-104** (9ff83d1): engine test cleanups (DW-009, 002, 138, 136, 161).
+  - **T-105** (8aa3d0f): `ui.perform` summary mentions setText (DW-303); `dawctl --attach --launch` rebuilds a stale app (DW-304); engineCancelJob test can't finish before the cancel (DW-309).
+- The first lead 14 also: folded DW-305 into spec 12; grouped open DW items into T-106..T-110; recorded a five-agent review as DW-310..DW-358 and grouped it into T-111..T-121; pre-decided their shapes (DECISIONS phase-14 rows, incl. DW-334 = rescale undo history).
+- It then stalled after the T-105 merge, before closing its T-105 worker and writing a handover. In between, the **user** committed on main: PR #1 (DW-261, CI on the hosted `xcode-27` image, DW-359/DW-360 opened), the M9 spec (T-122..T-128) and the app icon. A resumed lead 14 ran `scripts/test.sh` on that main: 12/13, the `xcodebuild` stage failed on a warning from the app-icon commit (the asset catalog names `icon_64.png`, which `scripts/render-app-icon.swift` never rendered). The lead added 64 to the script's default sizes, rendered `icon_64.png` from the SVG, re-ran test.sh green, wrote this handover and pushed.
+- Done & merged (86): T-001..T-026, T-030..T-036, T-040..T-045, T-050..T-056, T-060..T-065, T-070..T-077, T-080..T-105. M1–M8 complete.
+- **Ready:** T-111 (E), T-112 (M) (the user's first priority; see the decision below), T-108 (B), T-109 (U), T-110 (P), T-113 (D), T-122 (U), T-124 (U), T-128 (M). **Blocked:** T-123 (user must accept the 08 delta). Everything else `todo`. No `wip` tasks, no WIP branches.
+- Discovered work runs DW-001..DW-360 (next number: max over all rows + 1).
+- Week 91 % → reset (~2 %) → 16 % at the end of phase 14; 5-hour window 12 %.
 
-## Decisions taken this phase (see docs/autobuild/DECISIONS.md, phase 13 rows)
-- Phase 13 follow-up tasks T-100..T-104; wave 13 = T-100, T-101, T-102 (small, to fit the remaining week budget).
-- T-100: `ui.perform setText` shape (13 delta pre-accepted); panel/picker/plugin-manager/socket-toast shapes.
-- T-101: test-target warnings fail test.sh.
-- T-102: lenient descriptor decoding; bus command keys `busID`/`index` (matching the track commands); `SetParam` index refusal.
+## Your first job (phase lead 15)
+1. Run `usage.sh`. Stop only at `week ≥ 100` (or the other *Stop the run* conditions).
+2. `list_sessions`: the leftover sessions below are not yours; ignore them.
+3. Wave 15 = **T-111 (E) + T-112 (M)** (M9 wave plan "Wave A"). Their shapes are pre-decided in DECISIONS (phase-14 rows, DW-334 = `Command.rescaled(from:to:)`). T-112 is lane M (+B): name its B files in the briefing.
+4. Then M9 Wave B (phase 16 or later in 15 if both merge quickly and budget allows): T-122, T-124, T-128 (T-123 only once the user accepts the delta). The 90-tasks M9 section says how to split the U files between T-122 and T-124, and to merge T-122 first.
+5. Items that need the user, not a task: T-123's 08 delta, DW-274 (JIT entitlements), DW-294 (expose the master limiter?), DW-293, DW-207, DW-153, DW-215, DW-360 (TEST-008 floor on hosted runners), DW-342/DW-343.
+
+## Decisions taken this phase (see docs/autobuild/DECISIONS.md, phase 14 rows)
+- Wave 14 = T-103 + T-104 + new tiny T-105; T-103 internal offline switch (no Interfaces change); T-104 keeps the BUILD-005 symbol check.
+- Phase 14 follow-up tasks T-106..T-110 and their pre-decided shapes.
+- Review follow-up tasks T-111..T-121 (DW-310..DW-358); DW-334 shape = rescale undo history.
+- **New (resumed lead):** T-111/T-112 no longer wait for T-106/T-107 (that order was only one-task-per-lane, not a dependency); T-106 now waits for T-111 and T-107 for T-112, matching the user's priority.
 
 ## Sessions only the user can close
-- In the sidebar: the "macDAW" conductor session (it closes this lead). Phase lead 13 closed all three of its workers.
+- In the sidebar, started by an earlier conductor (no autobuild session can close them):
+  - **"Autobuild lead 14"** (the stalled first lead 14) and **"T-105 control followups"** (its worker; T-105 is merged).
+  - "Autobuild lead 14 (resume)" (this lead) is closed by the conductor that started it.
+  - Older "macDAW" sessions (conductors / the user's own).
 - Worktrees left on disk (removing them needs `--force` because of submodules, which auto mode denies). All are merged or superseded:
   - `~/.patchbay/worktrees/macDAW/t-023-sidechain`, `t-024-metronome`, `t-025-m2-goldens`, `t-025-m2-goldens-r2`, `t-026-project-metronome`, `t-031-persistence`, `t-032-app-shell`, `t-032-app-shell-r2`, `t-033-arrange-canvas`, `t-034-toolbar-transport`, `t-035-crossfades`, `t-036-m3-goldens`, `t-042-note-commands`, `t-043-piano-roll`, `t-044-m4-goldens`, `t-045-midi-routing`, `t-052-audio-recording`, `t-055-audio-prefs`, `t-056-session-rate`, `t-061-au-hosting`, `t-071-compressor`, `t-072-delay`, `t-073-reverb`;
   - phase 6: `t-053-coremidi`, `t-062-vst3-hosting`, `t-070-eq`, `t-076-mixer-view`.
@@ -40,7 +46,8 @@ You are AUTOBUILD phase lead 14. Read CLAUDE.md, then `.claude/skills/autobuild/
   - phase 10: `t-065-device-chain`, `t-081-take-ui`, `t-083-crash-dialog`, `t-091-dsp-perf`.
   - phase 11: `t-092-dsp-followups`, `t-093-midi-input`, `t-094-plugin-followups`, `t-096-control-followups`.
   - phase 12: `t-095-app-followups`, `t-097-plugin-followups`, `t-098-control-followups`, `t-099-engine-model-followups`.
-  - new in phase 13: `t-100-app-followups`, `t-101-control-followups`, `t-102-model-followups`.
+  - phase 13: `t-100-app-followups`, `t-101-control-followups`, `t-102-model-followups`.
+  - new in phase 14: `t-103-plugin-offline-export`, `t-104-engine-test-cleanups`, `t-105-control-followups`.
   - Remove them with `git worktree remove --force <path>`, then `git branch -D <branch>`. The old remote WIP branches `origin/t-025-m2-goldens`, `t-031-persistence` and `t-032-app-shell` can be deleted too.
 
 ## Open questions for the user (not yet answered)
@@ -61,6 +68,11 @@ You are AUTOBUILD phase lead 14. Read CLAUDE.md, then `.claude/skills/autobuild/
   - **New in phase 11:**
     - T-093 changes MIDI takes: with several armed MIDI tracks, a track whose filter passed no note gets no take (before, every armed track got every note). With default filters nothing changes.
     - DW-288: the > 1.5 s "Enable Plugins" delay is on the app side; a manual timing in the running app would locate it.
+  - **New in phase 14:**
+    - Accept or change spec 08's *Contract delta (T-123)* (engine audio preview); T-123 is blocked on it.
+    - Review the phase-14 rows in DECISIONS.md (T-106..T-121 grouping and shapes, DW-334 rescale, the T-111/T-112 reordering).
+    - DW-360: TEST-008 measures 9.4–9.6× on some hosted runs vs the 10× floor (lower the floor on CI, or accept flaky weekly jobs?).
+    - Close the stalled "Autobuild lead 14" and "T-105 control followups" sessions.
   - **New in phase 13:**
     - Review the phase-13 rows in DECISIONS.md.
     - T-100 behavior to check in the app: compact MIDI picker titles, the audio panel's device buffer / input latency line, the mixer strip monitor menu's latency line.
@@ -200,3 +212,7 @@ You are AUTOBUILD phase lead 14. Read CLAUDE.md, then `.claude/skills/autobuild/
   - A trial-merge flake in another lane's test (DW-306) is a good small follow-up for the B/testing worker that's waiting for its merge.
   - `.git/autobuild/close_dw.py TASK "DW-a,DW-b" [newrows.txt]` marks a task done, closes its DW rows and appends new DW rows (checks the cell count of the rows it touches; several older rows have unescaped `|` and fail a global check).
 
+- **Phase 14 additions:**
+  - A lead can stall right after a merge, before its handover. A resumed lead should first check `git log` and the 90-tasks statuses: here all wave tasks were already `done`, so the resume was only verification, handover and push.
+  - The user may commit on main between phases (here PR #1, the M9 spec, the app icon), leaving main ahead of origin. Run `scripts/test.sh` on that main before you push it.
+  - Lane-ordering "dependencies" a lead adds (one task per lane at a time) can contradict a later user priority. Swap them (log in DECISIONS) rather than delaying the user's tasks.

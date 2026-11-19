@@ -17,7 +17,7 @@ Unattended phases started by `/autobuild` (see `.claude/skills/autobuild/SKILL.m
 | 11 | T-092, T-093, T-094, T-096 | all 4 (T-096, T-093, T-094, T-092) | 46 → 62 | Per-track MIDI input picker (user backlog), render cancel/dither/meters/previewNote in the control protocol, VST3/AU display strings + scanner timeout/retry/parallel scans (DW-276 was a real AU parameter-tree bug, fixed), AUTO-003 wrap jump for every built-in, TEST-008 11.4×. One 5-hour pause (~2.2 h; T-096 merged during it). Lead spec housekeeping (DW-239/244/267/291); follow-up tasks T-097..T-099 added |
 | 12 | T-095, T-097, T-098, T-099 | all 4 (T-099, T-095, T-098, T-097) | 62 → 86 | Last phase: no `ready`/`wip`/`todo` tasks left (stop decision in DECISIONS). Engine/model correctness (telemetry clippedSamples/midiEventsDropped/bufferFrames, take-clip model fixes, stricter validate), app follow-ups (per-slot safe-mode enable, plugin-editor automation recording, arrow nudge, editable toolbar tempo/signature), `plugins.*`/`paramDisplay`/ordered dawmcp calls/stale warning, hosted-plugin reset/bypass note-offs/wrap jump/VST3 MIDI mapping/offline mode. Two 5-hour pauses (~3.8 h, ~3.9 h) |
 | 13 | T-100, T-101, T-102 | all 3 (T-100, T-102, T-101) | 86 → 92 | New run (user: WEEK_STOP 100, group DW items). Created T-100..T-104 from open DW items; small 3-worker wave, each task merged and pushed as soon as it was green; one follow-up (DW-306 flake, T-101); no 5-hour pause (38 → ~79) |
-| 14 | T-103, T-104, T-105 | (running) | 91 → | Wave prepared at 5-hour 79 %; workers start after the reset |
+| 14 | T-103, T-104, T-105 | all 3 (T-103, T-104, T-105) | 91 → ~2 (weekly reset mid-phase) → 16 | Wave prepared at 5-hour 79 %, started after the reset. Then grouped DW items into T-106..T-110 and the five-agent review into T-111..T-121. Lead 14 stalled after the T-105 merge (no handover); a resumed lead 14 verified main and wrote the handover. User commits in between: DW-261 CI fix (PR #1), M9 spec (T-122..T-128), app icon |
 
 ## Phase notes
 
@@ -154,6 +154,13 @@ Unattended phases started by `/autobuild` (see `.claude/skills/autobuild/SKILL.m
 - Resumed both at 1795003964. T-097 traced its export RT violations to a full param re-push after reset that trips Apple's V2 bridge allocation; fixed.
 - T-098 merged (32c04c1), then T-097 merged (e116757): test.sh 12/12 and swift test 2x green each. Workers closed.
 - End: 4/4 merged, main green, week ~86%. No task is ready/wip/todo, so the run stops (DECISIONS "Stop after phase 12").
+
+### Phase 14 (2026-11-18 → 2026-11-19)
+- Wave: T-103 (E+P, app exports render hosted plugins offline, DW-301/302), T-104 (E, engine test cleanups), T-105 (B, `ui.perform` setText summary + `dawctl --attach --launch` rebuilds a stale app, DW-303/304/309). Prepared at 5-hour 79 %, started after the reset.
+- Merged: T-103 (15f20df), T-104 (9ff83d1), T-105 (8aa3d0f). The weekly budget reset during the phase (91 % → ~2 %).
+- Lead work: DW-305 spec fold-in; T-106..T-110 from open DW items; DW-310..DW-358 from a five-agent review grouped into T-111..T-121 (DECISIONS phase-14 rows).
+- The first lead 14 stalled after merging T-105, before closing its worker and writing the handover. The user then merged PR #1 (DW-261: CI on the hosted xcode-27 image), added the M9 spec (T-122..T-128, docs/requests/2026-11-19.md) and the app icon on main.
+- Resumed lead 14 (2026-11-19): all three wave tasks already `done`; ran `scripts/test.sh` on main (incl. the user's 3 unpushed commits) before pushing: 12/13, `xcodebuild` failed on the app icon's missing `icon_64.png` (32x32@2x) warning. Fixed (render script default sizes + the rendered PNG), re-ran test.sh, wrote the handover. Week 16 %, 5-hour 12 % at the resume.
 
 ## Summary for the user
 
