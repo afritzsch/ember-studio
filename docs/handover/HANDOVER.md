@@ -2,6 +2,11 @@ You are AUTOBUILD phase lead 14. Read CLAUDE.md, then `.claude/skills/autobuild/
 
 **User overrides for this run (given to phase lead 13, still in force):** WEEK_STOP = **100**, not 50 (the user wants the whole weekly budget; a free reset follows on Mon 2026-11-23 22:00). "No ready tasks" is not a stop condition while open DW items can be grouped into tasks. Keep waves small enough to finish, merge each finished, green task as soon as it is reviewed, and **push main after every merge** so nothing is lost when the limit hits.
 
+
+## New user requests (2026-11-19), read before picking work
+- The user asked for an Ableton-style browser, a track-list context menu and MIDI clip creation by double-click. Spec'd by the lead with the user's answers (docs/requests/2026-11-19.md): 12 UI-017, UI-018, UI-060..UI-067; 07 MODEL-047; 08 *Contract delta (T-123), PROPOSED*.
+- **Priority (user):** T-111 + T-112 first, then M9 (T-122..T-128 in 90-tasks.md, with its wave plan), then everything else.
+- T-123 stays blocked until the user accepts the 08 preview delta. Don't accept it on the user's behalf.
 ## State at handoff (2026-11-18, end of autobuild phase 13; main @ the "Autobuild phase 13: handover" commit, pushed; clean; no worker sessions running)
 - Phase 13 (a new run) first grouped open DW items into T-100..T-104 (DECISIONS "Phase 13 follow-up tasks"), then ran a small 3-worker wave. All three merged and were pushed one by one:
   - **T-100** app follow-ups 3 (DW-295, 298, 299, 227, 155, 221, 297): `ui.perform {action: "setText", text}` for text fields (toolbar tempo/signature; 13 delta accepted); audio panel shows device buffer and input latency; compact MIDI picker titles ("All", "Ch 3"); attach-mode `plugins.unblock` and scan `timeoutSeconds`; mixer strip monitor menu shows the monitoring latency (and the strip now redraws on picker/latency changes); `project.open` over the socket toasts the load report; `AppModel.export(_:to:)` removed.

@@ -105,6 +105,11 @@ IDs are `UInt64`, allocated by `IDAllocator` stored in the project (never reused
 - *The document follows the engine* (DW-130): `EngineSync.engineSampleRate` is what the engine runs at. On an `assetsReloaded` event (every engine rate change raises one) it reads the engine's current rate from telemetry (events can be older than the engine) and, if the project differs, `ProjectStore` performs `SetSessionSampleRate` with it. That covers a device fallback and `device.set`; the engine already runs at the rate, so nothing is sent back.
 - *Peak cache* (DW-077): `EngineSync.loadAssets` loads with the project's `Cache/` as IO-034's peak-cache directory when the project has a folder.
 
+### MIDI file import (user request 2026-11-19, T-128)
+| ID | Requirement | Acceptance |
+|---|---|---|
+| MODEL-047 | `MidiFileReader` (pure Swift, `DAWModel`) reads Standard MIDI Files, formats 0 and 1, any PPQ (SMPTE time division refused): note-on/off pairs from every track and channel merged into one note list in 960-PPQ ticks (rounded to the nearest tick), velocity-0 note-on is a note-off, an unmatched note-on ends at the file's last event (at least one tick long), overlapping same-pitch notes end the earlier one. Tempo, time signature, CCs, pitch bend and SysEx are ignored in v1: notes keep their beat positions and the project tempo applies. Returns `{notes, lengthTicks}`, length = last event rounded up to a whole bar of 4/4 (at least one bar). Malformed or truncated files throw a typed error, never crash or hang. `MidiFileImport.commands(file:track:at:)` builds one composite `[AddClip, AddNotes]` (one undo entry; the clip is `lengthTicks` long). | `MidiFileReaderTests` (format 0/1, PPQ 96/480/960, running status, velocity-0 off, unmatched/overlapping notes, SMPTE refused, fuzz over truncated/garbage input never crashes or hangs) |
+
 ### Persistence
 | ID | Requirement | Acceptance |
 |---|---|---|
@@ -214,4 +219,5 @@ Additive; nothing in the Interfaces above changes. Closes DW-296, DW-113 and DW-
 | MODEL-044 | done (T-031) | `PersistenceTests` (debounced and periodic autosave into `autosave/`, `project.json` untouched; DW-148 race stress tests: bookkeeping follows queue order, an edit during a save still gets its debounced autosave); `ProjectCrashTests` |
 | MODEL-045 | done (T-031) | `PersistenceTests`; `ProjectCrashTests` (real crash); `DawctlTests` "MODEL-045: `dawctl project.open` reports a newer autosave, and with recover opens it" |
 | MODEL-046 | done (T-031) | `PersistenceTests` (missing file → offline asset, clips kept; real engine renders silence) |
+| MODEL-047 | todo (T-128) | |
 | MODEL-* (rest) | todo | |

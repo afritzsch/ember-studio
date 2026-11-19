@@ -446,6 +446,25 @@ No API change; behavior only. The hosting side is in 10 "Contract delta (T-097)"
 
 Affected: T-097 only.
 
+### Contract delta (T-123), PROPOSED (user request 2026-11-19, browser preview UI-065; awaiting the user's accept)
+The browser auditions audio files (12 UI-065). Today the facade can only audition MIDI notes (T-043). One **additive, non-RT** group of calls, none changing an existing call:
+```cpp
+struct PreviewStatePOD { bool playing; bool loading; double positionSeconds; double durationSeconds; int32_t error; }; // error: 0 none, 1 no device (offline engine), 2 unreadable file
+// Decodes `path` on daw.loader (IO-031, at the device rate) and plays it from `startSeconds` at `gainDb`.
+// Replaces any preview that is playing or loading (the newest call wins).
+void previewFile(const std::string& path, double startSeconds, float gainDb);
+void stopPreview();
+void setPreviewGain(float gainDb);     // ramped over one block, no zipper noise
+PreviewStatePOD previewState();        // copied snapshot, like telemetry()
+```
+- **Signal path.** A `PreviewPlayer` is summed into the device output **after** the master strip and limiter. The master fader, the master meter, exports (`renderOffline`), recordings and the metronome don't see it. It plays with the transport stopped or running. Mono files play to both channels; more than two channels use the first two.
+- **RT.** The decoded `AudioAsset` reaches the audio thread through an SPSC mailbox and is retired through the reclaim path (IO-032, ENG-014). No allocations or locks on the audio thread (00 §2). Files longer than 10 minutes preview their first 10 minutes (D-10 keeps everything in RAM).
+- **Ends.** At the end of the file; on `stopPreview`; on a device change, stop or loss (ENG / D-26); in an offline-mode engine every call sets `error = 1`.
+- **Swift.** `EngineProtocol.previewFile(url:startSeconds:gainDb:)`, `stopPreview()`, `setPreviewGain(_:)`, `previewState()`, with default no-ops in a protocol extension so test doubles compile unchanged. `FakeEngine` records the calls.
+- **Control** (13): `engine.previewFile {path, startSeconds?, gainDb?}`, `engine.stopPreview`, `engine.previewState` (dawmcp `daw_engine_preview_file` etc.), so agents can check the preview without the UI.
+
+Affected: T-123 (implements it), T-126 (browser preview, uses it). No other task's calls change. Tests: `PreviewPlayerTests` (plays on the fake realtime device with the transport stopped; replaces; ends; seeks; absent from `renderOffline` and the master meter; gain ramp; device change ends it; 0 RT violations).
+
 ## Status
 | ID | status | test |
 |---|---|---|

@@ -184,6 +184,22 @@ DSP effects (T-070..073) depend only on the Node API and can be **pulled forward
 | T-120 | M | Model refactors: one clip/take visitor, exact-integer recording import math, lossless bridge round-trip hook, `EngineProtocol.swift` split, `ProjectStore` autosave state machine as its own type, typed model errors, take-folder note repair on open; measure per-perform cost on a large project | DW-340, DW-341, DW-344, DW-345 | T-112 | todo |
 | T-121 | B+U | Control/app refactors: Dispatcher per-domain handlers with params `validate()` and schema bounds; `LiveEngineBroker` with leases; `WindowSubmodel` protocol; state dumping on the models; canvas revision key and weak display-link targets | DW-354, DW-355, DW-357 | T-114, T-115 | todo |
 
+### M9 — User requests (2026-11-19; see docs/requests/2026-11-19.md)
+Priority (user, 2026-11-19): **after T-111 and T-112**, before every other follow-up and refactor (T-106..T-110, T-113..T-121).
+| Task | Lane | Title | Requirements | Depends on | Status |
+|---|---|---|---|---|---|
+| T-122 | U | Track list context menu (New Audio/MIDI Track, Rename, Delete) and Insert MIDI Clip (double-click on an empty MIDI lane, canvas menu item, 1 bar, opens the piano roll) | UI-017, UI-018 | T-111, T-112 (priority only) | ready |
+| T-123 | E+B | Engine audio preview: `PreviewPlayer` after the master, facade calls, `EngineProtocol`, control/dawmcp `engine.previewFile/stopPreview/previewState` | 08 *Contract delta (T-123)* (UI-065) | T-111 | blocked (08 delta PROPOSED: user accept) |
+| T-124 | U | Browser shell: sidebar/list/search, Places (app-wide `Browser.json`, FSEvents), Current Project, loading audio files by drag (browser and Finder) and double-click, `ui.state`/`ui.perform` incl. drop | UI-060, UI-061, UI-062, UI-063 (audio files), UI-067 | T-111, T-112 (priority only) | ready |
+| T-125 | U | Browser instruments & effects (built-ins, AU/VST3 by format/vendor, drag to tracks/strips/device chain), MIDI files (drop → MIDI clip), audio file on a MIDI track → Sampler | UI-064, UI-063 (rest), UI-067 | T-124, T-128 | todo |
+| T-126 | U | Browser preview footer: toggle, gain, waveform overview with seek, Esc, live-engine-only | UI-065, UI-067 | T-123, T-124 | todo |
+| T-127 | U | Browser collections: Favorites + six colours, ⌘1…⌘7, context menu, persisted | UI-066, UI-067 | T-124 | todo |
+| T-128 | M | `MidiFileReader` (SMF 0/1 → 960-PPQ notes) and the `[AddClip, AddNotes]` import composite | MODEL-047 | T-112 (priority only) | ready |
+
+*M9 waves.* Wave A = T-111 + T-112 (in force before M9). Wave B = T-122, T-123 (once the delta is accepted), T-124, T-128.
+- T-122 and T-124 share the U lane. Give T-122 the track header column and `TimelineCanvasView`'s menu/double-click. Give T-124 `Shell/Browser/`, the pane slot in `ProjectWindowView`, and drag-and-drop on the canvas in its own file (`TimelineCanvasView+Drop.swift`). Merge T-122 first.
+- Wave C = T-125 + T-126. T-125 owns the device and MIDI parts of `Shell/Browser/`; T-126 owns the footer and preview files. Then T-127.
+
 ## Critical path
 `T-001 → T-002 → T-004 → T-012 → T-014 → T-016 → T-017 → T-018` unlocks agent self-testing. Prioritize it; everything else fans out from there.
 
