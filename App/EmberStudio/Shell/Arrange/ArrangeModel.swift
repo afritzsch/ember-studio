@@ -192,19 +192,91 @@ final class ArrangeModel {
         }
     }
 
-    /// UI-020: a double-click on a MIDI clip opens it in the piano roll. True if it did.
+    /// UI-020: a double-click on a MIDI clip opens it in the piano roll. UI-018 (T-122): on empty
+    /// space of a MIDI track's own row it inserts a 1-bar MIDI clip there and opens that. True if
+    /// it did either.
     @discardableResult
-    func doubleClick(at point: CGPoint) -> Bool {
+    func doubleClick(at point: CGPoint, modifiers: CanvasModifiers = []) -> Bool {
         if window?.automation.doubleClick(at: point, geometry: geometry) == true { return true }  // UI-015
         // UI-016: the first click of the pair already acted on a take row or a triangle.
         if let takes = window?.takes, takes.takeRowHit(point, geometry: geometry) != nil || takes.disclosureHit(point, geometry: geometry) != nil {
             return true
+        }
+        if let trackID = emptyMidiLane(at: point) {  // UI-018
+            return insertMidiClip(on: trackID, at: geometry.tick(atX: point.x), snapping: isSnapping(modifiers)) != nil
         }
         guard let hit = hitTest(point), case .midi = project.clip(hit.clipID) else { return false }
         finishDrag()
         selection = [hit.clipID]
         window?.pianoRoll.open(hit.clipID)
         return true
+    }
+
+    // MARK: Insert MIDI clip (UI-018, T-122)
+
+    /// The MIDI track whose own row is under `point` where no clip or take folder is: not the
+    /// ruler, a take row, an automation lane row or the space under the last track.
+    func emptyMidiLane(at point: CGPoint) -> NodeIDValue? {
+        let g = geometry
+        guard point.y >= TimelineGeometry.rulerHeight, g.rowAndTake(ofSlot: g.slot(atY: point.y)).take == 0,
+              let index = g.track(atY: point.y), index >= 0, index < tracks.count, tracks[index].kind == .midi,
+              hitTest(point) == nil, window?.takes.folderHit(point, geometry: g) == nil
+        else { return nil }
+        return tracks[index].id
+    }
+
+    /// UI-017 (T-122): whether `point` is in the empty timeline area under the last track (it
+    /// gets the track list's empty-space menu).
+    func isBelowTracks(_ point: CGPoint) -> Bool {
+        let g = geometry
+        guard point.y >= TimelineGeometry.rulerHeight else { return false }
+        return g.slot(atY: point.y) >= g.slotCount(tracks: tracks.count)
+    }
+
+    /// The grid line of the snap mode at or before `tick` (UI-018: a new clip's start snaps
+    /// down). Lines restart at every bar line, as `SnapGrid.snap` has them. Never before 0.
+    func snapDown(_ tick: Tick) -> Tick {
+        let t = max(tick.raw, 0)
+        guard snap != .off else { return Tick(t) }
+        let bar = grid.bar(containing: Tick(t))
+        let step = snap == .bar ? bar.length : grid.step(snap, at: Tick(t))
+        return Tick(bar.start.raw + (t - bar.start.raw) / step * step)
+    }
+
+    /// UI-018: where a MIDI clip inserted on `trackID` at `tick` goes, or nil if none would:
+    ///   - nothing when `tick` is inside a clip or take folder of the track (no empty space there);
+    ///   - start: `tick` snapped down to the grid (exact when not `snapping`), but not before the
+    ///     end of the clip before `tick` (Clarification T-122);
+    ///   - length: one bar of the signature in force at the start, ending where the next clip on
+    ///     the track starts if it would overlap it;
+    ///   - nothing if less than one grid step (a beat with snapping off) fits.
+    func midiClipPlacement(on trackID: NodeIDValue, at tick: Tick, snapping: Bool) -> (start: Tick, length: Tick)? {
+        guard let track = project.track(trackID), track.kind == .midi else { return nil }
+        let t = max(tick.raw, 0)
+        let spans = track.clips.map { ($0.start.raw, $0.start.raw + $0.length.raw) } + track.takeFolders.map { ($0.start.raw, $0.end.raw) }
+        guard !spans.contains(where: { $0.0 <= t && t < $0.1 }) else { return nil }
+        let previousEnd = spans.filter { $0.1 <= t }.map(\.1).max() ?? 0
+        let nextStart = spans.filter { $0.0 > t }.map(\.0).min() ?? Tick.timelineEnd.raw
+        let start = max(snapping ? snapDown(Tick(t)).raw : t, previousEnd)
+        let end = min(start + grid.bar(containing: Tick(start)).length, nextStart)
+        let minimum = snapping ? grid.step(snap, at: Tick(start)) : grid.beatTicks(at: Tick(start))
+        guard end - start >= minimum else { return nil }
+        return (Tick(start), Tick(end - start))
+    }
+
+    /// UI-018: inserts an empty MIDI clip on `trackID` at `tick` (`midiClipPlacement`'s rules) with
+    /// one `AddClip` (one undo entry), selects it and opens it in the piano roll. Returns its ID,
+    /// nil if nothing was inserted.
+    @discardableResult
+    func insertMidiClip(on trackID: NodeIDValue, at tick: Tick, snapping: Bool) -> ModelID? {
+        guard let window, let place = midiClipPlacement(on: trackID, at: tick, snapping: snapping) else { return nil }
+        finishDrag()
+        let before = Set(project.track(trackID)?.clips.map(\.id) ?? [])
+        window.perform(AddClip(trackID: trackID, start: place.start, length: place.length))
+        guard let added = project.track(trackID)?.clips.first(where: { !before.contains($0.id) })?.id else { return nil }
+        selection = [added]
+        window.pianoRoll.open(added)
+        return added
     }
 
     func mouseDragged(to point: CGPoint, modifiers: CanvasModifiers = []) {
@@ -609,6 +681,16 @@ final class ArrangeModel {
                 self?.nudgeSelection(steps: 0, rows: 1)
             },
         ]
+        // UI-018 (T-122): per MIDI track, insert a clip at the playhead (the double-click's rules;
+        // disabled when none would fit there).
+        let playhead = playheadTick()
+        controls += tracks.filter { $0.kind == .midi }.map { track in
+            .button("track.\(track.id).insertMidiClip", "Insert MIDI Clip on \(track.name)",
+                    enabled: midiClipPlacement(on: track.id, at: playhead, snapping: snap != .off) != nil) { [weak self] in
+                guard let self else { return }
+                insertMidiClip(on: track.id, at: playheadTick(), snapping: snap != .off)
+            }
+        }
         controls += visibleClips.map { entry in
             .button("clip.\(entry.id).select", "Select clip \(entry.id)") { [weak self] in self?.selection = [entry.id] }
         }

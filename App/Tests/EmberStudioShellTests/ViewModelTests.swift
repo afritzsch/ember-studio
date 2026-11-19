@@ -117,8 +117,8 @@ struct ViewModelTests {
         #expect(chainIDs.contains("deviceChain.device.\(eq).bypass") && chainIDs.contains("deviceChain.add.builtin.eq"))
         #expect(chainIDs.contains { $0.hasPrefix("deviceChain.device.\(eq).param.") })
         let ids = mixerIDs + chainIDs.filter { !mixerIDs.contains($0) }
-        for id in ids {
-            #expect(id.wholeMatch(of: /(transport|edit|zoom|pane|track|toast|snap|clip|pianoRoll|prefs|mixer|export|deviceChain)(\.[A-Za-z0-9]+)+/) != nil, "\(id)")
+        for id in ids {  // T-122 (UI-017): `tracks.menu.*`, the track list menu on empty space
+            #expect(id.wholeMatch(of: /(transport|edit|zoom|pane|track|tracks|toast|snap|clip|pianoRoll|prefs|mixer|export|deviceChain)(\.[A-Za-z0-9]+)+/) != nil, "\(id)")
         }
         #expect(ids.contains("mixer.bus.\(bus).mute") && ids.contains("mixer.master.fader.reset"))
         let track = model.project.tracks[1].id

@@ -359,7 +359,8 @@ final class TimelineCanvasView: NSView, SnapshotCompositing {
 
     override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
-        if event.clickCount == 2, model.doubleClick(at: point(event)) { return }  // UI-020: open in the piano roll
+        // UI-020: open in the piano roll; UI-018 (T-122): on an empty MIDI lane, insert a clip.
+        if event.clickCount == 2, model.doubleClick(at: point(event), modifiers: Self.modifiers(event)) { return }
         model.mouseDown(at: point(event), modifiers: Self.modifiers(event))
     }
 
@@ -391,6 +392,7 @@ final class TimelineCanvasView: NSView, SnapshotCompositing {
     override func menu(for event: NSEvent) -> NSMenu? {
         let p = point(event)
         if let menu = takeMenu(at: p) { return menu }  // UI-016 (T-081)
+        if let menu = emptySpaceMenu(at: p, modifiers: Self.modifiers(event)) { return menu }  // UI-017, UI-018 (T-122)
         guard let hit = model.hitTest(p) else { return nil }
         if !model.selection.contains(hit.clipID) { model.selection = [hit.clipID] }
         let tick = model.isSnapping(Self.modifiers(event)) ? model.grid.snap(model.geometry.tick(atX: p.x), model.snap)
@@ -402,6 +404,38 @@ final class TimelineCanvasView: NSView, SnapshotCompositing {
         menu.addItem(ClosureMenuItem("Split at Pointer") { [weak self] in self?.model.split(hit.clipID, at: tick) })
         menu.addItem(ClosureMenuItem("Duplicate", key: "d") { [weak self] in self?.model.duplicateSelection() })
         menu.addItem(ClosureMenuItem("Delete") { [weak self] in self?.model.deleteSelection() })
+        return menu
+    }
+
+    /// T-122: on an empty spot of a MIDI lane, Insert MIDI Clip (UI-018: the double-click's rules
+    /// at the clicked position; disabled when no clip would fit there); under the last track, the
+    /// track list's empty-space menu (UI-017).
+    private func emptySpaceMenu(at p: CGPoint, modifiers: CanvasModifiers) -> NSMenu? {
+        if let window = model.window, model.isBelowTracks(p) { return Self.trackListMenu(window, for: nil) }
+        guard let trackID = model.emptyMidiLane(at: p) else { return nil }
+        let tick = model.geometry.tick(atX: p.x), snapping = model.isSnapping(modifiers)
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        let item = ClosureMenuItem("Insert MIDI Clip") { [weak self] in
+            self?.model.insertMidiClip(on: trackID, at: tick, snapping: snapping)
+        }
+        item.isEnabled = model.midiClipPlacement(on: trackID, at: tick, snapping: snapping) != nil
+        menu.addItem(item)
+        return menu
+    }
+
+    /// UI-017 (T-122): the track list menu on `trackID`'s header (nil: empty space) as an `NSMenu`,
+    /// from the window's menu controls (`ProjectWindowModel.trackListMenu(for:)`), so a menu item
+    /// and `ui.perform` on its id run the same action. The header column uses it too.
+    static func trackListMenu(_ window: ProjectWindowModel, for trackID: NodeIDValue?) -> NSMenu {
+        let menu = NSMenu()
+        for (control, separatorBefore) in window.trackListMenu(for: trackID) {
+            if separatorBefore { menu.addItem(.separator()) }
+            let action = control.action
+            let item = ClosureMenuItem(control.label) { action() }
+            item.setAccessibilityIdentifier(control.id)
+            menu.addItem(item)
+        }
         return menu
     }
 
