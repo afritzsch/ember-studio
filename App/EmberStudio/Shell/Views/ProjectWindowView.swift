@@ -38,8 +38,9 @@ struct ProjectWindowView: View {
             }
             HSplitView {
                 if model.showsBrowser {
-                    PanePlaceholder(title: "Browser", detail: "Files and plugins")
-                        .frame(minWidth: 140, idealWidth: 180, maxWidth: 260)
+                    // UI-060 (T-124): sidebar and content list side by side.
+                    BrowserPane(model: model.browser)
+                        .frame(minWidth: 260, idealWidth: 320, maxWidth: 480)
                 }
                 ArrangeArea(model: model, controls: controls)
                     .frame(minWidth: 320, maxWidth: .infinity)

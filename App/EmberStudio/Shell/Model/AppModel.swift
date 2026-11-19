@@ -32,6 +32,9 @@ final class AppModel {
     @ObservationIgnored var makeEngine: Dispatcher.EngineFactory
     @ObservationIgnored var now: @MainActor () -> Date
     @ObservationIgnored private var nextWindowID = 1
+    /// UI-061 (T-124): the browser library every window's browser shares (places, Browser.json).
+    /// Tests set one of their own before making windows.
+    @ObservationIgnored var browserLibrary: BrowserLibrary = .shared
     @ObservationIgnored private var untitledCount = 0
 
     // MARK: One live engine (DW-156, T-090)
@@ -95,6 +98,7 @@ final class AppModel {
         let window = ProjectWindowModel(id: nextWindowID, store: store, toasts: ToastCenter(now: now))
         nextWindowID += 1
         window.crashRecovery = crashRecovery  // T-083
+        BrowserRegistry.register(window, library: browserLibrary)  // T-124 (UI-060)
         windows.append(window)
         presenter?.show(window)
         becameMain(window.id)
@@ -118,6 +122,7 @@ final class AppModel {
         guard let window = window(id) else { return }
         windows.removeAll { $0.id == id }
         window.pluginEditors.closeAll()  // T-063: its plugin editors close with it
+        BrowserRegistry.remove(window)  // T-124
         presenter?.close(window)
         if dispatcher.store === window.store {
             if let next = windows.last {
