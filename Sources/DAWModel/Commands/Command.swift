@@ -13,6 +13,13 @@ public protocol Command: Codable, Sendable {
     /// Shown in the undo menu ("Undo Rename Track").
     var label: String { get }
     func apply(to project: inout Project) throws(DAWError) -> any Command
+    /// DW-334 (T-112, 07 "Contract delta (T-112)"): this command with every absolute sample value it
+    /// carries (session-rate samples: clip offsets, sampler zone loops) rescaled from `from` Hz to
+    /// `to` Hz with `Project.rescaleSamples`, exactly as `SetSessionSampleRate` rescales the project.
+    /// `UndoStack` calls it on every history entry when the session rate changes, so undo and redo
+    /// after a rate change put back values at the new rate. The default is the command itself: most
+    /// commands hold only ticks, IDs and levels, or work relative to the project (`ResizeClip`).
+    func rescaled(from: Double, to: Double) -> any Command
 }
 
 /// A command that changes the document but not its history (07, T-026): `UndoStack` applies and
@@ -23,6 +30,8 @@ public protocol Command: Codable, Sendable {
 public protocol HistoryExemptCommand: Command {}
 
 extension Command {
+    public func rescaled(from: Double, to: Double) -> any Command { self }
+
     /// Whether `UndoStack` leaves this command out of the history.
     public var isHistoryExempt: Bool { self is any HistoryExemptCommand }
 

@@ -487,11 +487,12 @@ public final class Dispatcher {
         try CommandRegistry.decode(json.data())
     }
 
-    /// Performs one command as one undo entry.
+    /// Performs one command as one undo entry. DW-336 (T-112): as `.control`, so in attach mode a
+    /// command never joins a gesture the app has open (a fader drag); it is its own entry.
     private func perform(_ command: any Command) throws -> CommandResult {
         let store = try requireStore()
         let before = Self.entityIDs(store.project)
-        try store.perform(command)
+        try store.perform(command, as: .control)
         let created = Self.entityIDs(store.project).subtracting(before).sorted()
         return CommandResult(ok: true, createdIDs: created, label: command.label)
     }
@@ -532,7 +533,7 @@ public final class Dispatcher {
                                          label: command.label))
         }
         if !commands.isEmpty {
-            try store.perform(CompositeCommand(commands.count == 1 ? commands[0].label : "Batch", commands))
+            try store.perform(CompositeCommand(commands.count == 1 ? commands[0].label : "Batch", commands), as: .control)
         }
         return CommandBatchResult(ok: true, results: results)
     }
@@ -594,7 +595,7 @@ public final class Dispatcher {
             }
             // DW-123: the document's loop follows, validated by SetLoop (MODEL-005), before the engine
             // hears of it. Engine sync doesn't push the loop yet, so the engine is set directly too.
-            try requireStore().perform(SetLoop(loop: loop))
+            try requireStore().perform(SetLoop(loop: loop), as: .control)
             engine.setLoop(enabled: loop?.isEnabled ?? false, start: loop?.start ?? Tick(0), end: loop?.end ?? Tick(0))
         case .transportRecord:
             let p: TransportRecordParams = try decode(params)
@@ -630,7 +631,7 @@ public final class Dispatcher {
     /// engine sync turns it into slot writes on the metronome node. Returns the settings now.
     private func transportSetMetronome(_ p: TransportSetMetronomeParams) throws -> MetronomeSettings {
         let store = try requireStore()
-        try store.perform(SetMetronome(enabled: p.enabled, level: p.level, accent: p.accent))
+        try store.perform(SetMetronome(enabled: p.enabled, level: p.level, accent: p.accent), as: .control)
         return store.project.metronome
     }
 
@@ -667,8 +668,10 @@ public final class Dispatcher {
             throw DAWError.notImplemented("asset.import needs the \(Self.importAssetCommandType) command (MODEL-005)")
         }
         // The ID the command will get: the engine loads under it first, so a file that doesn't
-        // load leaves the project untouched (IDs are never reused, so peeking is safe).
-        let id = store.project.ids.next
+        // load leaves the project untouched (IDs are never reused, so a failed load leaves a gap).
+        // DW-339 (T-112): reserved, not peeked, so an edit while the engine loads (a recording
+        // import, a UI edit in attach mode) can't take the same ID.
+        let id = store.reserveID()
         let status = try await finish(engine.loadAsset(id, path: url.path), "asset.import")
         guard let info = status.asset else { throw DAWError.engine(code: .internal, detail: "load job reported no asset") }
         let asset = AssetRef(id: id, path: url.path, channels: Int(info.channels), originalSampleRate: info.fileSampleRate,

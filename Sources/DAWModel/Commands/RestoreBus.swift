@@ -15,6 +15,11 @@ public struct RestoreBus: Command {
 
     public var label: String { "Restore Bus" }
 
+    /// DW-334: the bus snapshot's inserts follow a session-rate change.
+    public func rescaled(from: Double, to: Double) -> any Command {
+        RestoreBus(bus: bus.rescaled(from: from, to: to), index: index)
+    }
+
     public func apply(to project: inout Project) throws(DAWError) -> any Command {
         guard (0...project.buses.count).contains(index) else {
             throw .invalidArgument("bus index \(index) is outside 0…\(project.buses.count)")

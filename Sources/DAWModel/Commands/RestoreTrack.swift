@@ -16,6 +16,11 @@ public struct RestoreTrack: Command {
 
     public var label: String { "Restore Track" }
 
+    /// DW-334: the track snapshot's clips, takes and zones follow a session-rate change.
+    public func rescaled(from: Double, to: Double) -> any Command {
+        RestoreTrack(track: track.rescaled(from: from, to: to), index: index)
+    }
+
     public func apply(to project: inout Project) throws(DAWError) -> any Command {
         guard (0...project.tracks.count).contains(index) else {
             throw .invalidArgument("track index \(index) is outside 0…\(project.tracks.count)")

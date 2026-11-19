@@ -20,6 +20,11 @@ public struct RestoreInstrument: Command {
 
     public var label: String { "Restore Instrument" }
 
+    /// DW-334: the slot snapshot's zones follow a session-rate change.
+    public func rescaled(from: Double, to: Double) -> any Command {
+        RestoreInstrument(trackID: trackID, instrument: instrument?.rescaled(from: from, to: to))
+    }
+
     public func apply(to project: inout Project) throws(DAWError) -> any Command {
         guard let track = project.track(trackID) else { throw .notFound(kind: "track", id: trackID) }
         guard track.kind == .midi else { throw .invalidArgument("track \(trackID) is not a MIDI track") }

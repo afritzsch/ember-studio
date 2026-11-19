@@ -17,6 +17,11 @@ public struct RestoreTakeFolder: Command {
 
     public var label: String { "Restore Take Folder" }
 
+    /// DW-334: the folder snapshot's audio takes follow a session-rate change.
+    public func rescaled(from: Double, to: Double) -> any Command {
+        RestoreTakeFolder(trackID: trackID, index: index, folder: folder.rescaled(from: from, to: to))
+    }
+
     public func apply(to project: inout Project) throws(DAWError) -> any Command {
         guard let track = project.track(trackID) else { throw .notFound(kind: "track", id: trackID) }
         guard (0...track.takeFolders.count).contains(index) else {

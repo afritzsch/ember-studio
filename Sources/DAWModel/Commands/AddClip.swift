@@ -34,6 +34,13 @@ public struct AddClip: Command {
 
     public var label: String { "Add Clip" }
 
+    /// DW-334: an explicit offset follows a session-rate change.
+    public func rescaled(from: Double, to: Double) -> any Command {
+        var command = self
+        command.sourceOffsetSamples = sourceOffsetSamples.map { Project.rescaleSamples($0, from: from, to: to) }
+        return command
+    }
+
     public func apply(to project: inout Project) throws(DAWError) -> any Command {
         guard let track = project.track(trackID) else { throw .notFound(kind: "track", id: trackID) }
         guard start.raw >= 0 else { throw .invalidArgument("clip start \(start.raw) is negative") }

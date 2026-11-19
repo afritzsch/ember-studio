@@ -28,6 +28,11 @@ public struct CompositeCommand: Command {
         return CompositeCommand(label, inverses.reversed())
     }
 
+    /// DW-334: every step, recursively.
+    public func rescaled(from: Double, to: Double) -> any Command {
+        CompositeCommand(label, commands.map { $0.rescaled(from: from, to: to) })
+    }
+
     private enum CodingKeys: String, CodingKey { case label, commands }
 
     public init(from decoder: any Decoder) throws {

@@ -22,6 +22,11 @@ public struct RestoreDevice: Command {
 
     public var label: String { "Restore Device" }
 
+    /// DW-334: the slot snapshot's zones (if any) follow a session-rate change.
+    public func rescaled(from: Double, to: Double) -> any Command {
+        RestoreDevice(channel: channel, index: index, slot: slot.rescaled(from: from, to: to))
+    }
+
     public func apply(to project: inout Project) throws(DAWError) -> any Command {
         guard project.inserts(of: channel) != nil else { throw .notFound(kind: "channel", id: channel) }
         let inverse = project.inverseRestoringLanes(RemoveDevice(slotID: slot.id), label: "Remove Device") {
