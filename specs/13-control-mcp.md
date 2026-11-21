@@ -168,6 +168,13 @@ Additive. Existing methods, params and results keep their meaning.
 
 Affected: T-100 only. Tests: `KeyBindingTests.setTextOnToolbarFields`, `PluginManagerTests.unblockAndScanLimit`, `AppModelTests.socketOpenToasts`, `AudioPreferencesTests.deviceBufferAndInputLatency`, `RecordingUITests.monitoringLatency` (EmberStudioShellTests); `UIPerformSetTextTests` (DAWControlTests).
 
+### Contract delta (T-124), accepted (user, docs/requests/2026-11-19.md; UI-067 pre-accepts it)
+Additive. Existing methods, params and results keep their meaning.
+- **`ui.perform {accessibilityId: "browser.item.<item>", action: "drop", tick, track?}`** (UI-063, UI-067): `UIPerformParams.track` (optional, a track ID) and `tick` (optional, ticks) are used only by `action: "drop"`. It drops the browser item onto the track, or with no `track` onto the empty area under the tracks (a new track), at `tick` snapped to the arrange grid as a drop is (`snap.off` first for an exact tick): one undo entry (12 *Browser shell*). The item is any row of the list, not only the 200 `ui.state` shows. It returns `{accessibilityId, kind: "browserItem", action: "drop", track, newTrack, tick (snapped), clips[], assets[], imported[]}`. A missing `tick`, an id that isn't an item, or an item not in the list is `invalidParams`; a refused load (a mismatch, a MIDI file until T-125, a failed load) is `invalidArgument` and the window toasts it too.
+- **Other browser controls** (12 *Browser shell*): `click`/`toggle`/`on`/`off` as for any control, and `setText` with `text` on `browser.search` (returns `text`, `results`, `moreResults`). `browser.places.add` and `browser.place.<place>.locate` take `text` (a folder path, `~` and relative paths resolved against the app's working directory) with `click` to add or relocate a place without the open panel. `browser.item.<item>.load` (the double-click) returns `load: {track, newTrack, tick, clips, assets, imported}`. Every browser `ui.perform` returns once the browser has settled (its search or scan finished, the folders it shows read; at most 10 s).
+
+Affected: T-124 only (T-125..T-127 add their own browser controls the same way). Tests: `BrowserAttachTests` (EmberStudioShellTests); `UIPerformDropTests` (DAWControlTests).
+
 ### `dawctl`
 | ID | Requirement |
 |---|---|

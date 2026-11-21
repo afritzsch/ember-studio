@@ -60,6 +60,7 @@ final class AppControlProvider: ControlUIProvider {
     func uiPerform(_ params: UIPerformParams) async throws -> JSONValue {
         let window = try mainWindow()
         if params.action == "swipe" { return try swipe(params, in: window) }  // UI-016 (T-081)
+        if params.accessibilityId.hasPrefix("browser.") { return try await browserPerform(params, in: window) }  // T-124 (UI-067)
         guard let action = UIAction(rawValue: params.action) else {
             throw ControlError.invalidParams("action must be one of \(UIAction.allCases.map(\.rawValue).joined(separator: ", "))")
         }

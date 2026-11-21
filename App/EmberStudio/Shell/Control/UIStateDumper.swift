@@ -143,6 +143,7 @@ enum UIStateDumper {
             "pluginEditors": dump(window.pluginEditors),  // T-063 (PLUG-017)
             "deviceChain": dump(window.deviceChain),  // T-065 (UI-032)
             "pluginManager": dump(window.pluginPanel),  // T-065 (UI-041)
+            "browser": dump(window.browser, open: window.showsBrowser),  // T-124 (UI-067)
             // T-083 (PLUG-021, DW-226): safe mode, with the plugin slots it keeps from loading.
             "safeMode": ["on": .bool(store.isSafeMode), "plugins": plugins(window.safeModePlugins),
                          "enabled": plugins(window.safeModeEnabledPlugins)],  // DW-266 (T-095)
